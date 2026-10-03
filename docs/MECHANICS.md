@@ -142,3 +142,5 @@ skills vs speed buffs (Speed Up = +30% speed per e7calc `spdUp 1.3`, `community`
 | NV-11 | Gear set piece counts (MECH-GEAR-05) and full main-stat table | Validation | In-game tooltips / OCR fixtures |
 | NV-12 | How the Weakening set's "+15% chance to inflict debuffs" combines with EFF/ER (MECH-EFF-02) | Debuff landing | Observation / official notes |
 | NV-13 | CR tie-break when units reach 100% together (MECH-CR-03) | Turn order | Recorded battles |
+| NV-14 | Skill multipliers where Fribbels and e7calc disagree (~40 fields, `e7 catalog conflicts --type skill`) | Damage maths | Third source (epic7db skill pages) / in-game skill text |
+| NV-15 | Base stats where Fribbels and e7calc disagree (~24 heroes; e7calc values are damage-calc tuned) | Consistency check | epic7db base stats / in-game Hero Info at known gear |

@@ -168,6 +168,11 @@ Cross-checks done without the images (details in MECHANICS.md):
 | D18 | 2026-10-03 | Repo licence MIT; weekly Stove API calls approved by the user | User answer Q6 | accepted |
 | D19 | 2026-10-03 | BBK EE stat type = Crit Chance as in Fribbels (user-confirmed); the 12% on the user's copy vs Fribbels' 0.06 still to explain (NV-08) | User answer Q7 | accepted |
 | D20 | 2026-10-03 | Launcher calls uv directly from `OrbisCodex.cmd` (args verbatim); PowerShell only installs uv; runtime deps only (`--no-dev`) | M1 review LAUNCH-1..3, TC-1 | accepted |
+| D21 | 2026-10-03 | Catalog persisted as versioned snapshots: facts table + one resolved JSON document per entity (see ARCHITECTURE §6 note) | Small, read-mostly, versioned as a whole | accepted |
+| D22 | 2026-10-03 | e7calc base ATK/HP/DEF are `assumed` facts (corroboration only) | Real data: tuned for its damage maths, include passive-like factors | accepted |
+| D23 | 2026-10-03 | Names map to codes only by exact normalised match; ambiguous names are refused; e7calc needs an explicit hand-checked alias table, validated by element/class | Golden rule; real duplicate names ("Mercedes" ×3) | accepted |
+| D24 | 2026-10-03 | Within one source, entries sharing a code: fields on which they disagree are dropped with a warning | Fribbels has 6 duplicated artifact codes | accepted |
+| D25 | 2026-10-03 | `e7 catalog sync` exit codes: 0 ok, 1 partial (a source failed, snapshot still saved, errors printed), 2 nothing synced | No silent failures | accepted |
 
 ## 10. Open questions
 Answered on 2026-10-03 (see D10–D19): Q1 client/region/display, Q3 Arena play style/league, Q4 hero priority,

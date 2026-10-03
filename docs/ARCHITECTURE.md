@@ -130,6 +130,12 @@ no separate system installers): PySide6 (~100 MB), opencv-headless (~40 MB), Rap
 
 ## 6. Data model
 
+> **As built in M2 (D21):** the catalog is stored as `catalog_snapshot` + `catalog_fact` (every fact with source/status) +
+> `catalog_entity` (one resolved JSON document per hero/skill/artifact/set, validated by pydantic on read). The typed
+> catalog tables below (HERO, SKILL, ARTIFACT, SET_CATALOG, …) describe the *logical* model; they are not separate
+> SQL tables because the catalog is small (~1.7k entities), read-mostly and versioned as a whole. Roster tables (M3) will
+> be typed SQL tables.
+
 ```mermaid
 erDiagram
   DATA_SOURCE ||--o{ CATALOG_FACT : provides

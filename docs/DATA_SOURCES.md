@@ -147,6 +147,14 @@ Percentiles that fall in an open-ended edge bin are flagged as low-confidence.
 `info_text` with `@`, `@@`, `@@@` placeholders, `level_list[i] = {lv01, lv_max}` per placeholder.
 Example Hostess of the Banquet `efa22`: ATK 21→273, HP 32→416.
 
+### Catalog lists: real-data observations (M2, 2026-10-03, Global)
+- `hero-list`: 390 heroes, 50 per page whatever `is_paging` says (8 pages). **Display names are not unique**: three
+  different codes are called "Mercedes" (`c0001`, `c1005` on Stove, plus `c0002` in Fribbels) → name lookups must refuse
+  ambiguous names.
+- `artifact-list`: 267 artifacts (6 pages). Some `level_list` entries are `{}` (value of that `@` unknown); one artifact
+  (`efw33` Tyrant's Descent) has no `info_text`. Both are accepted and reported as warnings, never guessed.
+- `equip-list`: 24 sets on one page; the official texts parse into static bonuses + in-combat clauses (`catalog/sets.py`).
+
 ### Freshness
 - Site text: "Every Wednesday 20:00 PDT / Every Thursday 03:00 UTC (subject to change)".
 - `last-update-time` (Global, 2026-10-03): week 2026-09-24 → 2026-09-30; `hero-detail` `reg_date` 2026-10-01.
@@ -190,6 +198,11 @@ Example Hostess of the Banquet `efa22`: ATK 21→273, HP 32→416.
   (`app/js/lib/artifact.js`), substat roll tables (`app/js/lib/reforge.js`), save format (`app/js/lib/saves.js`).
 - Licence: `app/package.json` declares MIT; there is no LICENSE file at the repo root → treat as MIT
   with attribution, confirm before redistributing anything.
+- Real-data observations (M2, 2026-10-03): 390 entries in `herodata.json`, of which 2 are monsters with `m…` codes
+  (`m0063` Mighty Scout, `m0171` Wild Angara → skipped); `artifactdata.json` has 287 entries with **6 duplicated codes**
+  (`ef315`, `ef427`, `ef506`, `efr20`, `efr25`, `efw28`) — some are renames with identical stats, some are different
+  artifacts (`ef506` "Guide to a Decision" vs "Blood-Seared Moon"). Fields on which duplicates disagree are dropped with
+  a warning. Several old artifacts have 0 ATK/HP where Stove has values (official wins, conflict kept).
 - ⚠️ Fribbels' *auto-importer* sniffs game network traffic (scapy). **We never do that.** We only read
   the save file the user exports.
 
@@ -212,6 +225,15 @@ Example Hostess of the Banquet `efa22`: ATK 21→273, HP 32→416.
 - `artifacts.ts` (89 damage-relevant artifacts), `constants.ts` (`damageConstant 1.871`, `elementalAdvantage 1.1`, buff values),
   `stat-tables.ts` (base stats by class × ★ × horoscope), `services/damage.service.ts` + `models/target.ts` (damage formula),
   `components/effectiveness-checker` (land chance capped at 85%), `components/speed-tuner` (0–5% random starting CR).
+- Default branch is **`master`** (raw URL `…/tyopoyt/epic7-damage-calc/master/…`); 400 `new Hero(` entries, of which 12
+  are pre-rework versions (`*_old`, ignored).
+- **Base stats are tuned for its damage maths, not the in-game base stats**: they differ from Fribbels for ~24 heroes,
+  sometimes by a passive-like factor (Senya 1445 vs 1112, Gunther 1426 vs 951). e7calc base-stat facts are therefore
+  `assumed` (corroboration only, D22). Skill multipliers disagree with Fribbels on ~40 fields → those fields are `assumed`
+  until a third source (epic7db) breaks the tie (NV-14).
+- Name mapping: e7calc keys are matched to hero codes by exact normalised name; 5 keys need an explicit, hand-checked
+  alias (`archdemon_shadow`, `baal_and_sezan`, `sage_baal_and_sezan`, `summer_disciple_alexa`, `kanna`), and every
+  mapping is rejected if e7calc's element/class differ from the official ones.
 - Format: TypeScript with closures → **not machine-readable as data**. Plan: use as cross-check for the
   constant numeric fields (base stats, rate/pow/enhance) via a small parser for the simple literal cases,
   and as the main human reference when authoring simulator kits. Two-source agreement (Fribbels + e7calc)
@@ -235,7 +257,12 @@ Example Hostess of the Banquet `efa22`: ATK 21→273, HP 32→416.
 
 ---
 
-## Catalog pipeline (accepted, SPEC D4)
+## Catalog pipeline (accepted, SPEC D4; implemented in M2)
+
+First real snapshot (Global, 2026-10-03): 390 heroes, 962 skills, 281 artifacts, 24 sets; field statuses
+verified 4010 · community 10088 · assumed 172; 114 conflicts between sources (`e7 catalog conflicts`); 16 entities with
+missing required fields (`e7 catalog coverage`: old Fribbels-only artifacts without +30 stats, two "Mercedes" without
+base stats). A full sync makes ~18 requests (~20 s at 1 req/s); a repeated sync within the cache age makes 0.
 
 ```mermaid
 flowchart LR
