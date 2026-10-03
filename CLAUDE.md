@@ -1,0 +1,58 @@
+# CLAUDE.md — Orbis Codex / E7 Arena Companion
+
+## How we work
+- Talk to the user in **European Portuguese (pt-PT)**, never Brazilian Portuguese. Code, identifiers, comments,
+  commit messages and docs in **English**.
+- Work in small vertical slices. Every milestone ends with passing tests, a two-line "how to try it",
+  a git commit and an updated `docs/ROADMAP.md`. Update this file and the docs at the end of every milestone.
+- Batch questions; for non-blocking details pick a sensible default, record it in `docs/SPEC.md` (§9 decisions) and continue.
+- Throwaway experiments go in `spikes/` (never imported by `src/`).
+
+## Golden rules
+- **Never invent game numbers** (multipliers, set bonuses, base stats, formulas, AI behaviour). Every datum carries
+  `source` + `status` (`verified` / `community` / `assumed` / `unknown`). Unverifiable → `assumed`, lower confidence,
+  add to "Needs verification" in `docs/MECHANICS.md`. Reference mechanics by ID (e.g. `MECH-DMG-01`) in docstrings.
+- **Read-only towards the game**: screen capture + OCR/CV only. Never read/write game memory, inject, intercept network
+  traffic, or automate inputs (no clicks/keys). Hotkeys via `RegisterHotKey`, no keyboard hooks.
+- **Stable IDs** (hero `c2011`, artifact `efa22`, set `set_cri_dmg`, EE `ek_c201101_01`); never key by display name;
+  fuzzy matching must never silently pick a near-miss (margin rule → review).
+- **No silent failures**: parsed fields and predictions carry confidence; validation mismatches are warnings, never silent fixes.
+- Game assets, screenshots, save files and real API responses are **git-ignored**; tests needing them skip cleanly.
+  Unit tests use synthetic data.
+- Polite scraping: cache, ≤ 1 req/s, honest User-Agent, robots/ToS. Ask before adding big dependencies.
+
+## Commands
+Phase 0 (now): no application code yet. Spike: `python spikes/stove_probe.py c2011 --world world_global`.
+From M1 (planned):
+```bash
+uv sync                      # install
+uv run e7 --help             # CLI
+uv run pytest                # tests (golden/fixture tests skip if fixtures are missing)
+uv run ruff check . && uv run ruff format --check .
+uv run mypy                  # strict on core packages
+```
+
+## Architecture summary (see docs/ARCHITECTURE.md)
+Python 3.12 + uv · pydantic v2 domain · SQLite via SQLAlchemy 2.0 + Alembic · httpx · Typer CLI `e7` ·
+OpenCV-headless + OCR engine chosen by benchmark · PySide6 main window + overlay.
+Package `src/e7ac/`: `domain`, `sources` (stove/fribbels/e7calc/epic7db), `catalog` (fact store → versioned snapshots),
+`roster`, `vision`, `opponents`, `predict`, `sim`, `learning`, `storage`, `ui`, `cli`. Core is UI-free.
+
+Key data facts (details in docs/DATA_SOURCES.md):
+- Stove JSON API: `https://api.onstove.com/pub-meta/v1.0/epic7/guide/hunt/hero-detail-for-game?world_code=…&stage=1&lang_code=en&hero_code=…&strategy_type=0&boss_type=1`
+  → 10-bin histograms per stat (edges inferred, `assumed`), top-3 set combos / EE options / artifacts; weekly (Thu 03:00 UTC).
+- Fribbels `data/cache/herodata.json` / `artifactdata.json`: base stats, imprint, skill multipliers.
+- e7calc (`tyopoyt/epic7-damage-calc`): damage formula, constants, enhancement steps (TypeScript).
+
+## Docs map
+- `docs/SPEC.md` — refined spec, decisions log, open questions
+- `docs/ROADMAP.md` — milestones with acceptance criteria
+- `docs/DATA_SOURCES.md` — sources, endpoints, freshness, licence/ToS, last verified
+- `docs/MECHANICS.md` — formulas/rules with source + status, needs-verification list
+- `docs/ARCHITECTURE.md` — diagram, stack, ERD, risks
+- `fixtures/README.md` — expected (git-ignored) fixture files
+
+## Current status
+- **Phase 0 delivered (2026-10-03); waiting for user approval** and answers to SPEC §10 (Q1–Q7).
+- Fixtures (`fixtures/screenshots/*.png`) and the Fribbels save file are not yet available in this environment.
+- Next milestone after approval: **M1 Skeleton & tooling**.
