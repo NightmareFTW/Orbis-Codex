@@ -8,6 +8,7 @@ from typing import Annotated
 import typer
 
 from e7ac import __version__
+from e7ac.cli.catalog import catalog_app
 from e7ac.doctor import CheckStatus, run_checks
 from e7ac.paths import default_paths
 from e7ac.settings import (
@@ -28,6 +29,7 @@ app = typer.Typer(
 )
 config_app = typer.Typer(help="Show or change settings (client, region, display).", add_completion=False)
 app.add_typer(config_app, name="config")
+app.add_typer(catalog_app, name="catalog")
 
 
 def _version_callback(value: bool) -> None:
