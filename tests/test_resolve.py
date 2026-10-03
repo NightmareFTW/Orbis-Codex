@@ -5,7 +5,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import JsonValue
 
-from e7ac.catalog.facts import EntityType, Fact, canonical_value
+from e7ac.catalog.facts import EntityType, Fact, canonical_value, value_key
 from e7ac.catalog.names import NameIndex, normalise_name
 from e7ac.catalog.resolve import conflicts, resolve, resolve_field
 from e7ac.domain.codes import DataStatus, SourceId
@@ -73,6 +73,10 @@ def test_resolve_needs_facts() -> None:
 
 def test_canonical_value_normalises_numbers_recursively() -> None:
     assert canonical_value({"b": [1.0, 0.1 + 0.2], "a": 2.5}) == {"a": 2.5, "b": [1, 0.3]}
+    one = canonical_value(0.7 + 0.2 + 0.1)  # 0.9999999999999999: rounding must happen before the integer check
+    assert one == 1 and isinstance(one, int)
+    assert canonical_value(1.0000000001) == 1 and value_key(1138.0) == value_key(1138)
+    assert canonical_value(True) is True and canonical_value(None) is None  # bool is not treated as int
 
 
 def test_resolve_groups_entities_and_lists_conflicts() -> None:

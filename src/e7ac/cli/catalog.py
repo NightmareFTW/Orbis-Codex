@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable
 from typing import Annotated, Final
 
@@ -15,6 +16,7 @@ from e7ac.catalog.coverage import coverage, status_counts
 from e7ac.catalog.facts import EntityType
 from e7ac.catalog.resolve import ResolvedEntity, conflicts
 from e7ac.catalog.store import (
+    Lookup,
     current_snapshot,
     find,
     list_snapshots,
@@ -34,6 +36,7 @@ from e7ac.storage.models import CatalogSnapshotRow
 catalog_app = typer.Typer(help="Game catalog: heroes, skills, artifacts, sets (with sources and status).")
 
 _VALUE_WIDTH: Final = 48
+SKILL_ID_RE: Final = re.compile(r"^c\d{4}:s[1-3]$")
 _PLURAL: Final = {
     EntityType.HERO: "heroes",
     EntityType.SKILL: "skills",
@@ -91,11 +94,16 @@ def sync(
 
     typer.echo(f"Catalog sync ({options.world.value}) - {report.requests_made} network request(s)")
     for run in report.runs:
-        flags = (" [cache]" if run.from_cache else "") + (" [STALE: network unavailable]" if run.stale else "")
+        flags = (" [cache]" if run.from_cache else "") + (" [STALE - see warnings]" if run.stale else "")
         fetched = run.retrieved_at.strftime("%Y-%m-%d %H:%M UTC")
         typer.echo(f"  {run.source.value:<9} {run.facts:>6} facts  fetched {fetched}  {run.version}{flags}")
     counts = ", ".join(f"{n} {_PLURAL[t]}" for t, n in sorted(report.entity_counts.items()))
     typer.echo(f"Snapshot #{report.snapshot_id} ({'new' if report.created else 'unchanged'}): {counts}")
+    if report.current_snapshot_id != report.snapshot_id:
+        typer.echo(
+            f"Partial sync: snapshot #{report.snapshot_id} kept for inspection; the current catalog stays "
+            f"#{report.current_snapshot_id} (only a complete sync of every source replaces it)."
+        )
     typer.echo(f"Conflicts between sources: {len(report.conflicts)}   (e7 catalog conflicts)")
     typer.echo(f"Entities with missing/assumed required fields: {len(report.gaps)}   (e7 catalog coverage)")
     warnings = [w for run in report.runs for w in run.warnings]
@@ -116,7 +124,14 @@ def show(
     engine = _engine(default_paths())
     with session_scope(engine) as session:
         snapshot = _require_snapshot(session)
-        lookup = find(session, snapshot.id, query)
+        if SKILL_ID_RE.match(query.strip()):
+            skill_entity = load_entity(session, snapshot.id, EntityType.SKILL, query.strip())
+            if skill_entity is None:
+                typer.echo(f"Nothing found for {query!r}.", err=True)
+                raise typer.Exit(code=1)
+            lookup = Lookup(exact=[skill_entity], partial=[])
+        else:
+            lookup = find(session, snapshot.id, query)
         if not lookup.exact:
             if lookup.partial:
                 typer.echo(f"No exact match for {query!r}. Candidates (use the code or the exact name):", err=True)
@@ -161,7 +176,8 @@ def show_conflicts(
     with session_scope(engine) as session:
         snapshot = _require_snapshot(session)
         entities = load_entities(session, snapshot.id, entity_type)
-    names = {e.entity_id: e.name for e in entities}
+        names = {e.entity_id: e.name for e in load_entities(session, snapshot.id, EntityType.HERO)}
+    names.update({e.entity_id: e.name for e in entities if e.entity_type is not EntityType.SKILL})
     found = conflicts(entities)
     for conflict in found:
         label = names.get(conflict.entity_id.split(":")[0], "")
@@ -232,6 +248,8 @@ def _print_fields(entity: ResolvedEntity) -> None:
         for alternative in resolved.alternatives:
             alt_sources = ", ".join(s.value for s in alternative.sources)
             typer.echo(f"  {'':<18}   conflict: {_fmt(alternative.value)} ({alt_sources})")
+        for note in resolved.notes:
+            typer.echo(f"  {'':<18}   note: {note}")
 
 
 def _fmt(value: JsonValue) -> str:

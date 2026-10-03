@@ -25,6 +25,7 @@ STOVE_HEROES: list[dict[str, Any]] = [
     {"hero_code": "c9001", "hero_name": "Test Hero", "grade": 5, "job_code": "warrior", "attribute_code": "fire"},
     {"hero_code": "c9002", "hero_name": "Twin", "grade": 3, "job_code": "mage", "attribute_code": "light"},
     {"hero_code": "c9003", "hero_name": "Twin", "grade": 3, "job_code": "mage", "attribute_code": "light"},
+    {"hero_code": "c9010", "hero_name": "Bomb Model Kanna", "grade": 5, "job_code": "ranger", "attribute_code": "fire"},
 ]
 STOVE_SETS: list[dict[str, Any]] = [
     {
@@ -39,6 +40,7 @@ STOVE_SETS: list[dict[str, Any]] = [
         "equip_effect": "Decreases Health by 10% and when attacking increases damage dealt by 10%.",
     },
 ]
+_PAD = {"lv01": "0", "lv_max": "0"}  # the real API always sends 5 level entries, padded like this
 STOVE_ARTIFACTS: list[dict[str, Any]] = [
     {
         "artifact_code": "efz01",
@@ -49,19 +51,43 @@ STOVE_ARTIFACTS: list[dict[str, Any]] = [
         "ability_defense": 32,
         "enhance_ability_attack": 273,
         "enhance_ability_defense": 416,
-        "info_text": "Increases damage dealt by @.",
-        "level_list": [{"lv01": "8.0%", "lv_max": "16.0%"}, {}],
+        "info_text": "Increases Effect Resistance by @. Increases damage dealt by @@.",
+        "level_list": [{"lv01": "0.0%", "lv_max": "0.0%"}, {"lv01": "8.0%", "lv_max": "16.0%"}, _PAD, _PAD, _PAD],
     },
     {
         "artifact_code": "efz02",
-        "artifact_name": "Plain Charm",
+        "artifact_name": "Queen's Charm",
         "job_code": "NN",
         "grade": 3,
         "ability_attack": 5,
         "ability_defense": 10,
         "enhance_ability_attack": 65,
         "enhance_ability_defense": 130,
-        "level_list": [],
+        "level_list": [_PAD, _PAD, _PAD, _PAD, _PAD],
+    },
+    {  # ATK + DEF artifact: Stove's second field is DEF here, not HP
+        "artifact_code": "efz03",
+        "artifact_name": "Guard Blade",
+        "job_code": "warrior",
+        "grade": 5,
+        "ability_attack": 21,
+        "ability_defense": 5,
+        "enhance_ability_attack": 273,
+        "enhance_ability_defense": 65,
+        "info_text": "Increases Attack by @.",
+        "level_list": [{"lv01": "10.0%", "lv_max": "20.0%"}, _PAD, _PAD, _PAD, _PAD],
+    },
+    {  # DEF + HP artifact: Stove's first field is DEF here, not ATK
+        "artifact_code": "efz04",
+        "artifact_name": "Warden Shield",
+        "job_code": "knight",
+        "grade": 5,
+        "ability_attack": 5,
+        "ability_defense": 76,
+        "enhance_ability_attack": 65,
+        "enhance_ability_defense": 988,
+        "info_text": "Increases Combat Readiness by @.",
+        "level_list": [{}, _PAD, _PAD, _PAD, _PAD],
     },
 ]
 
@@ -112,7 +138,10 @@ FRIBBELS_HERODATA: dict[str, Any] = {
         "zodiac": "lion",
         "self_devotion": {"type": "att", "grades": {"B": 30}},
         "ex_equip": [],
-        "skills": {"S1": {"hitTypes": ["normal"], "rate": 0.9, "pow": 1, "targets": 1, "options": []}},
+        "skills": {
+            "S1": {"hitTypes": ["normal"], "rate": 0.9, "pow": 1, "targets": 1, "options": []},
+            "S2": {"note": "S1 proc", "rate": 0.5, "pow": 1, "mysteryField": 1},
+        },
         "calculatedStatus": {"lv60SixStarFullyAwakened": _stat_block(1000, 6000, 100, 600)},
     },
     "Mighty Scout": {
@@ -132,8 +161,22 @@ FRIBBELS_ARTIFACTDATA: dict[str, Any] = {
         "name": "Test Dagger",
         "rarity": 5,
         "role": "assassin",
-        "stats": {"attack": 21, "health": 32},
+        "stats": {"attack": 21, "health": 32, "defense": 0},
         "code": "efz01",
+    },
+    "Guard Blade": {
+        "name": "Guard Blade",
+        "rarity": 5,
+        "role": "warrior",
+        "stats": {"attack": 21, "health": 0, "defense": 5},
+        "code": "efz03",
+    },
+    "Warden Shield": {
+        "name": "Warden Shield",
+        "rarity": 5,
+        "role": "knight",
+        "stats": {"attack": 0, "health": 76, "defense": 5},
+        "code": "efz04",
     },
     "Old Relic": {"name": "Old Relic", "rarity": 3, "role": "", "stats": {"attack": 6, "health": 9}, "code": "efz09"},
     "Old Relic II": {
@@ -168,14 +211,24 @@ export const Heroes: Record<string, Hero> = {
         soulburn: true,
         rate: (soulburn: boolean) => soulburn ? 1.45 : 1.2,
         pow: () => 0.95,
-        afterMath: (hitType: HitType) => new AftermathSkill({ rate: () => 9.9 }),
+        afterMath: (hitType: HitType) => new AftermathSkill({
+          rate: () => 9.9,
+          pow: () => 9.9,
+        }),
         enhance: [0.05, 0.05, 0, 0.1, 0.15],
+      }),
+      s2:  new Skill({
+        id: 's2',
+        enhance: [0.05, 0.1, 0.1, 0.1, 0.15]
       }),
     }
   }),
     test_hero: new Hero({ // misindented entry with a comment containing { braces }
     element: HeroElement.fire,
     class: HeroClass.warrior,
+    stats: {
+      baseAttack: 1,
+    },
     baseAttack: 1300,
     baseHP: 6000,
     baseDefense: 600,
@@ -211,6 +264,18 @@ export const Heroes: Record<string, Hero> = {
     baseHP: 5000,
     baseDefense: 500,
     skills: {}
+  }),
+  kanna: new Hero({
+    element: HeroElement.fire,
+    class: HeroClass.ranger,
+    baseAttack: 1100,
+    baseHP: 5000,
+    baseDefense: 500,
+    skills: {
+      s1: new Skill({
+        rate: (soulburn: boolean) => (soulburn ? 1.5: 1.1)
+      }),
+    }
   }),
   unknown_person: new Hero({
     element: HeroElement.ice,

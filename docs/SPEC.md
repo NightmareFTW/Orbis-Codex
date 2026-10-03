@@ -172,7 +172,12 @@ Cross-checks done without the images (details in MECHANICS.md):
 | D22 | 2026-10-03 | e7calc base ATK/HP/DEF are `assumed` facts (corroboration only) | Real data: tuned for its damage maths, include passive-like factors | accepted |
 | D23 | 2026-10-03 | Names map to codes only by exact normalised match; ambiguous names are refused; e7calc needs an explicit hand-checked alias table, validated by element/class | Golden rule; real duplicate names ("Mercedes" ×3) | accepted |
 | D24 | 2026-10-03 | Within one source, entries sharing a code: fields on which they disagree are dropped with a warning | Fribbels has 6 duplicated artifact codes | accepted |
-| D25 | 2026-10-03 | `e7 catalog sync` exit codes: 0 ok, 1 partial (a source failed, snapshot still saved, errors printed), 2 nothing synced | No silent failures | accepted |
+| D25 | 2026-10-03 | `e7 catalog sync` exit codes: 0 ok, 1 partial (a source failed, snapshot still saved but not made current — D28 — errors printed), 2 nothing synced | No silent failures | accepted |
+| D26 | 2026-10-03 | Stove artifact stat fields are positional (two non-zero stats in ATK, DEF, HP order); a slot is `verified` only when Fribbels' +0 values confirm it, else stored as an `assumed` ATK/HP reading | M2 review RP-01: ATK+DEF / DEF+HP artifacts exist | accepted |
+| D27 | 2026-10-03 | Artifact effect values: one entry per `@` placeholder in the text; `"0"`, `"0.0%"`, `{}` mean unknown → `null`, field `assumed` | M2 review RP-02; golden rule | accepted |
+| D28 | 2026-10-03 | A sync is *complete* when every catalog source succeeded; only a complete sync (or the first one) moves the "current" snapshot | M2 review SRC-03 / STORE-01 | accepted |
+| D29 | 2026-10-03 | HTTP: responses are validated before caching; a host that hit 429 or exhausted its retries is not contacted again in that run; stale copies carry a URL-free reason | M2 review HTTP-01..03 | accepted |
+| D30 | 2026-10-03 | SQLite transactions are begun by SQLAlchemy (pysqlite's implicit BEGIN disabled) so savepoints never commit the outer transaction early | Found while testing DB-02: a crash after `save_snapshot` left a snapshot without facts | accepted |
 
 ## 10. Open questions
 Answered on 2026-10-03 (see D10–D19): Q1 client/region/display, Q3 Arena play style/league, Q4 hero priority,

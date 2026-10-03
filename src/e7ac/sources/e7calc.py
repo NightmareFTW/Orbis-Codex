@@ -60,12 +60,12 @@ _CLASSES: Final = {
     "soul_weaver": HeroClass.SOUL_WEAVER,
 }
 _HERO_START: Final = re.compile(r"^\s*(?P<key>[a-z0-9_]+): new Hero\(\{", re.MULTILINE)
-_SKILL_START: Final = re.compile(r"(?:^|[\s,{])(?P<key>s[123]): new Skill\(\{")
+_SKILL_START: Final = re.compile(r"(?:^|[\s,{])(?P<key>s[123]):\s+new Skill\(\{")
 _NUM: Final = r"-?\d+(?:\.\d+)?"
 _FIELD_NUM: Final = {
     "base_atk": re.compile(rf"^\s*baseAttack: (?P<v>{_NUM}),", re.MULTILINE),
     "base_hp": re.compile(rf"^\s*baseHP: (?P<v>{_NUM}),", re.MULTILINE),
-    "base_def": re.compile(rf"^\s*baseDefense: (?P<v>{_NUM}),", re.MULTILINE),
+    "base_def": re.compile(rf"^\s*baseDef(?:ense)?: (?P<v>{_NUM}),", re.MULTILINE),
 }
 _ELEMENT_RE: Final = re.compile(r"^\s*element: HeroElement\.(?P<v>\w+),", re.MULTILINE)
 _CLASS_RE: Final = re.compile(r"^\s*class: HeroClass\.(?P<v>\w+),", re.MULTILINE)
@@ -75,14 +75,15 @@ _SKILLS_RE: Final = re.compile(r"^\s*skills: \{", re.MULTILINE)
 def _const_or_soulburn(name: str) -> re.Pattern[str]:
     return re.compile(
         rf"^\s*{name}: \((?:_?soulburn(?:: boolean)?)?[^)]*\) => "
-        rf"(?:(?P<const>{_NUM})|_?soulburn \? (?P<sb>{_NUM}) : (?P<base>{_NUM})),\s*$",
+        rf"(?:(?P<const>{_NUM})|\(?\s*_?soulburn\s*\?\s*(?P<sb>{_NUM})\s*:\s*(?P<base>{_NUM})\s*\)?),?\s*$",
         re.MULTILINE,
     )
 
 
 _RATE: Final = _const_or_soulburn("rate")
 _POW: Final = _const_or_soulburn("pow")
-_ENHANCE: Final = re.compile(rf"^\s*enhance: \[(?P<v>(?:\s*{_NUM}\s*,?)*)\],\s*$", re.MULTILINE)
+_ENHANCE: Final = re.compile(rf"^\s*enhance: \[(?P<v>(?:\s*{_NUM}\s*,?)*)\],?\s*$", re.MULTILINE)
+_ENHANCE_ANY: Final = re.compile(r"^\s*enhance:", re.MULTILINE)
 
 
 def matching_brace(text: str, open_index: int) -> int:
@@ -171,9 +172,15 @@ class E7calcData:
 
 
 def fetch(http: CachedHttp, *, refresh: bool = False, max_age: timedelta = DEFAULT_MAX_AGE) -> E7calcData:
-    result = http.get_text("e7calc", HEROES_URL, max_age=max_age, refresh=refresh)
+    result = http.get_text("e7calc", HEROES_URL, max_age=max_age, refresh=refresh, validate=_looks_like_heroes_ts)
     heroes, warnings = parse_heroes_ts(result.text)
     return E7calcData(heroes=heroes, results=[result], warnings=warnings)
+
+
+def _looks_like_heroes_ts(text: str) -> None:
+    """Validator applied before caching (an HTML error page must never replace the cached file)."""
+    if "new Hero(" not in text:
+        raise ValueError("no `new Hero(` entries (not the e7calc heroes file?)")
 
 
 def parse_heroes_ts(text: str) -> tuple[list[E7calcHero], list[str]]:
@@ -215,14 +222,20 @@ def _parse_hero(key: str, block: str, warnings: list[str]) -> E7calcHero:
         skills_open = skills_match.end() - 1
         skills_body = block[skills_open + 1 : matching_brace(block, skills_open)]
         skills_top_level = _top_level(skills_body)
+        declared = len(re.findall(r"(?:^|[\s,{])s[123]\s*:", skills_top_level))
         for skill_match in _SKILL_START.finditer(skills_top_level):
             # locate the same skill in the full body to read its own (un-stripped) block
-            full = re.search(rf"(?:^|[\s,{{]){skill_match.group('key')}: new Skill\(\{{", skills_body)
+            full = re.search(rf"(?:^|[\s,{{]){skill_match.group('key')}:\s+new Skill\(\{{", skills_body)
             if full is None:
                 continue
             open_index = full.end() - 1
             body = skills_body[open_index + 1 : matching_brace(skills_body, open_index)]
-            skills.append(_parse_skill(int(skill_match.group("key")[1]), _top_level(body)))
+            skill = _parse_skill(int(skill_match.group("key")[1]), _top_level(body))
+            if skill.enhance is None and _ENHANCE_ANY.search(_top_level(body)):
+                warnings.append(f"e7calc {key}.s{skill.slot}: 'enhance' is not a literal list, ignored")
+            skills.append(skill)
+        if declared != len(skills):
+            warnings.append(f"e7calc {key}: {declared} s1-s3 entries declared but {len(skills)} parsed")
     return E7calcHero(
         key=key,
         element=element,
@@ -319,6 +332,8 @@ def to_facts(
             if skill.enhance is not None:
                 enhance: list[JsonValue] = [float(x) for x in skill.enhance]
                 add(EntityType.SKILL, sid, "enhance", enhance, DataStatus.COMMUNITY)
+    stale_reasons = sorted({r.stale_reason for r in data.results if r.stale and r.stale_reason})
+    warnings.extend(f"e7calc: stale cache served ({reason})" for reason in stale_reasons)
     if legacy:
         warnings.append(f"e7calc: {legacy} pre-rework '*{LEGACY_SUFFIX}' entries ignored (old versions of heroes)")
     if unmapped:

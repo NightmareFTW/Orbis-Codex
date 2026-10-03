@@ -25,11 +25,17 @@ import httpx
 from e7ac import __version__
 
 USER_AGENT: Final = f"OrbisCodex/{__version__} (personal, non-commercial; +https://github.com/NightmareFTW/Orbis-Codex)"
-_RETRY_STATUS: Final = frozenset({429, 500, 502, 503, 504})
+_RETRY_STATUS: Final = frozenset({500, 502, 503, 504})
 
 
 class FetchError(Exception):
-    """The resource could not be fetched and no cached copy exists."""
+    """The resource could not be fetched and no cached copy exists.
+
+    `reason` is the URL-free cause (e.g. "HTTP 404"), used as the stale reason so one outage gives one warning."""
+
+    def __init__(self, message: str, reason: str | None = None) -> None:
+        super().__init__(message)
+        self.reason = reason or message
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,7 +45,9 @@ class FetchResult:
     fetched_at: datetime
     from_cache: bool
     stale: bool
-    """True when the network failed (or offline mode was requested) and an expired cached copy was served."""
+    """True when an expired (or unvalidated-replacement) cached copy was served instead of fresh data."""
+    stale_reason: str | None = None
+    """Why the stale copy was served: offline mode, network error, HTTP status, invalid response..."""
 
     @property
     def sha256(self) -> str:
@@ -71,6 +79,8 @@ class CachedHttp:
     now: Callable[[], datetime] = lambda: datetime.now(UTC)
     requests_made: int = 0
     _last_request: dict[str, float] = field(default_factory=dict)
+    _failed_hosts: dict[str, str] = field(default_factory=dict)
+    """Hosts that failed (retries exhausted or rate-limited) during this run: not contacted again."""
     _client: httpx.Client | None = None
 
     def get_text(
@@ -81,31 +91,40 @@ class CachedHttp:
         *,
         max_age: timedelta,
         refresh: bool = False,
+        validate: Callable[[str], None] | None = None,
     ) -> FetchResult:
-        """Return the resource text, from cache when younger than `max_age` (unless `refresh`)."""
+        """Return the resource text, from cache when younger than `max_age` (unless `refresh`).
+
+        `validate` (raises ValueError) is applied to fresh responses *before* they are cached, so an error page
+        served with HTTP 200 never replaces the last good copy."""
         full_url = _full_url(url, params)
         entry_path = self._entry_path(namespace, full_url)
         cached = _read_entry(entry_path)
 
-        if cached is not None and not refresh:
-            fetched_at = datetime.fromisoformat(cached["fetched_at"])
-            if self.now() - fetched_at < max_age:
-                return FetchResult(full_url, cached["text"], fetched_at, from_cache=True, stale=False)
+        def cached_result(stale: bool, reason: str | None = None) -> FetchResult:
+            assert cached is not None
+            fetched = datetime.fromisoformat(cached["fetched_at"])
+            return FetchResult(full_url, cached["text"], fetched, from_cache=True, stale=stale, stale_reason=reason)
+
+        if cached is not None and not refresh and self.now() - datetime.fromisoformat(cached["fetched_at"]) < max_age:
+            return cached_result(stale=False)
         if self.offline:
             if cached is None:
                 raise FetchError(f"offline and not cached: {full_url}")
-            return FetchResult(
-                full_url, cached["text"], datetime.fromisoformat(cached["fetched_at"]), from_cache=True, stale=True
-            )
+            return cached_result(stale=True, reason="offline mode: cached copy older than its refresh interval")
+        host = urlsplit(full_url).netloc
+        if host in self._failed_hosts:
+            reason = f"{host} not contacted again this run ({self._failed_hosts[host]})"
+            if cached is None:
+                raise FetchError(f"{reason}: {full_url}", reason)
+            return cached_result(stale=True, reason=reason)
 
         try:
             response = self._request(full_url, cached)
-        except FetchError:
+        except FetchError as exc:
             if cached is None:
                 raise
-            return FetchResult(
-                full_url, cached["text"], datetime.fromisoformat(cached["fetched_at"]), from_cache=True, stale=True
-            )
+            return cached_result(stale=True, reason=exc.reason)
 
         now = self.now()
         if response.status_code == 304 and cached is not None:
@@ -114,6 +133,14 @@ class CachedHttp:
             return FetchResult(full_url, cached["text"], now, from_cache=True, stale=False)
 
         text = response.text
+        if validate is not None:
+            try:
+                validate(text)
+            except ValueError as exc:
+                reason = f"invalid response from {host}: {exc}"
+                if cached is None:
+                    raise FetchError(f"invalid response from {full_url}: {exc}", reason) from exc
+                return cached_result(stale=True, reason=reason)
         _write_entry(
             entry_path,
             {
@@ -157,13 +184,22 @@ class CachedHttp:
             except httpx.HTTPError as exc:
                 last_error = f"{type(exc).__name__}: {exc}"
                 continue
+            if response.status_code == 429:
+                # rate limited: stop talking to this host for the rest of the run (polite scraping)
+                self._failed_hosts[host] = "HTTP 429 rate limited"
+                raise FetchError(f"HTTP 429 (rate limited) for {full_url}", f"HTTP 429 (rate limited) from {host}")
             if response.status_code in _RETRY_STATUS:
                 last_error = f"HTTP {response.status_code}"
                 continue
             if response.status_code == 304 or response.is_success:
                 return response
-            raise FetchError(f"HTTP {response.status_code} for {full_url}")
-        raise FetchError(f"giving up on {full_url} after {self.config.max_retries + 1} attempts ({last_error})")
+            raise FetchError(f"HTTP {response.status_code} for {full_url}", f"HTTP {response.status_code}")
+        self._failed_hosts[host] = last_error or "unreachable"
+        attempts = self.config.max_retries + 1
+        raise FetchError(
+            f"giving up on {full_url} after {attempts} attempt(s) ({last_error})",
+            f"{host} unreachable after {attempts} attempt(s) ({last_error})",
+        )
 
     def _throttle(self, host: str) -> None:
         last = self._last_request.get(host)

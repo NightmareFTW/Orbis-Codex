@@ -60,5 +60,11 @@ Key data facts (details in docs/DATA_SOURCES.md):
 - **M1 Skeleton & tooling — done**: package `e7ac` (`paths`, `settings`, `doctor`, `domain.world`, `cli.app`),
   launcher `OrbisCodex.cmd` (+ `scripts/install-uv.ps1`), GitHub Actions (Ubuntu + Windows + clean-machine launcher job), MIT.
   Reviewed by a multi-agent adversarial review (22 confirmed findings fixed).
+- **M2 Catalog v1 — done**:
+  - `sources/{http,stove,fribbels,e7calc}`: polite cached HTTP, validate-before-cache, per-run host breaker.
+  - `catalog/{facts,resolve,names,sets,coverage,store,sync}`: facts with provenance → resolver → versioned snapshots;
+    partial syncs never become current.
+  - `storage` (SQLAlchemy + Alembic, SQLAlchemy-emitted BEGIN) and `e7 catalog sync|show|conflicts|coverage|snapshots`.
+  - Real-data quirks are in DATA_SOURCES (positional artifact stats, `0.0%` = unknown effect values, duplicate names/codes).
+- **M3 Roster core — in progress** (code + tests in place; docs/review pending).
 - Still missing: screenshots + Fribbels save file (SPEC Q2) — needed from M4/M6. The repo is **public**: never commit them.
-- Next milestone: **M2 Catalog v1**.

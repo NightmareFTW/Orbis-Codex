@@ -39,3 +39,114 @@ Last reviewed: 2026-10-03.
 | MECH-GEAR-09 | Weapons cannot have DEF/DEF% substats; armor cannot have ATK/ATK% substats. | Fribbels `modificationFilter.js` | `community` | Roster validation: warning (not verified in game). |
 | MECH-GEAR-10 | Minimum number of substats by enhancement: +3 → 1, +6 → 2, +9 → 3, +12 → 4 (non-normal gear starts with ≥ 1 at +0). | Fribbels `itemAugmenter.js` (`fixProblemItem`) | `community` | Roster validation: warning. |
 | MECH-HERO-01 | Max level = stars × 10 (6★ → Lv. 60). | Common knowledge | `community` | Roster validation: warning. |
+
+## 3. Artifacts, Exclusive Equipment, Imprint
+
+| ID | Rule | Source | Status | Notes |
+|---|---|---|---|---|
+| MECH-ART-01 | Artifacts give flat ATK and HP. +30 value = 13 × +0 value. | **Stove** (`ability_*` vs `enhance_ability_*`), Fribbels | `verified` (endpoints) | Stove's field `ability_defense` is actually HP. |
+| MECH-ART-02 | Between +0 and +30 the flat stats scale linearly with level and keep one decimal (game shows integers). | Fribbels `artifact.js` | `community` | E.g. Hostess +18 → ATK 172.2, HP 262.4 (to verify with fixture). |
+| MECH-ART-03 | Artifact effect values: Stove gives `lv01` and `lv_max` per placeholder. Intermediate steps (skill level per +3 enhancements) | Stove (endpoints) | endpoints `verified`, steps `assumed` | Needs per-level table (epic7db/in-game). |
+| MECH-EE-01 | EE = hero-specific stat(s) + one chosen option modifying a given skill; Stove gives option code + target skill + usage share only. Stat **type** per hero from Fribbels `ex_equip` (BBK = Crit Chance, confirmed by the user). | Stove; Fribbels; user | structure `verified`, BBK stat type `verified` | Stat value range unknown: Fribbels lists `cri 0.06` for BBK while the user's EE shows 12% (NV-08). Option text from epic7db/in-game. |
+| MECH-IMP-01 | Memory Imprint (self/"concentration") adds a stat by grade C…SSS; BBK = ATK% 6/9/12/14/16/18%. | Fribbels `self_devotion`; Fixture (SSS = 18%) | BBK `verified`, others `community` | Release imprint (team-wide) not modelled yet. |
+
+## 4. Damage
+
+| ID | Rule | Source | Status | Notes |
+|---|---|---|---|---|
+| MECH-DMG-01 | Offensive power = ((ATK_eff · rate + flatMod) · **1.871** + flatMod2) · pow · (1 + Σ skill-enhance) · elemental · damage-up mods. `flatMod` = HP/DEF/SPD scaling terms; `flatMod2` = artifact/extra flat. | e7calc `damage.service.ts`, Fribbels kernel | `community` (2 sources) | Constant 1.871 has no official source. |
+| MECH-DMG-02 | Defensive factor = (1 − dmgReduction)(1 − dmgTransfer) / (1 + DEF_eff · (1 − penetration) / 300). | e7calc `target.ts`; Fribbels | `community` | |
+| MECH-DMG-03 | Effective HP = HP · (1 + DEF/300). | Fribbels kernel; e7calc EHP tool | `community` | |
+| MECH-DMG-04 | Penetration sources combine multiplicatively: Π(1 − p_i·(1 − penResist)); Penetration set 15% applies to single-target attacks only. | e7calc; Stove set text | `community` / set `verified` | |
+| MECH-DMG-05 | Hit-type damage: critical × min(CD, 350%) (+uncapped boosts) · crushing × 1.3 · normal × 1.0 · miss × 0.75. | e7calc, Fribbels | `community` (2 sources) | |
+| MECH-DMG-06 | ATK buffs: Attack Up +50%, Greater Attack Up +75%, Attack Down −50% (multiplicative on ATK); Defense Up +60%, Defense Break −70% on target DEF; "Target" debuff +15% damage taken. | e7calc `constants.ts` | `community` | Check vs in-game buff tooltips. |
+| MECH-DMG-07 | Torrent +10%, Rage +30% vs debuffed, Fervor +20%, Pursuit +20% (additional damage) — additive damage-up mods. | Stove text; e7calc constants | magnitudes `verified`, stacking `community` | |
+
+## 5. Hit determination and elements
+
+| ID | Rule | Source | Status | Notes |
+|---|---|---|---|---|
+| MECH-ELEM-01 | Fire > Earth > Ice > Fire; Light ↔ Dark mutually advantaged. (API codes: `fire`, `wind` = Earth, `ice`, `light`, `dark`.) | User brief; Stove codes | `community` | |
+| MECH-ELEM-02 | Elemental advantage: +10% damage, +15% crit chance. | e7calc (1.1); community guides | damage `community` (2), crit `community` (1) | |
+| MECH-ELEM-03 | Elemental disadvantage: 50% chance of a **Miss**; a miss cannot crit/crush and cannot inflict EFF-based debuffs. | Community guides (gamepress, gamesadda) | `community` | Some skills ignore elemental disadvantage. |
+| MECH-HIT-01 | Crushing hit chance in neutral/advantage. | — | **`unknown`** | Community claims conflict (e.g. "75% on advantage"). Parameter must be `assumed` until measured. |
+| MECH-HIT-02 | Order of resolution (miss → crit → crushing → normal). | — | `assumed` | |
+
+## 6. Debuffs
+
+| ID | Rule | Source | Status | Notes |
+|---|---|---|---|---|
+| MECH-EFF-01 | P(land) = P(not miss) · skill_chance · clamp(1 + EFF − ER, 0, **0.85**) (EFF/ER as fractions). The 85% cap = "15% minimum resist". | e7calc effectiveness checker; multiple guides | `community` | Effects that "cannot be resisted"/"ignore ER" bypass it. |
+| MECH-EFF-02 | Weakening set "+15% chance to inflict debuffs": how it combines with MECH-EFF-01. | Stove text | magnitude `verified`, formula `assumed` | |
+| MECH-EFF-03 | Each debuff in a multi-debuff skill rolls independently. | Community guides | `community` | |
+
+## 7. Turn order (Combat Readiness)
+
+| ID | Rule | Source | Status | Notes |
+|---|---|---|---|---|
+| MECH-CR-01 | Each unit has a CR gauge 0–100%; it fills at a rate proportional to its current Speed; the first to reach 100% acts; after acting CR resets to 0. CR push/pull add/subtract percentage points. | Community standard; e7calc speed tools | `community` | |
+| MECH-CR-02 | Starting CR = random uniform 0–5% per unit (so +5% speed guarantees order). | e7calc speed tuner/solver | `community` | One web summary claims ±5% in PvP → conflict; keep as parameter. |
+| MECH-CR-03 | Tie-breaking when two units reach 100% simultaneously. | — | `unknown` | |
+| MECH-CR-04 | Extra turn: the unit acts again immediately. | Skill text | `community` | Interaction with CR display to verify. |
+
+## 8. Extra actions
+
+| ID | Rule | Source | Status | Notes |
+|---|---|---|---|---|
+| MECH-DUAL-01 | Dual Attack: when a hero attacks with its basic skill (S1), with probability = DAC a random ally also attacks the same target with its S1. Base DAC 3–5% by hero; Unity set +8%. | Fribbels data (DAC); Stove (Unity); community | trigger rules `assumed`, magnitudes `verified`/`community` | Low impact; verify damage modifier and ally selection. |
+| MECH-CNT-01 | Counterattack uses S1; Counter set 30% when attacked; Riposte 70% after evading. | Stove (set text) | `verified` (chances); details `assumed` | Can counters be countered/dual-attacked: `unknown`. |
+
+## 9. Souls
+
+| ID | Rule | Source | Status | Notes |
+|---|---|---|---|---|
+| MECH-SOUL-01 | Skills generate souls (e.g. "+1 souls"); soulburn spends souls for an enhanced effect. | epic7db skill text | `community` | Soul gauge size/costs per skill to catalog. |
+| MECH-SOUL-02 | In Arena the defence AI never uses soulburn. | Game8 (2020) | `community` (dated) | Attacker (me) can soulburn: `community`. |
+
+## 10. Combat Power
+
+| ID | Rule | Source | Status | Notes |
+|---|---|---|---|---|
+| MECH-CP-01 | CP_gear = ((ATK·1.6 + ATK·1.6·CC·CD)·(1 + (SPD − 45)·0.02) + HP + DEF·9.3) · (1 + (ER + EFF)/4) (CC, CD, ER, EFF as fractions). Excludes skill enhancements. | Fribbels (README: "doesn't take skill enhances into account") | `community` | |
+| MECH-CP-02 | In-game CP = CP_gear · k(skill enhancements, …). Fixture BBK: CP_gear = 109,033 vs in-game 141,750 → k = 1.3001 for a (presumably) fully enhanced hero. | Fixture + MECH-CP-01 | `assumed` (1 sample) | Need more samples (Fribbels save will give many). Basis for CP→percentile calibration in Phase 2. |
+
+## 11. Arena (normal, asynchronous)
+
+| ID | Rule | Source | Status | Notes |
+|---|---|---|---|---|
+| MECH-ARENA-01 | The defence is played by the game AI; the attacker plays manually or on auto. The user plays mostly on **auto**, so both sides are AI-driven by default. | User brief / answers | `verified` | Whether auto-battle uses the same policy as the defence AI: `unknown`. |
+| MECH-ARENA-02 | AI targeting: prefers targets it has elemental advantage over (except invulnerable units); units whose skill ignores elemental disadvantage pick a random target. | Game8 (2020) | `community` (dated, low confidence) | |
+| MECH-ARENA-03 | AI targeting also prefers low-HP targets. | GameFAQs anecdote | `assumed` | |
+| MECH-ARENA-04 | AI skill choice (uses S3/S2 when off cooldown?). | — | `unknown` | Core uncertainty; learn from logged battles (Phase 6). |
+| MECH-ARENA-05 | Turn limit / sudden death / NPC opponents in the list. | — | `unknown` | Observe in captured battles. |
+| MECH-ARENA-06 | Auto-battle policy for the attacker (skill choice/targeting). | — | `unknown` | Default attacker policy = same approximation as the defence AI until data says otherwise (D15). |
+
+## 12. Not yet researched (Phase 4)
+Buff/debuff durations and "turn" semantics (start vs end of turn decrement), stacking/priority rules,
+immunity vs cleanse ordering, revive rules, barrier stacking, stealth/invincibility/skill-nullifier
+interactions, damage share, damage caps per boss/hero passives, Injury reduction cap, CR push from
+skills vs speed buffs (Speed Up = +30% speed per e7calc `spdUp 1.3`, `community`).
+
+---
+
+## Needs verification (live list)
+
+| # | Item | Why it matters | How to verify |
+|---|---|---|---|
+| NV-01 | Stove histogram bin edges (MECH via DATA_SOURCES §1) | All opponent stat percentiles | Compare with the user's own heroes' stats / percentile plausibility; contact Stove? |
+| NV-02 | Which population `hero-detail` vs `wearing-status` rankings use | Opponent set/artifact priors | Compare shares across weeks/regions; ask community |
+| NV-03 | Crushing hit chance and hit-resolution order (MECH-HIT-01/02) | Damage variance | Count hit types in recorded battles |
+| NV-04 | Starting CR randomness range in PvP (MECH-CR-02) | Turn-order probability | Speed-tuning observations from recorded battles |
+| NV-05 | Defence AI targeting & skill policy, auto-battle attacker policy (D15), turn limit / NPC teams (MECH-ARENA-02..06) | Simulator accuracy | Log battles (Phase 5/6) |
+| NV-06 | CP enhancement factor (MECH-CP-02) | CP→percentile calibration | Many heroes from the Fribbels save + Hero Info OCR |
+| NV-07 | Artifact effect per-level steps (MECH-ART-03) | Artifact effects in sim | epic7db / in-game tooltip |
+| NV-08 | EE stat value range (BBK: Fribbels 0.06 vs user's 12% Crit Chance) and option texts (MECH-EE-01) | Roster validation, sim | In-game EE tooltip / epic7db / Fribbels save |
+| NV-09 | Dual attack/counter details (MECH-DUAL-01, MECH-CNT-01) | Minor damage | Observation |
+| NV-10 | Fixture residuals: with Fribbels base stats, final − "gear contribution" leaves ATK +35, DEF +15, HP +100, CD +4%, ER +4%, SPD 0, CC 0 for BBK, while imprint (+18% ≈ +205 ATK) and artifact (+18 ≈ +172 ATK / +262 HP) are expected on top | Consistency check design | Inspect `hero_manage_bbk.png` (what "gear contribution" includes) |
+| NV-11 | Gear set piece counts (MECH-GEAR-05) and full main-stat table | Validation | In-game tooltips / OCR fixtures |
+| NV-12 | How the Weakening set's "+15% chance to inflict debuffs" combines with EFF/ER (MECH-EFF-02) | Debuff landing | Observation / official notes |
+| NV-13 | CR tie-break when units reach 100% together (MECH-CR-03) | Turn order | Recorded battles |
+| NV-14 | Skill multipliers where Fribbels and e7calc disagree (~40 fields, `e7 catalog conflicts --type skill`) | Damage maths | Third source (epic7db skill pages) / in-game skill text |
+| NV-15 | Base stats where Fribbels and e7calc disagree (~24 heroes; e7calc values are damage-calc tuned) | Consistency check | epic7db base stats / in-game Hero Info at known gear |
+| NV-16 | Which stats the two Stove artifact fields hold for artifacts Fribbels cannot confirm (`ef506`, `ef427`: stored as an assumed ATK/HP reading, D26) | Final stats | In-game artifact screen / OCR |
+| NV-17 | Artifact effect values Stove leaves unknown (84 artifacts have a `null` in `effect_levels`, D27) | Predictor (artifact effects) | e7calc `artifacts.ts` (damage-relevant ones) / in-game artifact text at +0 and +30 |

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -71,10 +72,12 @@ def test_expired_cache_revalidates_with_etag(tmp_path: Path) -> None:
     http.get_text("ns", URL, max_age=timedelta(hours=1))
     clock.advance(timedelta(hours=2))
     again = http.get_text("ns", URL, max_age=timedelta(hours=1))
-    assert again.text == "body"
+    assert (again.text, again.stale) == ("body", False)
     assert again.fetched_at == clock.wall
+    assert http.requests_made == 2
     clock.advance(timedelta(minutes=10))
     assert http.get_text("ns", URL, max_age=timedelta(hours=1)).from_cache  # refreshed timestamp counts
+    assert http.requests_made == 2  # ...so no third request
 
 
 def test_refresh_bypasses_fresh_cache(tmp_path: Path) -> None:
@@ -125,6 +128,7 @@ def test_network_failure_serves_stale_cache(tmp_path: Path) -> None:
     clock.advance(timedelta(days=2))
     result = http.get_text("ns", URL, max_age=timedelta(hours=1))
     assert (result.text, result.from_cache, result.stale) == ("cached", True, True)
+    assert result.stale_reason == "example.test unreachable after 3 attempt(s) (ConnectError: offline)"
 
 
 def test_network_failure_without_cache_raises(tmp_path: Path) -> None:
@@ -148,6 +152,7 @@ def test_offline_mode_never_touches_the_network(tmp_path: Path) -> None:
     offline.now = lambda: clock.wall
     result = offline.get_text("ns", URL, max_age=timedelta(hours=1))
     assert (result.text, result.stale) == ("v1", True)
+    assert result.stale_reason is not None and result.stale_reason.startswith("offline mode")
     with pytest.raises(FetchError, match="offline and not cached"):
         offline.get_text("ns", URL + "?other", max_age=timedelta(hours=1))
 
@@ -158,3 +163,69 @@ def test_corrupt_cache_entry_is_a_miss(tmp_path: Path) -> None:
     entry = next((tmp_path / "cache" / "ns").glob("*.json"))
     entry.write_text("{broken", encoding="utf-8")
     assert http.get_text("ns", URL, max_age=timedelta(hours=1)).from_cache is False
+
+
+def test_http_error_with_cache_serves_stale_copy_with_its_reason(tmp_path: Path) -> None:
+    statuses = iter([200, 404])
+    http, clock = make(tmp_path, lambda r: httpx.Response(next(statuses), text="v1"))
+    http.get_text("ns", URL, max_age=timedelta(hours=1))
+    clock.advance(timedelta(hours=2))
+    result = http.get_text("ns", URL, max_age=timedelta(hours=1))
+    assert (result.text, result.stale, result.stale_reason) == ("v1", True, "HTTP 404")
+
+
+def _must_be_json(text: str) -> None:
+    if not text.startswith("{"):
+        raise ValueError("not a JSON object")
+
+
+def test_invalid_response_never_overwrites_the_cache(tmp_path: Path) -> None:
+    bodies = iter(['{"good": 1}', "<html>maintenance</html>", '{"good": 2}'])
+    http, _ = make(tmp_path, lambda r: httpx.Response(200, text=next(bodies)))
+    http.get_text("ns", URL, max_age=timedelta(0), validate=_must_be_json)
+    bad = http.get_text("ns", URL, max_age=timedelta(0), validate=_must_be_json)
+    assert (bad.text, bad.stale) == ('{"good": 1}', True)
+    assert bad.stale_reason == "invalid response from example.test: not a JSON object"
+    entry = next((tmp_path / "cache" / "ns").glob("*.json"))
+    assert "maintenance" not in entry.read_text(encoding="utf-8")
+    assert http.get_text("ns", URL, max_age=timedelta(0), validate=_must_be_json).text == '{"good": 2}'
+
+
+def test_invalid_response_without_cache_raises(tmp_path: Path) -> None:
+    http, _ = make(tmp_path, lambda r: httpx.Response(200, text="<html>"))
+    with pytest.raises(FetchError, match=re.escape(f"invalid response from {URL}")):
+        http.get_text("ns", URL, max_age=timedelta(0), validate=_must_be_json)
+    assert not list((tmp_path / "cache").rglob("*.json"))
+
+
+def test_dead_host_is_not_contacted_again_in_the_same_run(tmp_path: Path) -> None:
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(str(request.url))
+        if request.url.host == "example.test":
+            raise httpx.ConnectError("down")
+        return httpx.Response(200, text="other host is fine")
+
+    http, _ = make(tmp_path, handler)
+    with pytest.raises(FetchError, match="giving up"):
+        http.get_text("ns", URL + "?page=1", max_age=timedelta(0))
+    with pytest.raises(FetchError, match="not contacted again this run"):
+        http.get_text("ns", URL + "?page=2", max_age=timedelta(0))
+    assert len(calls) == 3  # max_retries + 1 attempts in total for the whole run, not per URL
+    assert http.get_text("ns", "https://other.test/x", max_age=timedelta(0)).text == "other host is fine"
+
+
+def test_rate_limit_stops_contacting_the_host(tmp_path: Path) -> None:
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(str(request.url))
+        return httpx.Response(429)
+
+    http, _ = make(tmp_path, handler)
+    with pytest.raises(FetchError, match="429"):
+        http.get_text("ns", URL + "?page=1", max_age=timedelta(0))
+    with pytest.raises(FetchError, match=r"not contacted again this run \(HTTP 429 rate limited\)"):
+        http.get_text("ns", URL + "?page=2", max_age=timedelta(0))
+    assert len(calls) == 1  # 429 is never retried

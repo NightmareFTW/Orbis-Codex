@@ -40,6 +40,8 @@ class ResolvedField(BaseModel):
     status: DataStatus
     sources: tuple[SourceId, ...]
     alternatives: tuple[Alternative, ...] = ()
+    notes: tuple[str, ...] = ()
+    """Distinct notes attached by the sources of the chosen value (e.g. "S1 proc", "slot mapping not confirmed")."""
 
     @property
     def conflict(self) -> bool:
@@ -113,11 +115,13 @@ def resolve_field(facts: Sequence[Fact]) -> ResolvedField:
     # even between official values that contradict each other: the field is only `assumed`.
     tie = len(ranked) > 1 and rank(ranked[1]) == rank(chosen)
     status = DataStatus.ASSUMED if tie and chosen_status is not DataStatus.UNKNOWN else chosen_status
+    notes = tuple(sorted({f.note for f in chosen if f.note}))
     return ResolvedField(
         value=canonical_value(chosen[0].value),
         status=status,
         sources=distinct_sources(chosen),
         alternatives=alternatives,
+        notes=notes,
     )
 
 

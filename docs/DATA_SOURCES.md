@@ -142,17 +142,31 @@ Percentiles that fall in an open-ended edge bin are flagged as low-confidence.
 
 ### Artifact items (`hero-artifact-ranking` / `artifact-list`)
 `artifact_code` (e.g. `efa22`), `artifact_name`, `job_code` (class lock or `NN`), `grade` (★),
-`ability_attack` (ATK at +0), `ability_defense` (**actually Health** at +0 — misnamed; matches Fribbels
-`health`), `enhance_ability_attack` / `enhance_ability_defense` (+30 values; observed = 13 × +0 values),
-`info_text` with `@`, `@@`, `@@@` placeholders, `level_list[i] = {lv01, lv_max}` per placeholder.
-Example Hostess of the Banquet `efa22`: ATK 21→273, HP 32→416.
+`ability_attack` / `ability_defense` at +0 and `enhance_ability_attack` / `enhance_ability_defense` at +30
+(observed = 13 × +0 values). **The two fields are positional, not named**: they hold the artifact's two non-zero stats
+in the order ATK, DEF, HP. Most artifacts are ATK + HP, but ATK + DEF (`efa28` Summer Photogenic 21/5,
+`efw37` Thorn of the Blue Rose 9/11) and DEF + HP (`efh28` Veritas 5/76) exist; checked against Fribbels'
+`{attack, defense, health}` on all 7 real artifacts that have DEF. The catalog therefore stores a slot as `verified`
+only when Fribbels' +0 values confirm which stats they are, otherwise as an `assumed` ATK/HP reading (2 artifacts:
+`ef506`, `ef427`, whose Fribbels entries are duplicated and disagree).
+`info_text` with `@`, `@@`, `@@@` placeholders, `level_list[i] = {lv01, lv_max}` for placeholder `i+1`.
+`level_list` always has 5 entries; unused ones are padded with `"0"`. Example Hostess of the Banquet `efa22`:
+ATK 21→273, HP 32→416.
 
 ### Catalog lists: real-data observations (M2, 2026-10-03, Global)
 - `hero-list`: 390 heroes, 50 per page whatever `is_paging` says (8 pages). **Display names are not unique**: three
   different codes are called "Mercedes" (`c0001`, `c1005` on Stove, plus `c0002` in Fribbels) → name lookups must refuse
   ambiguous names.
-- `artifact-list`: 267 artifacts (6 pages). Some `level_list` entries are `{}` (value of that `@` unknown); one artifact
-  (`efw33` Tyrant's Descent) has no `info_text`. Both are accepted and reported as warnings, never guessed.
+- `artifact-list`: 267 artifacts (6 pages); one artifact (`efw33` Tyrant's Descent) has no `info_text`.
+  Of 328 placeholders used in effect texts, only 189 have real values. The rest are **unknown, not zero**:
+  - 106 are `"0.0%"`/`"0.0%"`, e.g. `efr17` "Hit Chance by @ and Critical Hit Damage by @@";
+  - 29 are `{}`;
+  - 3 are `"0"`/`"0"`;
+  - 1 has only its +0 value.
+
+  The catalog keeps one `effect_levels` entry per placeholder present in the text, turns these sentinels into `null`,
+  and marks the field `assumed` unless every value is real (84 artifacts). This is reported as a warning, never
+  guessed; a second source for effect values is NV-17.
 - `equip-list`: 24 sets on one page; the official texts parse into static bonuses + in-combat clauses (`catalog/sets.py`).
 
 ### Freshness
@@ -177,6 +191,14 @@ Example Hostess of the Banquet `efa22`: ATK 21→273, HP 32→416.
   1 req/s. Default is **lazy**: heroes in my roster + heroes seen in Arena + on demand.
 - Raw responses stored with timestamp, region and SHA-256; parsed with strict pydantic models so a
   schema change fails loudly and falls back to the last good snapshot.
+- Implemented in `sources/http.py` (M2):
+  - An error page served with HTTP 200 (Stove `code != 0`, non-JSON) is rejected **before** it is cached, so it
+    never replaces the last good copy.
+  - HTTP 429, or a host that still fails after its retries, is not contacted again for the rest of the run.
+  - Whenever a stale cached copy is served, the reason (offline mode, HTTP status, unreachable host, invalid response)
+    is printed as a warning and the source is flagged `[STALE]`.
+  - Paginated lists are re-fetched in one go when their pages come from different list versions (different
+    `total_count`, or fetched more than 10 min apart); if they still differ, a warning says so.
 - ToS: not reviewed clause by clause; the user approved weekly use of the Stove API (SPEC D18). Personal, polite access;
   no redistribution: real responses are git-ignored and tests use synthetic responses.
 
@@ -259,10 +281,18 @@ Example Hostess of the Banquet `efa22`: ATK 21→273, HP 32→416.
 
 ## Catalog pipeline (accepted, SPEC D4; implemented in M2)
 
-First real snapshot (Global, 2026-10-03): 390 heroes, 962 skills, 281 artifacts, 24 sets; field statuses
-verified 4010 · community 10088 · assumed 172; 114 conflicts between sources (`e7 catalog conflicts`); 16 entities with
-missing required fields (`e7 catalog coverage`: old Fribbels-only artifacts without +30 stats, two "Mercedes" without
-base stats). A full sync makes ~18 requests (~20 s at 1 req/s); a repeated sync within the cache age makes 0.
+Real snapshot (Global, 2026-10-03, after the M2 review fixes): 390 heroes, 967 skills, 281 artifacts, 24 sets.
+- Field statuses: verified 3899 · community 10404 · assumed 264.
+- 107 conflicts between sources (`e7 catalog conflicts`).
+- 16 entities with missing required fields (`e7 catalog coverage`): old Fribbels-only artifacts without +30 stats,
+  and two "Mercedes" without base stats.
+- The `assumed` count rose against the first run because incomplete artifact effect values and unconfirmed artifact
+  stat slots are now flagged.
+- A full sync makes ~18 requests (~20 s at 1 req/s); a repeated sync within the cache age makes 0.
+
+**Partial syncs** (a source failed, or `--source` picked a subset) are stored as snapshots for inspection. They never
+replace the current catalog: only a complete sync of every source does, or the very first sync when there is no
+catalog yet (SPEC D25, D28).
 
 ```mermaid
 flowchart LR

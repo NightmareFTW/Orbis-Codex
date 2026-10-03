@@ -60,9 +60,10 @@ def canonical_value(value: JsonValue) -> JsonValue:
     if isinstance(value, int):
         return value
     if isinstance(value, float):
-        if math.isfinite(value) and value.is_integer():
-            return int(value)
-        return round(value, _FLOAT_DIGITS)
+        if not math.isfinite(value):
+            return value
+        rounded = round(value, _FLOAT_DIGITS)  # round first: 0.7 + 0.3 must equal 1
+        return int(rounded) if rounded.is_integer() else rounded
     if isinstance(value, list):
         return [canonical_value(v) for v in value]
     return {str(k): canonical_value(v) for k, v in sorted(value.items())}

@@ -24,7 +24,7 @@ REQUIRED_FIELDS: Final[dict[EntityType, tuple[str, ...]]] = {
         f"base.{Stat.CRIT_CHANCE.value}",
         f"base.{Stat.CRIT_DAMAGE.value}",
     ),
-    EntityType.ARTIFACT: ("name", "rarity", "atk_min", "hp_min", "atk_max", "hp_max"),
+    EntityType.ARTIFACT: ("name", "rarity"),  # + both flat stats with +0 and max values (see _artifact_stats)
     EntityType.SET: ("name", "pieces", "effect_text", "kind"),
 }
 
@@ -45,6 +45,8 @@ def coverage(entities: Iterable[ResolvedEntity]) -> list[Gap]:
         if required is None:
             continue
         missing = tuple(f for f in required if f not in entity.fields)
+        if entity.entity_type is EntityType.ARTIFACT:
+            missing += _artifact_stat_gaps(entity)
         assumed = tuple(f for f in required if f in entity.fields and entity.fields[f].status is DataStatus.ASSUMED)
         if missing or assumed:
             gaps.append(
@@ -65,3 +67,18 @@ def status_counts(entities: Iterable[ResolvedEntity]) -> dict[DataStatus, int]:
         for resolved in entity.fields.values():
             counts[resolved.status] += 1
     return counts
+
+
+def _artifact_stat_gaps(entity: ResolvedEntity) -> tuple[str, ...]:
+    """Every artifact has two flat stats (ATK/DEF/HP); each needs its +0 and max value."""
+    present = [s for s in ("atk", "def", "hp") if _positive(entity.value(f"{s}_min"))]
+    if not present:
+        return ("stats",)
+    gaps = [f"{s}_max" for s in present if f"{s}_max" not in entity.fields]
+    if len(present) < 2:
+        gaps.append("second stat")
+    return tuple(gaps)
+
+
+def _positive(value: object) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0

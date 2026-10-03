@@ -14,8 +14,7 @@ from e7ac.catalog.coverage import Gap, coverage
 from e7ac.catalog.facts import EntityType, Fact, SourceRun
 from e7ac.catalog.names import NameIndex
 from e7ac.catalog.resolve import Conflict, conflicts, resolve
-from e7ac.catalog.sets import set_facts
-from e7ac.catalog.store import save_snapshot
+from e7ac.catalog.store import current_snapshot, save_snapshot
 from e7ac.domain.codes import SourceId
 from e7ac.domain.world import World
 from e7ac.sources import e7calc, fribbels, stove
@@ -46,41 +45,49 @@ class SyncReport:
     conflicts: list[Conflict] = field(default_factory=list)
     gaps: list[Gap] = field(default_factory=list)
     requests_made: int = 0
+    complete: bool = False
+    """Every catalog source synced without error (only then does the snapshot become current)."""
+    current_snapshot_id: int | None = None
 
 
 def collect_facts(http: CachedHttp, options: SyncOptions) -> tuple[list[Fact], list[SourceRun], list[str]]:
-    facts: list[Fact] = []
-    runs: list[SourceRun] = []
     errors: list[str] = []
     names = NameIndex()
     known: dict[str, tuple[str, str]] = {}
 
+    stove_catalog: stove.StoveCatalog | None = None
     if SourceId.STOVE in options.sources:
         try:
-            catalog = stove.fetch_catalog(http, options.world, refresh=options.refresh)
-            stove_facts, run = stove.to_facts(catalog)
-            for item in catalog.sets:
-                stove_facts.extend(set_facts(item.equip_code, item.equip_effect))
-            facts.extend(stove_facts)
-            runs.append(run.model_copy(update={"facts": len(stove_facts)}))
-            for hero in catalog.heroes:
+            stove_catalog = stove.fetch_catalog(http, options.world, refresh=options.refresh)
+            errors.extend(f"stove {e}" for e in stove_catalog.errors)
+            for hero in stove_catalog.heroes:
                 names.add(hero.hero_name, hero.hero_code)
                 known[hero.hero_code] = (hero.attribute_code.value, hero.job_code.value)
         except (FetchError, stove.StoveError) as exc:
             errors.append(f"stove: {exc}")
 
-    if SourceId.FRIBBELS in options.sources or SourceId.E7CALC in options.sources:
+    fribbels_data: fribbels.FribbelsData | None = None
+    if SourceId.FRIBBELS in options.sources or SourceId.E7CALC in options.sources or stove_catalog is not None:
         try:
-            data = fribbels.fetch(http, refresh=options.refresh)
-            if SourceId.FRIBBELS in options.sources:
-                fribbels_facts, run = fribbels.to_facts(data)
-                facts.extend(fribbels_facts)
-                runs.append(run)
-            fribbels.add_to_index(data, names)
-            for fhero in data.heroes:
+            fribbels_data = fribbels.fetch(http, refresh=options.refresh)
+            fribbels.add_to_index(fribbels_data, names)
+            for fhero in fribbels_data.heroes:
                 known.setdefault(fhero.code, (fhero.attribute.value, fhero.role.value))
         except (FetchError, fribbels.FribbelsError, ValueError) as exc:
-            errors.append(f"fribbels: {exc}")
+            if SourceId.FRIBBELS in options.sources:
+                errors.append(f"fribbels: {exc}")
+
+    facts: list[Fact] = []
+    runs: list[SourceRun] = []
+    if stove_catalog is not None:
+        hints = fribbels.artifact_stat_hints(fribbels_data) if fribbels_data is not None else None
+        stove_facts, run = stove.to_facts(stove_catalog, hints)
+        facts.extend(stove_facts)
+        runs.append(run)
+    if fribbels_data is not None and SourceId.FRIBBELS in options.sources:
+        fribbels_facts, run = fribbels.to_facts(fribbels_data)
+        facts.extend(fribbels_facts)
+        runs.append(run)
 
     if SourceId.E7CALC in options.sources:
         if not len(names):
@@ -94,12 +101,11 @@ def collect_facts(http: CachedHttp, options: SyncOptions) -> tuple[list[Fact], l
             except (FetchError, ValueError) as exc:
                 errors.append(f"e7calc: {exc}")
     ambiguous = names.ambiguous()
-    if ambiguous:
+    if ambiguous and runs:
         listed = "; ".join(f"{key}: {', '.join(codes)}" for key, codes in ambiguous.items())
         notice = f"names shared by several hero codes (never matched by name): {listed}"
         target = next((i for i, r in enumerate(runs) if r.source is SourceId.STOVE), 0)
-        if runs:
-            runs[target] = runs[target].model_copy(update={"warnings": (*runs[target].warnings, notice)})
+        runs[target] = runs[target].model_copy(update={"warnings": (*runs[target].warnings, notice)})
     return facts, runs, errors
 
 
@@ -110,15 +116,30 @@ def sync_catalog(
     *,
     now: Callable[[], datetime] = lambda: datetime.now(UTC),
 ) -> SyncReport:
+    """Build and store a snapshot. Only a complete sync (every source, no error) replaces the current snapshot,
+    unless there is no current snapshot yet; a partial one is stored for inspection (DATA_SOURCES "Access policy")."""
     facts, runs, errors = collect_facts(http, options)
     report = SyncReport(runs=runs, errors=errors, requests_made=http.requests_made)
     if not facts:
         raise SyncError("no source produced data: " + "; ".join(errors or ["no source selected"]))
     entities = resolve(facts)
+    complete = not errors and options.sources == ALL_SOURCES
     with session_scope(engine) as session:
-        saved = save_snapshot(session, world=options.world, entities=entities, facts=facts, runs=runs, now=now())
+        previous = current_snapshot(session)
+        saved = save_snapshot(
+            session,
+            world=options.world,
+            entities=entities,
+            facts=facts,
+            runs=runs,
+            now=now(),
+            make_current=complete or previous is None,
+        )
+        current = current_snapshot(session)
     report.snapshot_id = saved.snapshot_id
     report.created = saved.created
+    report.complete = complete
+    report.current_snapshot_id = current.id if current is not None else None
     report.entity_counts = dict(Counter(e.entity_type for e in entities))
     report.conflicts = conflicts(entities)
     report.gaps = coverage(entities)

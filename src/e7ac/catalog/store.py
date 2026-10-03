@@ -10,6 +10,7 @@ from datetime import datetime
 
 from pydantic import TypeAdapter
 from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from e7ac.catalog.facts import EntityType, Fact, SourceRun
@@ -44,14 +45,25 @@ def save_snapshot(
     facts: Sequence[Fact],
     runs: Sequence[SourceRun],
     now: datetime,
+    make_current: bool = True,
 ) -> SaveResult:
+    """Store a snapshot (or find the identical one). Only `make_current` moves the 'current' marker, so a partial
+    sync can be kept for inspection without replacing the last complete catalog."""
     digest = content_hash(world, entities)
-    existing = session.scalars(select(CatalogSnapshotRow).where(CatalogSnapshotRow.content_sha256 == digest)).first()
-    session.execute(update(CatalogSnapshotRow).values(is_current=False))
+
+    def find_existing() -> CatalogSnapshotRow | None:
+        return session.scalars(select(CatalogSnapshotRow).where(CatalogSnapshotRow.content_sha256 == digest)).first()
+
+    def promote(row: CatalogSnapshotRow) -> SaveResult:
+        if make_current:
+            session.execute(update(CatalogSnapshotRow).where(CatalogSnapshotRow.id != row.id).values(is_current=False))
+            row.is_current = True
+            session.flush()
+        return SaveResult(snapshot_id=row.id, created=False)
+
+    existing = find_existing()
     if existing is not None:
-        existing.is_current = True
-        session.flush()
-        return SaveResult(snapshot_id=existing.id, created=False)
+        return promote(existing)
 
     snapshot = CatalogSnapshotRow(
         created_at=now,
@@ -60,10 +72,18 @@ def save_snapshot(
         sources_json=_RUNS_ADAPTER.dump_json(list(runs)).decode("utf-8"),
         entity_count=len(entities),
         conflict_count=len(conflicts(entities)),
-        is_current=True,
+        is_current=False,
     )
-    session.add(snapshot)
-    session.flush()
+    try:
+        with session.begin_nested():
+            session.add(snapshot)
+            session.flush()
+    except IntegrityError:
+        # another process stored the same content meanwhile (unique content hash): reuse it
+        raced = find_existing()
+        if raced is None:
+            raise
+        return promote(raced)
     session.add_all(
         CatalogFactRow(
             snapshot_id=snapshot.id,
@@ -88,6 +108,8 @@ def save_snapshot(
         for e in entities
     )
     session.flush()
+    if make_current:
+        promote(snapshot)
     return SaveResult(snapshot_id=snapshot.id, created=True)
 
 
@@ -139,16 +161,21 @@ def find(session: Session, snapshot_id: int, query: str) -> Lookup:
     """Exact code or exact (case-insensitive) name matches first; substring matches are only *candidates*.
 
     Callers must never treat a partial match as an answer (golden rule: no silent near-miss)."""
-    needle = query.strip().casefold()
+    needle = _fold(query)
     rows = session.scalars(
         select(CatalogEntityRow).where(
             CatalogEntityRow.snapshot_id == snapshot_id,
             CatalogEntityRow.entity_type != EntityType.SKILL.value,
         )
     ).all()
-    exact = [r for r in rows if r.entity_id.casefold() == needle or r.name.casefold() == needle]
-    partial = [r for r in rows if r not in exact and needle and needle in r.name.casefold()]
+    exact = [r for r in rows if r.entity_id.casefold() == needle or _fold(r.name) == needle]
+    partial = [r for r in rows if r not in exact and needle and needle in _fold(r.name)]
     return Lookup(
         exact=[ResolvedEntity.model_validate_json(r.data_json) for r in exact],
         partial=[ResolvedEntity.model_validate_json(r.data_json) for r in sorted(partial, key=lambda r: r.name)],
     )
+
+
+def _fold(text: str) -> str:
+    """Case- and quote-insensitive form: typographic quotes (U+2018/U+2019) are the same character to a user."""
+    return text.strip().casefold().replace("\u2019", "'").replace("\u2018", "'")

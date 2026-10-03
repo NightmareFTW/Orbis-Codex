@@ -8,6 +8,7 @@ they come from the optimizer's `enums/Set.java` and are listed in `SET_PIECES` b
 from __future__ import annotations
 
 import hashlib
+import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import timedelta
@@ -84,7 +85,13 @@ _SKILL_FIELDS: Final = {
     "selfDefScaling": "self_def_scaling",
     "selfSpdScaling": "self_spd_scaling",
     "selfAtkScaling": "self_atk_scaling",
+    "extraSelfAtkScaling": "extra_self_atk_scaling",
+    "extraSelfDefScaling": "extra_self_def_scaling",
+    "extraSelfHpScaling": "extra_self_hp_scaling",
+    "increasedValue": "increased_value",
+    "cdmgIncrease": "crit_damage_increase",
 }
+_SKILL_KNOWN_KEYS: Final = frozenset({"hitTypes", "options", "note", *_SKILL_FIELDS})
 
 
 class FribbelsError(Exception):
@@ -147,6 +154,7 @@ class FribbelsHero(_Model):
 class _ArtifactStats(_Model):
     attack: float
     health: float
+    defense: float = 0.0
 
 
 class FribbelsArtifact(_Model):
@@ -166,10 +174,18 @@ class FribbelsData:
 
 
 def fetch(http: CachedHttp, *, refresh: bool = False, max_age: timedelta = DEFAULT_MAX_AGE) -> FribbelsData:
-    hero_result = http.get_text("fribbels", HERODATA_URL, max_age=max_age, refresh=refresh)
-    artifact_result = http.get_text("fribbels", ARTIFACTDATA_URL, max_age=max_age, refresh=refresh)
+    hero_result = http.get_text("fribbels", HERODATA_URL, max_age=max_age, refresh=refresh, validate=_json_object)
+    artifact_result = http.get_text(
+        "fribbels", ARTIFACTDATA_URL, max_age=max_age, refresh=refresh, validate=_json_object
+    )
     heroes, artifacts, warnings = parse(hero_result.json(), artifact_result.json())
     return FribbelsData(heroes=heroes, artifacts=artifacts, results=[hero_result, artifact_result], warnings=warnings)
+
+
+def _json_object(text: str) -> None:
+    """Validator applied before caching: the data files are JSON objects keyed by name."""
+    if not isinstance(json.loads(text), dict):
+        raise ValueError("expected a JSON object")
 
 
 def parse(herodata: object, artifactdata: object) -> tuple[list[FribbelsHero], list[FribbelsArtifact], list[str]]:
@@ -183,6 +199,9 @@ def parse(herodata: object, artifactdata: object) -> tuple[list[FribbelsHero], l
             continue
         try:
             heroes.append(FribbelsHero.parse(raw))
+            stray = sorted(k for k in raw if k in ("S1", "S2", "S3"))
+            if stray:
+                warnings.append(f"fribbels hero {name!r}: skill keys outside 'skills' ignored: {', '.join(stray)}")
         except ValidationError as exc:
             warnings.append(f"fribbels hero {name!r} skipped: {exc.errors()[0]['loc']} {exc.errors()[0]['msg']}")
     artifacts: list[FribbelsArtifact] = []
@@ -224,6 +243,7 @@ def to_facts(data: FribbelsData) -> tuple[list[Fact], SourceRun]:
     if non_hero:
         listed = ", ".join(non_hero)
         warnings.append(f"fribbels: {len(non_hero)} entry(ies) with non-hero codes skipped (monsters?): {listed}")
+    unknown_skill_keys: list[str] = []
     for hero in data.heroes:
         code = hero.code
         if not is_hero_code(code):
@@ -258,6 +278,8 @@ def to_facts(data: FribbelsData) -> tuple[list[Fact], SourceRun]:
             if slot_name not in ("S1", "S2", "S3"):
                 continue
             sid = skill_id(code, int(slot_name[1]))
+            # e.g. "S1 proc" on an S2 entry: the multipliers describe something else than the plain skill
+            skill_note = str(skill.get("note") or "")
             hit_types = skill.get("hitTypes")
             if isinstance(hit_types, list) and hit_types:
                 hit_list: list[JsonValue] = [str(h) for h in sorted(str(h) for h in hit_types)]
@@ -265,7 +287,9 @@ def to_facts(data: FribbelsData) -> tuple[list[Fact], SourceRun]:
             for key, field in _SKILL_FIELDS.items():
                 value = skill.get(key)
                 if isinstance(value, (int, float)) and not isinstance(value, bool):
-                    add(EntityType.SKILL, sid, field, value)
+                    add(EntityType.SKILL, sid, field, value, note=skill_note)
+            for key in sorted(set(skill) - _SKILL_KNOWN_KEYS):
+                unknown_skill_keys.append(f"{sid}:{key}")
             options = skill.get("options")
             if isinstance(options, list) and options:
                 add(EntityType.SKILL, sid, "variants", options, note="Fribbels skill options (e.g. soulburn/heal)")
@@ -283,6 +307,7 @@ def to_facts(data: FribbelsData) -> tuple[list[Fact], SourceRun]:
             "role_lock": [a.role or None for a in entries],
             "atk_min": [a.stats.attack for a in entries],
             "hp_min": [a.stats.health for a in entries],
+            "def_min": [a.stats.defense for a in entries],
         }
         disagreeing = [field for field, values in candidates.items() if len({repr(v) for v in values}) > 1]
         if disagreeing:
@@ -294,6 +319,11 @@ def to_facts(data: FribbelsData) -> tuple[list[Fact], SourceRun]:
         for field, values in candidates.items():
             if field not in disagreeing:
                 add(EntityType.ARTIFACT, code, field, values[0])
+
+    if unknown_skill_keys:
+        warnings.append(f"fribbels: unmapped skill fields ignored: {', '.join(unknown_skill_keys)}")
+    stale_reasons = sorted({r.stale_reason for r in data.results if r.stale and r.stale_reason})
+    warnings.extend(f"fribbels: stale cache served ({reason})" for reason in stale_reasons)
 
     for set_code, (fribbels_name, pieces) in SET_PIECES.items():
         add(EntityType.SET, set_code, "pieces", pieces, note=SET_SOURCE_NOTE)
@@ -310,6 +340,18 @@ def to_facts(data: FribbelsData) -> tuple[list[Fact], SourceRun]:
         warnings=tuple(warnings),
     )
     return facts, run
+
+
+def artifact_stat_hints(data: FribbelsData) -> dict[str, dict[str, float]]:
+    """Artifact code -> {"atk", "def", "hp"} at +0, for codes whose entries all agree (duplicates excluded)."""
+    hints: dict[str, dict[str, float]] = {}
+    conflicting: set[str] = set()
+    for art in data.artifacts:
+        values = {"atk": art.stats.attack, "def": art.stats.defense, "hp": art.stats.health}
+        if art.code in hints and hints[art.code] != values:
+            conflicting.add(art.code)
+        hints.setdefault(art.code, values)
+    return {code: values for code, values in hints.items() if code not in conflicting}
 
 
 def add_to_index(data: FribbelsData, index: NameIndex) -> None:
