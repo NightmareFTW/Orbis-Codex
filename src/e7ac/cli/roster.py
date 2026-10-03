@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
+import codecs
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Any, Final
+from typing import Annotated, Any, Final, NoReturn
 
 import typer
 from pydantic import ValidationError
-from sqlalchemy import Engine
+from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 
 from e7ac.catalog.facts import EntityType
@@ -17,7 +18,8 @@ from e7ac.catalog.resolve import ResolvedEntity
 from e7ac.catalog.store import current_snapshot as current_catalog
 from e7ac.catalog.store import find, load_entities, load_entity
 from e7ac.domain.codes import Element, HeroClass, Stat, is_hero_code
-from e7ac.domain.roster import FINAL_STAT_FIELDS, BuildSource, HeroBuild
+from e7ac.domain.roster import FINAL_STAT_FIELDS, MAX_INT, BuildSource, HeroBuild
+from e7ac.fileio import write_text_atomic
 from e7ac.paths import default_paths
 from e7ac.roster.backup import RosterExport, export_roster, import_roster
 from e7ac.roster.store import (
@@ -31,14 +33,30 @@ from e7ac.roster.store import (
     list_owned,
     set_arena_relevant,
 )
-from e7ac.roster.validation import Issue, Severity, validate_build
+from e7ac.roster.validation import CatalogContext, Issue, Severity, validate_build
 from e7ac.storage.db import open_database, session_scope
-from e7ac.storage.models import HeroSnapshotRow
+from e7ac.storage.models import CatalogEntityRow, HeroSnapshotRow
 
 roster_app = typer.Typer(help="Your heroes: builds with history, validation and JSON backup.")
 
 _SORT_FIELDS: Final = ("id", "name", "level", "cp", *FINAL_STAT_FIELDS)
-_PERCENT_FIELDS: Final = frozenset({"crit_chance", "crit_damage", "effectiveness", "effect_resistance", "dual_attack"})
+_PERCENT_FLAGS: Final = {
+    "crit_chance": "--cc",
+    "crit_damage": "--cd",
+    "effectiveness": "--eff",
+    "effect_resistance": "--er",
+    "dual_attack": "--dac",
+}
+_DEFAULT_PROGRESS: Final = {"stars": 6, "awakening": 6, "level": 60}
+_NO_CATALOG_NOTE: Final = (
+    "note: no catalog yet - catalog checks (known codes, class lock, imprint, EE, base stats) skipped; "
+    "run: e7 catalog sync"
+)
+
+
+def _fail(message: str, code: int = 2) -> NoReturn:
+    typer.echo(f"Error: {message}", err=True)
+    raise typer.Exit(code=code)
 
 
 def _engine() -> Engine:
@@ -47,10 +65,11 @@ def _engine() -> Engine:
     return open_database(paths.database)
 
 
-def _catalog_heroes(session: Session) -> dict[str, ResolvedEntity]:
+def _catalog_heroes(session: Session) -> dict[str, ResolvedEntity] | None:
+    """None when there is no catalog yet (callers must say so instead of silently filtering everything out)."""
     snapshot = current_catalog(session)
     if snapshot is None:
-        return {}
+        return None
     return {e.entity_id: e for e in load_entities(session, snapshot.id, EntityType.HERO)}
 
 
@@ -60,8 +79,7 @@ def _resolve_hero_code(session: Session, query: str) -> str:
         return query.strip()
     snapshot = current_catalog(session)
     if snapshot is None:
-        typer.echo("Error: no catalog yet - use a hero code (e.g. c2011) or run: e7 catalog sync", err=True)
-        raise typer.Exit(code=2)
+        _fail("no catalog yet - use a hero code (e.g. c2011) or run: e7 catalog sync")
     lookup = find(session, snapshot.id, query)
     heroes = [e for e in lookup.exact if e.entity_type is EntityType.HERO]
     if len(heroes) == 1:
@@ -74,8 +92,52 @@ def _resolve_hero_code(session: Session, query: str) -> str:
     raise typer.Exit(code=2)
 
 
-StatOption = Annotated[int | None, typer.Option(min=0)]
-PercentOption = Annotated[float | None, typer.Option(min=0, help="Percent, e.g. 100 for 100%.")]
+# ------------------------------------------------------------------------------------------------ JSON input
+
+
+def _read_json(path: Path, what: str) -> dict[str, Any]:
+    """A JSON object from a file written by hand, by e7, or redirected by PowerShell (UTF-16 with a BOM)."""
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        _fail(f"cannot read {what} {path}: {exc.strerror or exc}")
+    try:
+        data = json.loads(raw.decode(_encoding(raw)), parse_constant=_reject_constant)
+    except (UnicodeDecodeError, ValueError) as exc:
+        _fail(f"cannot read {what} {path}: {exc}")
+    if not isinstance(data, dict):
+        _fail(f"cannot read {what} {path}: expected a JSON object, found {type(data).__name__}")
+    return data
+
+
+def _encoding(raw: bytes) -> str:
+    if raw.startswith((codecs.BOM_UTF32_LE, codecs.BOM_UTF32_BE)):
+        return "utf-32"
+    if raw.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
+        return "utf-16"
+    return "utf-8-sig"
+
+
+def _reject_constant(name: str) -> Any:
+    raise ValueError(f"{name} is not a valid number here")
+
+
+def _build_json(path: Path, hero_code: str) -> dict[str, Any]:
+    """A build from --from-json; also accepts the output of `e7 roster show --json` ({"build": {...}})."""
+    data = _read_json(path, "build")
+    if "hero_code" not in data and isinstance(data.get("build"), dict):
+        data = dict(data["build"])
+    found = data.get("hero_code")
+    if found is not None and found != hero_code:
+        _fail(f"{path} is a build of {found!r}, not {hero_code!r} (nothing saved)")
+    data["hero_code"] = hero_code
+    return data
+
+
+# ------------------------------------------------------------------------------------------------ options
+
+
+StatOption = Annotated[int | None, typer.Option(min=0, max=MAX_INT)]
 
 
 def _stat_overrides(
@@ -100,13 +162,29 @@ def _stat_overrides(
         "effect_resistance": effect_resistance,
         "dual_attack": dual_attack,
     }
-    return {k: (v / 100 if k in _PERCENT_FIELDS else v) for k, v in values.items() if v is not None}
+    out: dict[str, Any] = {}
+    for key, value in values.items():
+        if value is None:
+            continue
+        if key in _PERCENT_FLAGS:
+            if 0 < value <= 1:
+                typer.echo(
+                    f"note: {_PERCENT_FLAGS[key]} {value:g} means {value:g}% - options take percent "
+                    f"(e.g. {_PERCENT_FLAGS[key]} 100 for 100%)",
+                    err=True,
+                )
+            value = value / 100
+        out[key] = value
+    return out
 
 
 def _apply(base: dict[str, Any], *, stats: dict[str, Any], **fields: Any) -> dict[str, Any]:
-    """Overlay the CLI options on a build dict. Final stats must be complete the first time they are given."""
+    """Overlay the CLI options on a build dict. Final stats must be complete the first time they are given.
+
+    A value typed by the user replaces any (OCR) confidence the old value had: the key is dropped (= 1.0)."""
     data = dict(base)
-    data.update({key: value for key, value in fields.items() if value is not None})
+    given = {key: value for key, value in fields.items() if value is not None}
+    data.update(given)
     if stats:
         current = data.get("final_stats")
         if current:
@@ -114,9 +192,12 @@ def _apply(base: dict[str, Any], *, stats: dict[str, Any], **fields: Any) -> dic
         else:
             missing = [f for f in FINAL_STAT_FIELDS if f not in stats]
             if missing:
-                typer.echo(f"Error: give all final stats the first time (missing: {', '.join(missing)})", err=True)
-                raise typer.Exit(code=2)
+                _fail(f"give all final stats the first time (missing: {', '.join(missing)})")
             data["final_stats"] = stats
+    replaced = {*given, *stats, *(f"final_stats.{key}" for key in stats)}
+    confidence = data.get("confidence")
+    if isinstance(confidence, dict):
+        data["confidence"] = {k: v for k, v in confidence.items() if k not in replaced}
     return data
 
 
@@ -124,31 +205,51 @@ def _validated_build(data: dict[str, Any]) -> HeroBuild:
     try:
         return HeroBuild.model_validate(data)
     except ValidationError as exc:
-        typer.echo(f"Error: invalid build:\n{exc}", err=True)
-        raise typer.Exit(code=2) from exc
+        _fail(f"invalid build:\n{exc}")
+
+
+# ------------------------------------------------------------------------------------------------ validation
 
 
 def _check(session: Session, build: HeroBuild, force: bool) -> None:
     issues = _issues(session, build)
     _print_issues(issues)
     if any(i.severity is Severity.ERROR for i in issues) and not force:
-        typer.echo("Not saved: fix the errors above (or use --force to store it anyway).", err=True)
-        raise typer.Exit(code=2)
+        _fail("not saved: fix the errors above (or use --force to store it anyway).")
 
 
-def _issues(session: Session, build: HeroBuild) -> list[Issue]:
+def _issues(session: Session, build: HeroBuild, *, quiet: bool = False) -> list[Issue]:
+    context = _catalog_context(session, build)
+    if context is None and not quiet:
+        typer.echo(_NO_CATALOG_NOTE, err=True)
+    return validate_build(build, context)
+
+
+def _catalog_context(session: Session, build: HeroBuild) -> CatalogContext | None:
     snapshot = current_catalog(session)
     if snapshot is None:
-        return validate_build(build)
+        return None
+    rows = session.execute(
+        select(CatalogEntityRow.entity_type, CatalogEntityRow.entity_id).where(
+            CatalogEntityRow.snapshot_id == snapshot.id
+        )
+    )
+    known: dict[str, set[str]] = {t.value: set() for t in EntityType}
+    for entity_type, entity_id in rows:
+        known.setdefault(entity_type, set()).add(entity_id)
     hero = load_entity(session, snapshot.id, EntityType.HERO, build.hero_code)
     artifact = load_entity(session, snapshot.id, EntityType.ARTIFACT, build.artifact.code) if build.artifact else None
-    return validate_build(
-        build,
+    return CatalogContext(
+        known_heroes=known[EntityType.HERO.value],
+        known_artifacts=known[EntityType.ARTIFACT.value],
+        known_sets=known[EntityType.SET.value],
         hero_role=_str(hero.value("role")) if hero else None,
         artifact_role_lock=_str(artifact.value("role_lock")) if artifact else None,
+        artifact_role_lock_status=artifact.status("role_lock").value if artifact else None,
         imprint_stat=_stat(hero.value("imprint.stat")) if hero else None,
         imprint_values=_float_map(hero.value("imprint.values")) if hero else None,
         ee_stat=_stat(hero.value("ee.stat")) if hero else None,
+        base_crit_damage=_number(hero.value("base.cri_dmg")) if hero else None,
     )
 
 
@@ -157,16 +258,19 @@ def _print_issues(issues: list[Issue]) -> None:
         typer.echo(f"  {issue.severity.value.upper():<7} {issue.rule:<20} {issue.field}: {issue.message}", err=True)
 
 
+# ------------------------------------------------------------------------------------------------ commands
+
+
 @roster_app.command("add")
 def add(
     hero: Annotated[str, typer.Argument(help="Hero code (c2011) or exact name.")],
-    stars: Annotated[int, typer.Option(min=1, max=6)] = 6,
-    awakening: Annotated[int, typer.Option(min=0, max=6)] = 6,
-    level: Annotated[int, typer.Option(min=1, max=60)] = 60,
+    stars: Annotated[int | None, typer.Option(min=1, max=6, help="Default 6 (said when assumed).")] = None,
+    awakening: Annotated[int | None, typer.Option(min=0, max=6, help="Default 6 (said when assumed).")] = None,
+    level: Annotated[int | None, typer.Option(min=1, max=60, help="Default 60 (said when assumed).")] = None,
     atk: StatOption = None,
-    defense: Annotated[int | None, typer.Option("--def", min=0)] = None,
+    defense: Annotated[int | None, typer.Option("--def", min=0, max=MAX_INT)] = None,
     hp: StatOption = None,
-    speed: Annotated[int | None, typer.Option("--spd", min=0)] = None,
+    speed: Annotated[int | None, typer.Option("--spd", min=0, max=MAX_INT)] = None,
     crit_chance: Annotated[float | None, typer.Option("--cc", min=0, help="Percent.")] = None,
     crit_damage: Annotated[float | None, typer.Option("--cd", min=0, help="Percent.")] = None,
     effectiveness: Annotated[float | None, typer.Option("--eff", min=0, help="Percent.")] = None,
@@ -175,22 +279,30 @@ def add(
     cp: StatOption = None,
     arena: Annotated[bool, typer.Option("--arena", help="Mark as arena-relevant.")] = False,
     note: Annotated[str, typer.Option()] = "",
-    from_json: Annotated[Path | None, typer.Option(help="Full build JSON (gear, artifact, imprint, EE...).")] = None,
+    from_json: Annotated[
+        Path | None, typer.Option(help="Build JSON (gear, artifact, imprint, EE...); options override it.")
+    ] = None,
     force: Annotated[bool, typer.Option(help="Store even if validation finds errors.")] = False,
 ) -> None:
     """Add an owned hero (manual entry). Rates are given in percent: --cc 100 means 100%."""
     engine = _engine()
     with session_scope(engine) as session:
         code = _resolve_hero_code(session, hero)
-        base: dict[str, Any] = {"hero_code": code, "stars": stars, "awakening": awakening, "level": level}
+        base: dict[str, Any] = {"hero_code": code}
         if from_json is not None:
-            base = {**json.loads(from_json.read_text(encoding="utf-8-sig")), "hero_code": code}
+            base = _build_json(from_json, code)
+        base.setdefault("source", BuildSource.MANUAL.value)
         base.setdefault("captured_at", datetime.now(UTC).isoformat())
-        base["source"] = BuildSource.MANUAL.value
+        given = {"stars": stars, "awakening": awakening, "level": level}
+        assumed = {k: v for k, v in _DEFAULT_PROGRESS.items() if given[k] is None and k not in base}
+        if assumed:
+            listed = ", ".join(f"{k} {v}" for k, v in assumed.items())
+            typer.echo(f"note: not given, assumed {listed} (use --stars/--awakening/--level)", err=True)
+            base.update(assumed)
         stats = _stat_overrides(
             atk, defense, hp, speed, crit_chance, crit_damage, effectiveness, effect_resistance, dual_attack
         )
-        build = _validated_build(_apply(base, stats=stats, cp=cp))
+        build = _validated_build(_apply(base, stats=stats, cp=cp, **given))
         _check(session, build, force)
         owned = add_owned_hero(session, build, arena_relevant=arena, note=note)
         typer.echo(f"Added #{owned.id} {code}")
@@ -203,9 +315,9 @@ def edit(
     awakening: Annotated[int | None, typer.Option(min=0, max=6)] = None,
     level: Annotated[int | None, typer.Option(min=1, max=60)] = None,
     atk: StatOption = None,
-    defense: Annotated[int | None, typer.Option("--def", min=0)] = None,
+    defense: Annotated[int | None, typer.Option("--def", min=0, max=MAX_INT)] = None,
     hp: StatOption = None,
-    speed: Annotated[int | None, typer.Option("--spd", min=0)] = None,
+    speed: Annotated[int | None, typer.Option("--spd", min=0, max=MAX_INT)] = None,
     crit_chance: Annotated[float | None, typer.Option("--cc", min=0, help="Percent.")] = None,
     crit_damage: Annotated[float | None, typer.Option("--cd", min=0, help="Percent.")] = None,
     effectiveness: Annotated[float | None, typer.Option("--eff", min=0, help="Percent.")] = None,
@@ -221,15 +333,14 @@ def edit(
         owned = _owned_or_exit(session, owned_id)
         row = current_snapshot(session, owned.id)
         if from_json is not None:
-            base = json.loads(from_json.read_text(encoding="utf-8-sig"))
+            base = _build_json(from_json, owned.hero_code)
+            base.setdefault("source", BuildSource.MANUAL.value)
         elif row is not None:
             base = build_from_row(session, row).model_dump(mode="json")
+            base["source"] = BuildSource.MANUAL.value
         else:
-            typer.echo("Error: this hero has no snapshot to edit; use --from-json", err=True)
-            raise typer.Exit(code=2)
-        base["hero_code"] = owned.hero_code
+            _fail("this hero has no snapshot to edit; use --from-json")
         base["captured_at"] = datetime.now(UTC).isoformat()
-        base["source"] = BuildSource.MANUAL.value
         stats = _stat_overrides(
             atk, defense, hp, speed, crit_chance, crit_damage, effectiveness, effect_resistance, dual_attack
         )
@@ -253,18 +364,23 @@ def list_cmd(
 ) -> None:
     """List owned heroes with their current final stats."""
     if sort not in _SORT_FIELDS:
-        typer.echo(f"Error: --sort must be one of: {', '.join(_SORT_FIELDS)}", err=True)
-        raise typer.Exit(code=2)
+        _fail(f"--sort must be one of: {', '.join(_SORT_FIELDS)}")
     engine = _engine()
     with session_scope(engine) as session:
         catalog = _catalog_heroes(session)
+        if catalog is None and (element or role):
+            _fail("--element/--class need the catalog: run e7 catalog sync")
         rows = []
+        unknown = 0
         for owned, snap in list_owned(session):
-            entity = catalog.get(owned.hero_code)
+            entity = (catalog or {}).get(owned.hero_code)
             name = entity.name if entity else owned.hero_code
-            if element and (entity is None or entity.value("element") != element.value):
+            if (element or role) and entity is None:
+                unknown += 1
                 continue
-            if role and (entity is None or entity.value("role") != role.value):
+            if element and entity is not None and entity.value("element") != element.value:
+                continue
+            if role and entity is not None and entity.value("role") != role.value:
                 continue
             if arena and not owned.arena_relevant:
                 continue
@@ -279,6 +395,10 @@ def list_cmd(
     for owned, snap, name in rows:
         typer.echo(_row_line(owned.id, owned.hero_code, name, snap, owned.arena_relevant))
     typer.echo(f"{len(rows)} hero(es)")
+    if catalog is None and search:
+        typer.echo("note: no catalog yet - --search only matched hero codes", err=True)
+    if unknown:
+        typer.echo(f"note: {unknown} hero(es) not in the catalog were left out by --element/--class", err=True)
 
 
 @roster_app.command("show")
@@ -292,8 +412,8 @@ def show(owned_id: Annotated[int, typer.Argument()], as_json: Annotated[bool, ty
             typer.echo(f"#{owned.id} {owned.hero_code} has no snapshot", err=True)
             raise typer.Exit(code=1)
         build = build_from_row(session, row)
-        catalog = _catalog_heroes(session)
-        issues = _issues(session, build)
+        catalog = _catalog_heroes(session) or {}
+        issues = _issues(session, build, quiet=as_json)
     if as_json:
         typer.echo(json.dumps({"id": owned.id, "uid": owned.uid, "build": build.model_dump(mode="json")}, indent=2))
         return
@@ -347,7 +467,7 @@ def history_cmd(owned_id: Annotated[int, typer.Argument()]) -> None:
 
 @roster_app.command("validate")
 def validate_cmd(owned_id: Annotated[int, typer.Argument()]) -> None:
-    """Re-check the current build against the rules (and the catalog, when synced)."""
+    """Re-check the current build against the rules (and the catalog, when synced). Exit 1 if there are errors."""
     engine = _engine()
     with session_scope(engine) as session:
         owned = _owned_or_exit(session, owned_id)
@@ -376,30 +496,69 @@ def arena_cmd(
 
 
 @roster_app.command("export")
-def export_cmd(target: Annotated[Path, typer.Argument(help="JSON file to write.")]) -> None:
-    """Back up the whole roster (every snapshot) to a JSON file."""
+def export_cmd(
+    target: Annotated[Path, typer.Argument(help="JSON file to write.")],
+    force: Annotated[bool, typer.Option(help="Overwrite the file if it exists.")] = False,
+) -> None:
+    """Back up the whole roster (every snapshot) to a JSON file (written atomically)."""
+    paths = default_paths()
+    database = paths.database.resolve()
+    protected = {database, *(database.with_name(database.name + suffix) for suffix in ("-wal", "-shm", "-journal"))}
+    if target.resolve() in protected:
+        _fail(f"{target} is the roster database itself; choose another file")
+    if target.is_dir():
+        _fail(f"{target} is a folder; give a file name, e.g. {target / 'roster-backup.json'}")
+    if target.exists() and not force:
+        _fail(f"{target} already exists; use --force to overwrite it")
     engine = _engine()
     with session_scope(engine) as session:
         data = export_roster(session, datetime.now(UTC))
-    target.write_text(data.model_dump_json(indent=2), encoding="utf-8")
+    text = data.model_dump_json(indent=2)
+    RosterExport.model_validate_json(text)  # what we write must be readable back (no lossy values)
+    try:
+        write_text_atomic(target, text + "\n")
+    except OSError as exc:
+        _fail(f"cannot write {target}: {exc.strerror or exc}")
     typer.echo(f"Exported {len(data.heroes)} hero(es), {sum(len(h.snapshots) for h in data.heroes)} snapshot(s)")
 
 
 @roster_app.command("import")
 def import_cmd(source: Annotated[Path, typer.Argument(help="JSON file written by e7 roster export.")]) -> None:
-    """Restore a roster backup. Idempotent: entries already present (same uid) are skipped."""
+    """Restore or merge a roster backup. Idempotent: entries already present (same uid) are skipped.
+
+    Imported builds are validated; problems are reported but do not block the import (backups may hold forced
+    builds). Any conflict (same uid for a different hero) aborts the whole import."""
+    raw = _read_json(source, "backup")
     try:
-        data = RosterExport.model_validate_json(source.read_text(encoding="utf-8-sig"))
-    except (OSError, ValidationError) as exc:
-        typer.echo(f"Error: cannot read backup {source}: {exc}", err=True)
-        raise typer.Exit(code=2) from exc
+        data = RosterExport.model_validate(raw)
+    except ValidationError as exc:
+        _fail(f"cannot read backup {source}: {exc}")
     engine = _engine()
     with session_scope(engine) as session:
-        report = import_roster(session, data)
+        try:
+            report = import_roster(session, data)
+        except RosterError as exc:
+            _fail(f"backup {source} conflicts with the roster (nothing imported): {exc}")
+        flagged = []
+        for snapshot_id in report.added_snapshot_ids:
+            row = session.get(HeroSnapshotRow, snapshot_id)
+            if row is None:
+                continue
+            issues = _issues(session, build_from_row(session, row), quiet=True)
+            if issues:
+                errors = sum(i.severity is Severity.ERROR for i in issues)
+                flagged.append(
+                    f"#{row.owned_hero_id} snapshot {row.id}: {len(issues)} issue(s), {errors} error(s) "
+                    f"(e7 roster validate {row.owned_hero_id})"
+                )
     typer.echo(
         f"Imported {report.heroes_added} hero(es), {report.snapshots_added} snapshot(s); "
         f"{report.snapshots_skipped} already present"
     )
+    if report.current_changed:
+        typer.echo(f"Current build updated from newer backup snapshots for {len(report.current_changed)} hero(es)")
+    for line in flagged:
+        typer.echo(f"  warning: {line}", err=True)
 
 
 def _owned_or_exit(session: Session, owned_id: int) -> Any:
@@ -444,6 +603,10 @@ def _stat(value: object) -> Stat | None:
     if isinstance(value, str) and value in Stat._value2member_map_:
         return Stat(value)
     return None
+
+
+def _number(value: object) -> float | None:
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
 
 
 def _float_map(value: object) -> dict[str, float] | None:

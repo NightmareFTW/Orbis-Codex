@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+from hypothesis import assume
 from hypothesis import strategies as st
 
 from e7ac.domain.codes import Stat
@@ -28,9 +29,31 @@ SET_CODES = ["set_cri_dmg", "set_cri", "set_speed", "set_max_hp", "set_att", "se
 
 
 def stat_value(stat: Stat) -> st.SearchStrategy[float]:
+    """Rates as fractions (> 1% so that the same value typed as percent is always caught), flats as whole units."""
     if stat.is_rate:
-        return st.floats(min_value=0.01, max_value=1.0, allow_nan=False).map(lambda v: round(v, 4))
+        return st.floats(min_value=0.011, max_value=1.0, allow_nan=False).map(lambda v: round(v, 4))
     return st.integers(min_value=1, max_value=3000).map(float)
+
+
+_IMPRINT_STATS = [Stat.ATK_PERCENT, Stat.HP_PERCENT, Stat.DEF_PERCENT, Stat.CRIT_CHANCE, Stat.EFFECTIVENESS, Stat.SPEED]
+_EE_STATS = [Stat.CRIT_CHANCE, Stat.SPEED, Stat.ATK_PERCENT, Stat.EFFECT_RESISTANCE]
+
+
+@st.composite
+def imprints(draw: st.DrawFn) -> Imprint:
+    stat = draw(st.sampled_from(_IMPRINT_STATS))
+    return Imprint(grade=draw(st.sampled_from(list(ImprintGrade))), stat=stat, value=draw(stat_value(stat)))
+
+
+@st.composite
+def exclusive_equipments(draw: st.DrawFn) -> ExclusiveEquipment:
+    """Any combination of known/unknown fields, as OCR may give (but never all unknown: that is `None`)."""
+    stat = draw(st.none() | st.sampled_from(_EE_STATS))
+    value = draw(st.none() | stat_value(stat or Stat.CRIT_CHANCE))
+    code = draw(st.none() | st.from_regex(r"ek_c[0-9]{6}_[0-9]{2}", fullmatch=True))
+    text = draw(st.none() | st.text(max_size=40))
+    assume(any(v is not None for v in (stat, value, code, text)))
+    return ExclusiveEquipment(stat=stat, value=value, option_code=code, option_text=text)
 
 
 def min_subs(enhance: int, grade: GearGrade) -> int:
@@ -97,19 +120,12 @@ def builds(draw: st.DrawFn) -> HeroBuild:
         awakening=draw(st.integers(0, stars)),
         level=draw(st.integers(1, stars * 10)),
         skills=SkillEnhancements(s1=draw(st.integers(0, 5)), s2=draw(st.integers(0, 5)), s3=draw(st.integers(0, 5))),
-        imprint=draw(
+        imprint=draw(st.none() | imprints()),
+        exclusive_equipment=draw(st.none() | exclusive_equipments()),
+        artifact=draw(
             st.none()
-            | st.builds(
-                Imprint,
-                grade=st.sampled_from(list(ImprintGrade)),
-                stat=st.just(Stat.ATK_PERCENT),
-                value=st.sampled_from([0.06, 0.18]),
-            )
+            | st.builds(ArtifactRef, code=st.sampled_from(["efa22", "efw37", "ef506"]), level=st.integers(0, 30))
         ),
-        exclusive_equipment=draw(
-            st.none() | st.builds(ExclusiveEquipment, stat=st.just(Stat.CRIT_CHANCE), value=st.just(0.12))
-        ),
-        artifact=draw(st.none() | st.builds(ArtifactRef, code=st.just("efa22"), level=st.integers(0, 30))),
         gear={slot: draw(gears(slot)) for slot in slots},
         final_stats=final,
         cp=draw(st.none() | st.integers(0, 400000)),

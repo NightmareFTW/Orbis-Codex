@@ -7,9 +7,7 @@ writes are atomic so a crash cannot leave a half-written file.
 from __future__ import annotations
 
 import json
-import os
 import re
-import tempfile
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, Final
@@ -17,6 +15,7 @@ from typing import Any, Final
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
 from e7ac.domain.world import World
+from e7ac.fileio import write_text_atomic
 
 SETTINGS_SCHEMA_VERSION: Final = 1
 _RESOLUTION_RE: Final = re.compile(r"^(\d{3,5})x(\d{3,5})$")
@@ -112,17 +111,7 @@ def save_settings(settings: Settings, path: Path) -> None:
     On failure the previous file is left untouched and the temp file is removed; the OSError propagates.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = json.dumps(settings.model_dump(mode="json"), indent=2, sort_keys=True) + "\n"
-    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
-    tmp = Path(tmp_name)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
-            handle.write(payload)
-            handle.flush()
-            os.fsync(handle.fileno())
-        tmp.replace(path)
-    finally:
-        tmp.unlink(missing_ok=True)
+    write_text_atomic(path, json.dumps(settings.model_dump(mode="json"), indent=2, sort_keys=True) + "\n")
 
 
 def with_value(settings: Settings, key: str, value: str) -> Settings:

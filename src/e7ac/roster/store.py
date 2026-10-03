@@ -145,6 +145,13 @@ def list_owned(session: Session) -> list[tuple[OwnedHeroRow, HeroSnapshotRow | N
     return [(owned, current.get(owned.id)) for owned in owned_rows]
 
 
+def make_current(session: Session, owned_id: int, snapshot: HeroSnapshotRow) -> None:
+    """Move the 'current' marker (clear all first: the partial unique index allows one current row per hero)."""
+    session.execute(update(HeroSnapshotRow).where(HeroSnapshotRow.owned_hero_id == owned_id).values(is_current=False))
+    snapshot.is_current = True
+    session.flush()
+
+
 def set_arena_relevant(session: Session, owned_id: int, value: bool) -> None:
     get_owned(session, owned_id).arena_relevant = value
     session.flush()
@@ -209,8 +216,9 @@ def _gear_row(session: Session, gear: Gear) -> GearRow:
         query = query.where(GearRow.external_id.is_(None))
     else:
         query = query.where(GearRow.external_id == gear.external_id)
-    existing = session.scalars(query).first()
-    if existing is not None and existing.score == gear.score:
+    query = query.where(GearRow.score.is_(None) if gear.score is None else GearRow.score == gear.score)
+    existing = session.scalars(query.order_by(GearRow.id)).first()
+    if existing is not None:
         return existing
     row = GearRow(
         slot=gear.slot.value,

@@ -20,8 +20,15 @@ Checkboxes: `[x]` done · `[ ]` pending. Milestones are small vertical slices; o
     and corroborated). A multi-agent adversarial review was run and its confirmed findings fixed (SPEC D26–D30).
   - **How to try:** `.\OrbisCodex.cmd catalog sync` (≈20 s the first time, then cached), then
     `.\OrbisCodex.cmd catalog show "Blood Blade Karin"`, `... catalog conflicts --type skill`, `... catalog coverage`.
-- [ ] **M3 Roster core** — domain models, DB schema + first Alembic migration, validation rules (slot ↔ main, substats, ranges, caps), immutable snapshots + history, JSON export/import; `e7 roster add|show|list|history|export|import`.
+- [x] **M3 Roster core** — domain models, DB schema + first Alembic migration, validation rules (slot ↔ main, substats, ranges, caps), immutable snapshots + history, JSON export/import; `e7 roster add|show|list|history|export|import`.
   - Acceptance: property tests (hypothesis) for stat maths/validation; round-trip export → import is lossless; editing creates a new snapshot.
+  - ✅ Done 2026-10-03, followed by a multi-agent adversarial review: 39 confirmed findings fixed (SPEC D31–D35). Every
+    reported test gap is covered, and 13 deliberate mutations of the code are all caught by the tests.
+    Deferred: the consistency check between final stats and their components moves to M4, because it needs the
+    Fribbels save to settle NV-10.
+  - **How to try:** `.\OrbisCodex.cmd roster add "Blood Blade Karin" --atk 4116 --def 829 --hp 12819 --spd 133 --cc 100
+    --cd 357 --eff 0 --er 21 --dac 3 --cp 141750` (after `catalog sync`), then `... roster edit 1 --spd 140`,
+    `... roster history 1`, `... roster export roster-backup.json`.
 - [ ] **M4 Fribbels save import** — schema derived from the user's real save file; strict models + raw passthrough; gear dedupe by id/fingerprint; mapping Fribbels names → hero codes with margin rule; `e7 import fribbels <file>`.
   - Acceptance: user's file imports with a report (imported/skipped/ambiguous); unknown fields preserved; test skips cleanly without the file; CP samples feed NV-06.
 - [ ] **M5 OCR spike & benchmark** (`spikes/ocr_bench/`) — template digits vs RapidOCR vs Windows OCR on the fixtures (+ synthetic rescales); Tesseract excluded (separate installer, D17).

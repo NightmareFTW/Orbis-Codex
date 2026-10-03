@@ -66,5 +66,12 @@ Key data facts (details in docs/DATA_SOURCES.md):
     partial syncs never become current.
   - `storage` (SQLAlchemy + Alembic, SQLAlchemy-emitted BEGIN) and `e7 catalog sync|show|conflicts|coverage|snapshots`.
   - Real-data quirks are in DATA_SOURCES (positional artifact stats, `0.0%` = unknown effect values, duplicate names/codes).
-- **M3 Roster core — in progress** (code + tests in place; docs/review pending).
+- **M3 Roster core — done**:
+  - `domain/roster.py`: builds, gear, final stats; NaN/∞ refused; codes matched exactly.
+  - `roster/{validation,store,backup}.py`, with migrations 0002 and 0003.
+  - `e7 roster add|edit|list|show|history|validate|arena|export|import`.
+  - Severity policy (SPEC D31): only data-contract rules (units, positivity) are errors; every non-verified game rule
+    is a warning.
+  - Reviewed by a multi-agent adversarial review (39 findings fixed; the tests catch 13 deliberate code mutations).
+- Next milestone: **M4 Fribbels save import** (needs the user's save file, SPEC Q2).
 - Still missing: screenshots + Fribbels save file (SPEC Q2) — needed from M4/M6. The repo is **public**: never commit them.

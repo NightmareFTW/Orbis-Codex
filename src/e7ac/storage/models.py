@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, TypeDecorator
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, TypeDecorator, text
 from sqlalchemy.engine import Dialect
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -89,7 +89,11 @@ class HeroSnapshotRow(Base):
     """Immutable build snapshot; editing a hero adds a new row and moves `is_current`."""
 
     __tablename__ = "hero_snapshot"
-    __table_args__ = (Index("ix_hero_snapshot_owned_hero_id", "owned_hero_id"),)
+    __table_args__ = (
+        Index("ix_hero_snapshot_owned_hero_id", "owned_hero_id"),
+        # at most one current snapshot per owned hero (migration 0003)
+        Index("ux_hero_snapshot_current", "owned_hero_id", unique=True, sqlite_where=text("is_current = 1")),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     uid: Mapped[str] = mapped_column(String(32), nullable=False, unique=True)

@@ -15,6 +15,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from e7ac.domain.codes import Stat, is_artifact_code, is_hero_code, is_set_code
 
+# Storage contract (SQLite INTEGER is 64-bit; we stay well inside it). Not a game number: "too big to be real data".
+MAX_INT: Final = 2**31 - 1
+
 
 class GearSlot(StrEnum):
     """In-game layout: left column weapon/helmet/armor, right column necklace/ring/boots."""
@@ -56,19 +59,13 @@ class BuildSource(StrEnum):
 
 
 class _Frozen(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    # NaN/inf are never game data; SQLite would store NaN as NULL and JSON export would write null (lossy).
+    model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 
 
 class StatValue(_Frozen):
     stat: Stat
     value: float
-
-    @field_validator("value")
-    @classmethod
-    def _finite(cls, value: float) -> float:
-        if value != value or value in (float("inf"), float("-inf")):
-            raise ValueError("stat value must be finite")
-        return value
 
 
 class Substat(_Frozen):
@@ -87,7 +84,7 @@ class Gear(_Frozen):
     enhance: int = Field(ge=0, le=15)
     main: StatValue
     substats: tuple[Substat, ...] = ()
-    score: int | None = Field(default=None, ge=0)
+    score: int | None = Field(default=None, ge=0, le=MAX_INT)
     external_id: str | None = None
     """Id in the source it came from (e.g. Fribbels item id), used to recognise the same physical piece."""
 
@@ -112,10 +109,10 @@ class Gear(_Frozen):
 class FinalStats(_Frozen):
     """Displayed Hero Info stats (final values)."""
 
-    atk: int = Field(ge=0)
-    defense: int = Field(ge=0)
-    hp: int = Field(ge=0)
-    speed: int = Field(ge=0)
+    atk: int = Field(ge=0, le=MAX_INT)
+    defense: int = Field(ge=0, le=MAX_INT)
+    hp: int = Field(ge=0, le=MAX_INT)
+    speed: int = Field(ge=0, le=MAX_INT)
     crit_chance: float = Field(ge=0)
     crit_damage: float = Field(ge=0)
     effectiveness: float = Field(ge=0)
@@ -133,11 +130,19 @@ class Imprint(_Frozen):
 
 
 class ExclusiveEquipment(_Frozen):
+    """At least one field must be known; use `exclusive_equipment=None` for "no EE / not read"."""
+
     stat: Stat | None = None
     value: float | None = None
     option_code: str | None = None
     """Stove EE option code (e.g. 'ek_c201101_01') when known."""
     option_text: str | None = None
+
+    @model_validator(mode="after")
+    def _not_empty(self) -> ExclusiveEquipment:
+        if self.stat is None and self.value is None and self.option_code is None and self.option_text is None:
+            raise ValueError("an exclusive equipment needs at least one known field (use null for none)")
+        return self
 
 
 class ArtifactRef(_Frozen):
@@ -171,7 +176,7 @@ class HeroBuild(_Frozen):
     artifact: ArtifactRef | None = None
     gear: dict[GearSlot, Gear] = {}
     final_stats: FinalStats | None = None
-    cp: int | None = Field(default=None, ge=0)
+    cp: int | None = Field(default=None, ge=0, le=MAX_INT)
     captured_at: datetime
     source: BuildSource
     confidence: dict[str, float] = {}

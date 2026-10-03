@@ -390,8 +390,10 @@ erDiagram
 ```
 
 Notes:
-- **History**: `HERO_SNAPSHOT` rows are immutable; editing creates a new snapshot and flips `is_current`.
-  `GEAR` rows are deduplicated by `fingerprint` (slot, set, grade, level, main, substats); Fribbels items keep `external_id`.
+- **History**: `HERO_SNAPSHOT` rows are immutable; editing creates a new snapshot and flips `is_current`. A partial unique
+  index allows at most one current snapshot per owned hero (SPEC D32).
+  `GEAR` rows are shared when (`fingerprint`, `external_id`, `score`) are equal; the fingerprint covers slot, set, grade,
+  level, enhance, main and every substat with rolls/modified/reforged (SPEC D35).
 - `final_stats` (displayed) are the combat truth; components are kept for validation and what-ifs.
 - `field_status` / `status` columns carry provenance into the predictor's confidence computation.
 

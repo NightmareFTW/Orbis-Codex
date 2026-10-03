@@ -112,18 +112,19 @@ _CLASS_NAMES: Final = {
     HeroClass.SOUL_WEAVER: "Soul Weaver",
 }
 
-HERO_CODE_RE: Final = re.compile(r"^c\d{4}$")
-ARTIFACT_CODE_RE: Final = re.compile(r"^ef[0-9a-z]{2,8}$")
-SET_CODE_RE: Final = re.compile(r"^set_[a-z_]+$")
+# fullmatch + explicit ASCII classes: no trailing newline ('c2011\n') or non-ASCII (fullwidth) digits slip through
+HERO_CODE_RE: Final = re.compile(r"c[0-9]{4}")
+ARTIFACT_CODE_RE: Final = re.compile(r"ef[0-9a-z]{2,8}")
+SET_CODE_RE: Final = re.compile(r"set_[a-z_]+")
 
 
 def is_hero_code(value: str) -> bool:
-    return bool(HERO_CODE_RE.match(value))
+    return bool(HERO_CODE_RE.fullmatch(value))
 
 
 def is_artifact_code(value: str) -> bool:
-    return bool(ARTIFACT_CODE_RE.match(value))
+    return bool(ARTIFACT_CODE_RE.fullmatch(value))
 
 
 def is_set_code(value: str) -> bool:
-    return bool(SET_CODE_RE.match(value))
+    return bool(SET_CODE_RE.fullmatch(value))
