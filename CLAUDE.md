@@ -30,6 +30,7 @@ uv run ruff check . && uv run ruff format --check .
 uv run mypy                  # strict, src + tests
 .\OrbisCodex.cmd doctor      # Windows end-user launcher (installs uv -> Python 3.12 -> deps; double-click = doctor + pause)
 python spikes/stove_probe.py c2011 --world world_global   # Stove API probe (spike)
+actionlint .github/workflows/ci.yml   # validate workflow edits before pushing (a broken file runs 0 jobs)
 ```
 Tests isolate the app home via `E7AC_HOME` (autouse fixture in `tests/conftest.py`). Markers (logic in `tests/markers.py`):
 `windows`, `network`, `fixtures("screenshots/x.png", …)` — skipped automatically when not applicable.

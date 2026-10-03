@@ -39,12 +39,13 @@ jobs:
     runs-on: windows-latest
     env:
       UV_PYTHON_PREFERENCE: only-managed
-      E7AC_HOME: ${{ runner.temp }}\e7home
     steps:
       - uses: actions/checkout@v7
-      - name: Assert uv is not preinstalled (so the install path is really exercised)
+      - name: Assert uv is not preinstalled (so the install path is really exercised); isolate the app home
         shell: pwsh
-        run: if (Get-Command uv -ErrorAction SilentlyContinue) { throw 'uv is preinstalled on the runner; install path not tested' }
+        run: |
+          if (Get-Command uv -ErrorAction SilentlyContinue) { throw 'uv is preinstalled on the runner; install path not tested' }
+          "E7AC_HOME=$env:RUNNER_TEMP\e7home" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       - name: .\OrbisCodex.cmd --version (installs uv, downloads Python 3.12, syncs locked deps)
         shell: cmd
         run: call .\OrbisCodex.cmd --version
