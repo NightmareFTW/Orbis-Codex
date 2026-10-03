@@ -1,0 +1,82 @@
+[project]
+name = "orbis-codex"
+dynamic = ["version"]
+description = "E7 Arena Companion: local, read-only roster tracker and Arena win-probability overlay for Epic Seven."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.12"
+authors = [{ name = "NightmareFTW" }]
+classifiers = [
+    "Private :: Do Not Upload",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: Microsoft :: Windows",
+]
+dependencies = [
+    "platformdirs>=4.2",
+    "pydantic>=2.7",
+    "typer>=0.12",
+]
+
+[project.scripts]
+e7 = "e7ac.cli.app:main"
+
+[dependency-groups]
+dev = [
+    "hypothesis>=6.100",
+    "mypy>=1.10",
+    "pytest>=8.2",
+    "ruff>=0.5",
+]
+
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "src/e7ac/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/e7ac"]
+
+# ---------------------------------------------------------------- tooling
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+src = ["src", "tests"]
+extend-exclude = ["spikes"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",   # pycodestyle
+    "F",        # pyflakes
+    "I",        # isort
+    "N",        # pep8-naming
+    "UP",       # pyupgrade
+    "B",        # bugbear
+    "SIM",      # simplify
+    "PTH",      # use pathlib
+    "RUF",      # ruff-specific
+]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["src", "tests"]
+plugins = ["pydantic.mypy"]
+warn_unreachable = true
+
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+warn_required_dynamic_aliases = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+markers = [
+    "windows: needs Windows (skipped elsewhere)",
+    "fixtures: needs git-ignored fixtures under fixtures/ (skipped when missing)",
+    "network: talks to the network (skipped unless E7AC_NETWORK_TESTS=1)",
+]

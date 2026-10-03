@@ -11,9 +11,9 @@ fixtures/private/
 !docs/**/*.png
 
 # Local runtime data (DB, caches, captures)
-data/
-.cache/
-captures/
+/data/
+/.cache/
+/captures/
 *.sqlite3
 *.db
 

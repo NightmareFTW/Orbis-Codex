@@ -22,15 +22,16 @@
 - Polite scraping: cache, ≤ 1 req/s, honest User-Agent, robots/ToS. Ask before adding big dependencies.
 
 ## Commands
-Phase 0 (now): no application code yet. Spike: `python spikes/stove_probe.py c2011 --world world_global`.
-From M1 (planned):
 ```bash
-uv sync                      # install
-uv run e7 --help             # CLI
-uv run pytest                # tests (golden/fixture tests skip if fixtures are missing)
+uv sync                      # install (dev group included)
+uv run e7 --help             # CLI: --version, doctor, paths, config show|set|options
+uv run pytest                # tests (fixture tests skip if fixtures are missing; network tests need E7AC_NETWORK_TESTS=1)
 uv run ruff check . && uv run ruff format --check .
-uv run mypy                  # strict on core packages
+uv run mypy                  # strict, src + tests
+OrbisCodex.cmd doctor        # Windows end-user launcher (bootstraps uv -> Python 3.12 -> deps)
+python spikes/stove_probe.py c2011 --world world_global   # Stove API probe (spike)
 ```
+Tests isolate the app home via `E7AC_HOME` (autouse fixture in `tests/conftest.py`). Markers: `windows`, `fixtures`, `network`.
 
 ## Architecture summary (see docs/ARCHITECTURE.md)
 Python 3.12 + uv · pydantic v2 domain · SQLite via SQLAlchemy 2.0 + Alembic · httpx · Typer CLI `e7` ·
@@ -53,6 +54,8 @@ Key data facts (details in docs/DATA_SOURCES.md):
 - `fixtures/README.md` — expected (git-ignored) fixture files
 
 ## Current status
-- **Phase 0 delivered (2026-10-03); waiting for user approval** and answers to SPEC §10 (Q1–Q7).
-- Fixtures (`fixtures/screenshots/*.png`) and the Fribbels save file are not yet available in this environment.
-- Next milestone after approval: **M1 Skeleton & tooling**.
+- Phase 0 approved 2026-10-03 (SPEC D11; user answers recorded as D10–D19).
+- **M1 Skeleton & tooling — done**: package `e7ac` (`paths`, `settings`, `doctor`, `domain.world`, `cli.app`),
+  Windows launcher `OrbisCodex.cmd` → `scripts/bootstrap.ps1`, GitHub Actions (Ubuntu + Windows + launcher smoke test), MIT.
+- Still missing: screenshots + Fribbels save file (SPEC Q2) — needed from M4/M6.
+- Next milestone: **M2 Catalog v1**.

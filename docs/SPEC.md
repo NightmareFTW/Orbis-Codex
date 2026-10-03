@@ -13,7 +13,13 @@ Opponents' heroes are visible in Arena; their stats and gear are not → assumed
 (Lv60, 6★ awakened, fully equipped heroes, per region).
 
 ## 2. User context
-- Plays on **[CLIENT — open question Q1]**, server **[REGION — Q1]**, game in English, **[RESOLUTION / windowed|borderless — Q1]**.
+- Plays on the **Stove PC client** today; must also support the upcoming **Steam** release and stay open to Google Play Games
+  and emulators → the game client is a configurable *client profile* (window title/process, capture hints), never hard-coded.
+- Server **Global** (`world_global`) for now; region must be switchable in settings.
+- Game in English, **borderless windowed fullscreen**; must work at any resolution/aspect ratio (no fixed-pixel assumptions).
+- Arena: plays mostly on **auto**; league/rank varies a lot → the model must work for **all leagues** (no fixed rank prior).
+- Owns ~90% of the roster and uses many heroes → no hero priority list; kit coverage must be broad (generic kits + priority
+  by observed frequency).
 - Machine: Windows laptop, i7-12700H, 16 GB RAM, RTX 3050 Ti.
 - Roster: hundreds of heroes → incremental import and an "arena-relevant" flag.
 
@@ -49,7 +55,10 @@ extra turns, counters, dual attacks, revives, soulburn; the defence is played by
      classifier (templates bootstrapped from screenshots + labelling tool) + "%" detection; set from set icon; grade from frame
      colour; slot from position (left: weapon, helmet, armor; right: necklace, ring, boots); hero name via OCR + catalog match;
      per-field confidence; low confidence → review screen (crop next to parsed value).
-     **Scan mode**: passive watching while the user browses heroes; auto-capture each new Hero Info screen; dedupe by hero + CP.
+     **Scan via overlay**: a small overlay with a **"Scan hero"** button (one capture per click) and an optional passive
+     watch mode that auto-captures each new Hero Info screen while the user browses heroes; dedupe by hero + CP.
+     The same overlay later gets **"Scan Arena teams"** (Phase 5). Clicking our overlay is input to *our* window only — nothing
+     is ever sent to the game.
      **Batch import** from a folder of screenshots. Incremental; "arena-relevant" flag.
   2. **Fribbels save file import** (schema derived from the user's real file).
   3. **Manual create/edit form** with validation.
@@ -128,29 +137,41 @@ Cross-checks done without the images (details in MECHANICS.md):
 - Python package `e7ac` (E7 Arena Companion), distribution `orbis-codex`, CLI command `e7`.
 - Stove refresh: weekly after Thu 03:00 UTC, lazy per hero, on demand; ≤ 1 req/s.
 - Logging: structured, local only; no telemetry.
+- Settings file: `%LOCALAPPDATA%\OrbisCodex\settings.json` (client, world/region, display mode, resolution; opponent
+  profile added in M10). Missing file = defaults; corrupt file = explicit error, never a silent reset.
+- Install/run: a Windows launcher (`OrbisCodex.cmd` → `scripts/bootstrap.ps1`) installs **uv** if missing, lets uv fetch
+  Python 3.12 and all dependencies on first start (`uv sync --frozen`), then runs the app. No manual dependency installs;
+  no dependency that needs a separate system installer (→ Tesseract excluded).
 
 ## 9. Decisions log
 | # | Date | Decision | Rationale | Status |
 |---|---|---|---|---|
-| D1 | 2026-10-03 | Stove data via its public JSON API (`api.onstove.com/pub-meta/v1.0/epic7/guide/…`) with httpx; no Playwright | Page is a Nuxt SPA fetching plain JSON; no auth | proposed |
-| D2 | 2026-10-03 | Use `hero-detail-for-game` with `strategy_type=0` (general equipment statistics) for builds | Same call the in-game guide link uses; has histograms + top combos | proposed |
-| D3 | 2026-10-03 | Histogram edges = equal-width between UI label bounds, edge bins open-ended; configurable; status `assumed` | Inferred from front-end constants + equal totals | proposed |
-| D4 | 2026-10-03 | Catalog = fact store with per-field provenance merged from Stove (official) + Fribbels + e7calc (+ epic7db for text) | No single complete source | proposed |
-| D5 | 2026-10-03 | SQLAlchemy 2.0 typed ORM + Alembic, pydantic for domain (not SQLModel) | mypy strict, history tables | proposed |
-| D6 | 2026-10-03 | opencv-python-**headless** | Avoid Qt plugin clash with PySide6 | proposed |
-| D7 | 2026-10-03 | OCR engine chosen by benchmark on the fixtures (M5) | Requirement | proposed |
-| D8 | 2026-10-03 | Default opponent profile: typical (P50), overridable; CP calibration when CP is visible | Neutral default; Arena-specific data unavailable | proposed |
-| D9 | 2026-10-03 | Real Stove responses git-ignored; unit tests use synthetic responses mimicking the schema | ToS / redistribution caution | proposed |
-| D10 | 2026-10-03 | Region default `world_global` until the user answers Q1 | Placeholder | proposed |
+| D1 | 2026-10-03 | Stove data via its public JSON API (`api.onstove.com/pub-meta/v1.0/epic7/guide/…`) with httpx; no Playwright | Page is a Nuxt SPA fetching plain JSON; no auth | accepted |
+| D2 | 2026-10-03 | Use `hero-detail-for-game` with `strategy_type=0` (general equipment statistics) for builds | Same call the in-game guide link uses; has histograms + top combos | accepted |
+| D3 | 2026-10-03 | Histogram edges = equal-width between UI label bounds, edge bins open-ended; configurable; status `assumed` | Inferred from front-end constants + equal totals | accepted |
+| D4 | 2026-10-03 | Catalog = fact store with per-field provenance merged from Stove (official) + Fribbels + e7calc (+ epic7db for text) | No single complete source | accepted |
+| D5 | 2026-10-03 | SQLAlchemy 2.0 typed ORM + Alembic, pydantic for domain (not SQLModel) | mypy strict, history tables | accepted |
+| D6 | 2026-10-03 | opencv-python-**headless** | Avoid Qt plugin clash with PySide6 | accepted |
+| D7 | 2026-10-03 | OCR engine chosen by benchmark on the fixtures (M5) | Requirement | accepted |
+| D8 | 2026-10-03 | Default opponent profile: typical (P50), overridable; CP calibration when CP is visible | Neutral default; Arena-specific data unavailable | accepted |
+| D9 | 2026-10-03 | Real Stove responses git-ignored; unit tests use synthetic responses mimicking the schema | ToS / redistribution caution | accepted |
+| D10 | 2026-10-03 | Region `world_global` by default, switchable in settings | User answer Q1 | accepted |
+| D11 | 2026-10-03 | Phase 0 plan approved (user answered Q1–Q7) | User | accepted |
+| D12 | 2026-10-03 | Game client = configurable client profile (Stove PC default; Steam, Google Play Games, emulator) | User answer Q1 | accepted |
+| D13 | 2026-10-03 | Display assumption: borderless windowed fullscreen by default, any resolution; vision must be resolution-independent | User answer Q1 | accepted |
+| D14 | 2026-10-03 | Hero/team capture is user-triggered from an overlay "Scan" button, plus optional passive watch; overlay shell moves into Phase 1 (M9) | User answer Q2 | accepted |
+| D15 | 2026-10-03 | Attacker policy default = auto-battle AI approximation (user plays on auto); no league prior, CP-based calibration for all leagues | User answer Q3 | accepted |
+| D16 | 2026-10-03 | No hero priority list; kit work ordered by observed frequency (battle log, then Stove usage) | User answer Q4 | accepted |
+| D17 | 2026-10-03 | Any dependency size is fine if installation is automatic; uv-based bootstrap launcher; avoid deps needing a separate installer (Tesseract out) | User answer Q5 | accepted |
+| D18 | 2026-10-03 | Repo licence MIT; weekly Stove API calls approved by the user | User answer Q6 | accepted |
+| D19 | 2026-10-03 | BBK EE stat type = Crit Chance as in Fribbels (user-confirmed); the 12% on the user's copy vs Fribbels' 0.06 still to explain (NV-08) | User answer Q7 | accepted |
 
-## 10. Open questions (batched; see the Phase 0 summary)
-- **Q1** Client (Stove PC / Google Play Games / emulator), server region, resolution and windowed/borderless?
-- **Q2** The screenshots are not in this environment (git-ignored, so not cloned). How do you want to provide them and the
-  Fribbels save file? (attach to the chat, or a private branch/gist that I delete after copying locally).
-- **Q3** Do you play Arena attacks manually or on auto? Typical Arena rank/league? Does your Arena list include NPC teams?
-  Is there a turn limit / sudden death you have noticed?
-- **Q4** Which heroes do you use most in Arena (attack and defence)? (Prioritises kits and OCR testing.)
-- **Q5** OK with these dependency sizes: PySide6 (~100 MB), opencv-headless (~40 MB), possibly RapidOCR + onnxruntime (~30 MB)?
-  Tesseract would need a separate install — acceptable or to be avoided?
-- **Q6** Licence for the repo when published (MIT suggested)? Any objection to calling Stove's undocumented JSON API weekly?
-- **Q7** EE "Blood Blade, 12%": which stat is the 12%? (Fribbels lists BBK's EE stat as crit chance.)
+## 10. Open questions
+Answered on 2026-10-03 (see D10–D19): Q1 client/region/display, Q3 Arena play style/league, Q4 hero priority,
+Q5 dependencies, Q6 licence + Stove API, Q7 EE stat.
+
+Still open:
+- **Q2** The screenshots (`hero_info_bbk.png`, `hero_manage_bbk.png`, `stove_guide_lisette.png`) and the Fribbels save file are
+  still not in this environment (git-ignored → not cloned). Needed from M4 (save import) and M6 (OCR golden fixture). Options:
+  attach them in the chat, or push them to a temporary private branch that is deleted right after copying them locally.
+- **Q8** Does the Arena opponent list show CP (and/or artifact/stars) per opponent team? (Determines Phase 2 calibration inputs.)

@@ -5,11 +5,13 @@ Checkboxes: `[x]` done · `[ ]` pending. Milestones are small vertical slices; o
 
 ## Phase 0 — Research & plan
 - [x] **M0 Research & plan** — `DATA_SOURCES.md`, `MECHANICS.md`, `ARCHITECTURE.md` (diagram, stack, ERD, risks), `SPEC.md`, this roadmap, `CLAUDE.md`, `spikes/stove_probe.py`.
-  - Acceptance: user approves the plan and answers the batched questions (SPEC §10). **⏸ Waiting for approval.**
+  - Acceptance: user approves the plan and answers the batched questions (SPEC §10). ✅ Approved 2026-10-03 (D11).
 
 ## Phase 1 — Roster storage
-- [ ] **M1 Skeleton & tooling** — uv project (`orbis-codex`, package `e7ac`), ruff, mypy (strict for core), pytest + hypothesis, Typer CLI `e7`, `platformdirs` data dir, GitHub Actions (Windows + Ubuntu).
-  - Acceptance: `uv run e7 --version` works; `uv run pytest`, `uv run ruff check`, `uv run mypy` clean on CI for both OSes.
+- [x] **M1 Skeleton & tooling** — uv project (`orbis-codex`, package `e7ac`), ruff, mypy (strict for core), pytest + hypothesis, Typer CLI `e7`, `platformdirs` data dir, settings (client profile, region, display), Windows bootstrap launcher (installs uv → Python 3.12 → deps on first run), MIT licence, GitHub Actions (Windows + Ubuntu).
+  - Acceptance: `uv run e7 --version` works; `e7 config show|set` persists settings; `e7 doctor` reports environment; `uv run pytest`, `uv run ruff check`, `uv run mypy` clean on CI for both OSes; `OrbisCodex.cmd --version` works on a clean Windows user account.
+  - ✅ Done 2026-10-03. **How to try:** run `OrbisCodex.cmd doctor` (first run installs everything), then
+    `OrbisCodex.cmd config set resolution 2560x1440` and `OrbisCodex.cmd config show`.
 - [ ] **M2 Catalog v1** — Stove client (cache, rate limit, strict models), Fribbels herodata/artifactdata parsers, e7calc cross-check for base stats/multipliers, fact store + resolver, versioned snapshot in SQLite; `e7 catalog sync`, `e7 catalog show c2011`, `e7 catalog conflicts`.
   - Acceptance: synthetic-response tests; BBK resolves to `c2011` with base stats 1138/5871/462/111 and statuses; coverage report lists heroes missing any field; second sync is served from cache.
 - [ ] **M3 Roster core** — domain models, DB schema + first Alembic migration, validation rules (slot ↔ main, substats, ranges, caps), immutable snapshots + history, JSON export/import; `e7 roster add|show|list|history|export|import`.
@@ -24,8 +26,8 @@ Checkboxes: `[x]` done · `[ ]` pending. Milestones are small vertical slices; o
   - Acceptance: golden BBK fixture passes 100% including substats, EE stat, artifact level; ambiguous crops produce review items instead of guesses.
 - [ ] **M8 Roster UI** — PySide6 main window: roster list (search, element/class filters, sort by any stat), hero page mirroring the game layout, edit form with validation, history view, review queue (crop + value), JSON backup.
   - Acceptance: pytest-qt smoke tests; manual checklist for the user on Windows.
-- [ ] **M9 Scan mode + batch import** — window locator, mss capture at low fps, Hero Info detection, dedupe by hero + CP, incremental folder import, arena-relevant flag.
-  - Acceptance: replaying a folder of screenshots imports each hero once; scan mode verified by the user in game (no inputs sent).
+- [ ] **M9 Overlay scan + batch import** — client profiles (Stove PC, Steam, Google Play Games, emulator: window title/process + capture hints), window locator, minimal overlay shell (topmost, draggable, non-activating) with a **"Scan hero"** button and an optional passive watch mode, Hero Info detection, dedupe by hero + CP, incremental folder import, arena-relevant flag.
+  - Acceptance: replaying a folder of screenshots imports each hero once; the user verifies in game that "Scan hero" captures the current hero and nothing is ever sent to the game.
 
 ## Phase 2 — Opponent model
 - [ ] **M10 AssumedBuild** — histogram model (configurable edges), P50/P75/P90 profiles, Monte Carlo sampler (independent marginals, documented), set/EE/artifact priors, weekly refresh + data-age warning, CP-based percentile calibration; `e7 opponent show c2011 --profile strong`.
@@ -34,7 +36,7 @@ Checkboxes: `[x]` done · `[ ]` pending. Milestones are small vertical slices; o
 ## Phase 3 — Predictor v1 + overlay
 - [ ] **M11 Heuristic predictor** — features (turn order, TTK both ways, debuff landing, mechanic tags), logistic score with documented weights, CI, confidence, top-3 factors, warnings; `e7 predict --team … --vs …`.
   - Acceptance: explainable output for 3 manual opponent teams; reproducible with seed; each weight documented.
-- [ ] **M12 Overlay** — topmost translucent window, drag, click-through toggle, position memory, DPI-aware, global hotkey (RegisterHotKey), colour-coded results, fuzzy autocomplete entry.
+- [ ] **M12 Overlay predictions** — extends the M9 overlay shell: results panel, click-through toggle, position memory, DPI-aware, global hotkey (RegisterHotKey), colour-coded results, fuzzy autocomplete entry.
   - Acceptance: user checklist on Windows (windowed + borderless).
 
 ## Phase 4 — Simulator
@@ -44,7 +46,7 @@ Checkboxes: `[x]` done · `[ ]` pending. Milestones are small vertical slices; o
 
 ## Phase 5 — Screen automation
 - [ ] **M16 Capture benchmark + screen classifier** (WGC / dxcam / mss on the user's client).
-- [ ] **M17 Arena list detection** — portraits (perceptual hash/embeddings vs Stove portraits) + OCR, confirmation UI.
+- [ ] **M17 Arena list detection** — overlay **"Scan Arena teams"** button; portraits (perceptual hash/embeddings vs Stove portraits) + OCR; confirmation UI.
 - [ ] **M18 Battle result logging** — win/loss detection with confirmation.
 
 ## Phase 6 — Learning & calibration
