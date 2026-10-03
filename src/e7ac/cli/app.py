@@ -94,7 +94,11 @@ def config_set(
     except SettingsError as exc:
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(code=2) from exc
-    save_settings(updated, app_paths.settings_file)
+    try:
+        save_settings(updated, app_paths.settings_file)
+    except OSError as exc:
+        typer.echo(f"Error: cannot write settings file {app_paths.settings_file}: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
     shown = updated.model_dump(mode="json")[key]
     typer.echo(f"{key} = {shown if shown is not None else 'auto'}")
 

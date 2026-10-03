@@ -5,12 +5,14 @@ Part 1: **E7 Arena Companion** — a local, read-only roster tracker and Arena w
 Status: Phase 1 in progress — see [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ## Run it (Windows)
-1. Download or clone this repository.
-2. Double-click / run `OrbisCodex.cmd` (or `OrbisCodex.cmd doctor` from a terminal).
-   The first start installs [uv](https://docs.astral.sh/uv/), Python 3.12 and every dependency automatically
-   (a few minutes, once). Later starts are instant.
+1. Download the ZIP of this branch (**Code → Download ZIP**) and extract it (right-click → *Extract All*).
+   Running `OrbisCodex.cmd` from inside the ZIP does not work.
+2. Double-click `OrbisCodex.cmd` in the extracted folder. The first start installs [uv](https://docs.astral.sh/uv/),
+   Python 3.12 and every dependency automatically (a few minutes, only once), then shows the `e7 doctor` check
+   (lines starting with `[OK  ]`) and waits for a key. Later starts are instant.
 
-Useful commands (via `OrbisCodex.cmd <command>` or `uv run e7 <command>`):
+From a terminal opened in that folder (cmd or PowerShell), run commands as `.\OrbisCodex.cmd <command>`
+(developers: `uv run e7 <command>`):
 
 | Command | What it does |
 |---|---|

@@ -77,6 +77,6 @@ testpaths = ["tests"]
 addopts = "-ra --strict-markers"
 markers = [
     "windows: needs Windows (skipped elsewhere)",
-    "fixtures: needs git-ignored fixtures under fixtures/ (skipped when missing)",
+    "fixtures(*paths): needs git-ignored files under fixtures/ (skipped when any is missing; see tests/markers.py)",
     "network: talks to the network (skipped unless E7AC_NETWORK_TESTS=1)",
 ]

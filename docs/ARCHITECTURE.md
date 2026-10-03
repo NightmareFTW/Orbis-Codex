@@ -1,6 +1,6 @@
 # Architecture
 
-Status: **proposal (Phase 0)**, awaiting approval. Decisions are logged in `docs/SPEC.md`.
+Status: **accepted** (SPEC D11); implemented through **M1**. Decisions are logged in `docs/SPEC.md`.
 
 ## 1. Principles
 - **Core is UI-free and fully usable from the CLI** (`e7 …`). Qt only lives in `e7ac.ui`.
@@ -65,8 +65,13 @@ everything logged → outcome logged from the result screen → calibration.
 ## 3. Package layout (proposed)
 
 ```text
+OrbisCodex.cmd   # end-user launcher (M1)
+scripts/         # install-uv.ps1 (M1)
 src/e7ac/
-  domain/        # pydantic v2 models: HeroCode, Stat, Gear, OwnedHeroSnapshot, AssumedBuild, Confidence…
+  paths.py       # data home (%LOCALAPPDATA%\OrbisCodex, E7AC_HOME override)            [M1]
+  settings.py    # settings.json: client, world, display mode, resolution               [M1]
+  doctor.py      # environment self-check                                              [M1]
+  domain/        # pydantic v2 models: World [M1]; HeroCode, Stat, Gear, OwnedHeroSnapshot, AssumedBuild, Confidence…
   sources/       # stove/, fribbels/, e7calc/, epic7db/ — fetch (httpx, cache, rate limit) + strict parsers
   catalog/       # fact store, merge/resolve rules, snapshots, coverage/conflict reports
   roster/        # importers (ocr, fribbels, manual), validation rules, history, JSON backup
@@ -96,7 +101,7 @@ docs/
 | CLI | **Typer** | Small (click + rich), typed signatures. |
 | Fuzzy matching | **rapidfuzz** | Fast, MIT; used with a margin rule (best − second best ≥ threshold, else ask). |
 | CV | **opencv-python-headless**, **numpy** | *Headless* build avoids Qt plugin conflicts with PySide6. |
-| OCR | **decided by benchmark (M5)** — candidates: template digit reader (OpenCV), RapidOCR (`rapidocr-onnxruntime`, ~30 MB incl. models), Windows.Media.Ocr (via `winrt` packages, zero download, Windows-only), Tesseract (needs separate install) | Game fonts are consistent → template digits likely win for numbers; a general engine is still needed for hero names/set names. Criteria: field accuracy on fixtures, latency, install friction. |
+| OCR | **decided by benchmark (M5)** — candidates: template digit reader (OpenCV), RapidOCR (`rapidocr-onnxruntime`, ~30 MB incl. models), Windows.Media.Ocr (via `winrt` packages, zero download, Windows-only). Tesseract excluded (needs a separate system installer, D17) | Game fonts are consistent → template digits likely win for numbers; a general engine is still needed for hero names/set names. Criteria: field accuracy on fixtures, latency, install friction. |
 | Icons | Template matching (NCC) + tiny kNN on normalised crops | No deep learning, no PyTorch. Templates bootstrapped from user screenshots + Stove set icons. |
 | Capture | **mss** for M9 scan mode; **Windows Graphics Capture** (`windows-capture`) / **dxcam** benchmarked in Phase 5 | mss is tiny and fine at 1–2 fps for visible windowed/borderless games; WGC handles occlusion and higher fps. |
 | Window/DPI | ctypes (user32) | No pywin32 needed; process set to per-monitor-v2 DPI awareness. |
@@ -105,9 +110,10 @@ docs/
 | Simulator speed | pure Python + `multiprocessing` first | numba/Rust only after profiling. |
 | Paths | `platformdirs` | `%LOCALAPPDATA%\OrbisCodex\{e7ac.sqlite3,cache,captures,logs}`. |
 | Quality | pytest, hypothesis, pytest-qt (UI), ruff (lint+format), mypy | CI: GitHub Actions on `windows-latest` + `ubuntu-latest`; Windows-only tests marked. |
+| Install / launch | `OrbisCodex.cmd` → uv (installed by `scripts/install-uv.ps1` if missing) → `uv run --frozen --no-dev e7` | Zero manual setup for a non-technical user (D17, D20); uv downloads Python 3.12 + locked wheels. CI job simulates a clean PC (uv absent, managed Python only). |
 
-Dependencies to confirm with the user (size): PySide6 (~100 MB, required by the brief), opencv-headless (~40 MB),
-RapidOCR + onnxruntime (~30 MB, only if it wins the benchmark).
+Dependency size is accepted by the user (D17) as long as everything installs automatically through uv (wheels only,
+no separate system installers): PySide6 (~100 MB), opencv-headless (~40 MB), RapidOCR + onnxruntime (~30 MB, if it wins M5).
 
 ## 5. Vision pipeline (Phase 1)
 

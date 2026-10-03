@@ -7,7 +7,9 @@ writes are atomic so a crash cannot leave a half-written file.
 from __future__ import annotations
 
 import json
+import os
 import re
+import tempfile
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, Final
@@ -92,7 +94,8 @@ def load_settings(path: Path) -> Settings:
     if not path.exists():
         return Settings()
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
+        # utf-8-sig: accept files saved "with BOM" by Notepad or Windows PowerShell.
+        raw = json.loads(path.read_text(encoding="utf-8-sig"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise SettingsError(f"cannot read settings file {path}: {exc}") from exc
     if not isinstance(raw, dict):
@@ -104,12 +107,19 @@ def load_settings(path: Path) -> Settings:
 
 
 def save_settings(settings: Settings, path: Path) -> None:
-    """Write atomically: temp file in the same directory, then `os.replace`."""
+    """Write atomically: unique temp file in the same directory, flushed to disk, then replace the target.
+
+    On failure the previous file is left untouched and the temp file is removed; the OSError propagates.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = json.dumps(settings.model_dump(mode="json"), indent=2, sort_keys=True) + "\n"
-    tmp = path.with_name(path.name + ".tmp")
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    tmp = Path(tmp_name)
     try:
-        tmp.write_text(payload, encoding="utf-8")
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
         tmp.replace(path)
     finally:
         tmp.unlink(missing_ok=True)

@@ -169,8 +169,8 @@ Example Hostess of the Banquet `efa22`: ATK 21→273, HP 32→416.
   1 req/s. Default is **lazy**: heroes in my roster + heroes seen in Arena + on demand.
 - Raw responses stored with timestamp, region and SHA-256; parsed with strict pydantic models so a
   schema change fails loudly and falls back to the last good snapshot.
-- ToS: Stove's terms were not reviewed clause by clause → **open item for the user**. No redistribution:
-  real responses are git-ignored; tests use synthetic responses.
+- ToS: not reviewed clause by clause; the user approved weekly use of the Stove API (SPEC D18). Personal, polite access;
+  no redistribution: real responses are git-ignored and tests use synthetic responses.
 
 ---
 
@@ -235,7 +235,7 @@ Example Hostess of the Banquet `efa22`: ATK 21→273, HP 32→416.
 
 ---
 
-## Catalog pipeline (proposal)
+## Catalog pipeline (accepted, SPEC D4)
 
 ```mermaid
 flowchart LR

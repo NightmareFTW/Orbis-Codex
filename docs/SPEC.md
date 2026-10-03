@@ -139,8 +139,10 @@ Cross-checks done without the images (details in MECHANICS.md):
 - Logging: structured, local only; no telemetry.
 - Settings file: `%LOCALAPPDATA%\OrbisCodex\settings.json` (client, world/region, display mode, resolution; opponent
   profile added in M10). Missing file = defaults; corrupt file = explicit error, never a silent reset.
-- Install/run: a Windows launcher (`OrbisCodex.cmd` → `scripts/bootstrap.ps1`) installs **uv** if missing, lets uv fetch
-  Python 3.12 and all dependencies on first start (`uv sync --frozen`), then runs the app. No manual dependency installs;
+- Install/run: the Windows launcher `OrbisCodex.cmd` finds uv (or installs it via `scripts/install-uv.ps1`, the official
+  installer), then runs `uv run --frozen --no-dev --project <repo> e7 <args>`: uv downloads Python 3.12 and the locked
+  runtime dependencies on first start. Arguments reach `e7` exactly as typed (no PowerShell in between). Double-click (no
+  arguments) runs `e7 doctor` and waits for a key (will open the GUI once it exists). No manual dependency installs;
   no dependency that needs a separate system installer (→ Tesseract excluded).
 
 ## 9. Decisions log
@@ -165,6 +167,7 @@ Cross-checks done without the images (details in MECHANICS.md):
 | D17 | 2026-10-03 | Any dependency size is fine if installation is automatic; uv-based bootstrap launcher; avoid deps needing a separate installer (Tesseract out) | User answer Q5 | accepted |
 | D18 | 2026-10-03 | Repo licence MIT; weekly Stove API calls approved by the user | User answer Q6 | accepted |
 | D19 | 2026-10-03 | BBK EE stat type = Crit Chance as in Fribbels (user-confirmed); the 12% on the user's copy vs Fribbels' 0.06 still to explain (NV-08) | User answer Q7 | accepted |
+| D20 | 2026-10-03 | Launcher calls uv directly from `OrbisCodex.cmd` (args verbatim); PowerShell only installs uv; runtime deps only (`--no-dev`) | M1 review LAUNCH-1..3, TC-1 | accepted |
 
 ## 10. Open questions
 Answered on 2026-10-03 (see D10–D19): Q1 client/region/display, Q3 Arena play style/league, Q4 hero priority,
@@ -172,6 +175,8 @@ Q5 dependencies, Q6 licence + Stove API, Q7 EE stat.
 
 Still open:
 - **Q2** The screenshots (`hero_info_bbk.png`, `hero_manage_bbk.png`, `stove_guide_lisette.png`) and the Fribbels save file are
-  still not in this environment (git-ignored → not cloned). Needed from M4 (save import) and M6 (OCR golden fixture). Options:
-  attach them in the chat, or push them to a temporary private branch that is deleted right after copying them locally.
+  still not in this environment (git-ignored → not cloned). Needed from M4 (save import) and M6 (OCR golden fixture).
+  Attach them in the chat (or share them through a private channel outside this repository). **Never push them to this
+  repository**: it is public, GitHub has no private branches, and deleted branches stay reachable by commit SHA;
+  `fixtures/` stays local and git-ignored.
 - **Q8** Does the Arena opponent list show CP (and/or artifact/stars) per opponent team? (Determines Phase 2 calibration inputs.)

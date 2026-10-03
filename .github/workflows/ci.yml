@@ -17,8 +17,8 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.2.0
         with:
           enable-cache: true
       - name: Install (locked)
@@ -33,13 +33,35 @@ jobs:
         run: uv run pytest
 
   launcher:
-    name: launcher smoke test (windows)
+    # Simulates a clean user PC: uv must be absent (the launcher installs it) and uv must download
+    # its own CPython 3.12 instead of reusing the runner's preinstalled Python.
+    name: launcher smoke test (windows, clean-machine path)
     runs-on: windows-latest
+    env:
+      UV_PYTHON_PREFERENCE: only-managed
+      E7AC_HOME: ${{ runner.temp }}\e7home
     steps:
-      - uses: actions/checkout@v4
-      - name: OrbisCodex.cmd --version (installs uv if missing)
+      - uses: actions/checkout@v7
+      - name: Assert uv is not preinstalled (so the install path is really exercised)
+        shell: pwsh
+        run: if (Get-Command uv -ErrorAction SilentlyContinue) { throw 'uv is preinstalled on the runner; install path not tested' }
+      - name: .\OrbisCodex.cmd --version (installs uv, downloads Python 3.12, syncs locked deps)
         shell: cmd
-        run: OrbisCodex.cmd --version
-      - name: OrbisCodex.cmd doctor
+        run: call .\OrbisCodex.cmd --version
+      - name: doctor passes and runs on a uv-managed interpreter
         shell: cmd
-        run: OrbisCodex.cmd doctor
+        run: |
+          call .\OrbisCodex.cmd doctor || exit /b 1
+          rem uv-managed interpreters live in ...\uv\python\cpython-3.12.*; the runner's own Python does not match.
+          call .\OrbisCodex.cmd doctor | findstr /i /c:"cpython-3.12"
+      - name: arguments reach e7 verbatim (quoted value with spaces)
+        shell: cmd
+        run: |
+          call .\OrbisCodex.cmd config set resolution " 2560 x 1440 " || exit /b 1
+          call .\OrbisCodex.cmd config show | findstr /c:"2560x1440"
+      - name: invalid value fails with exit code 2
+        shell: cmd
+        run: |
+          call .\OrbisCodex.cmd config set world nowhere
+          if not "%ERRORLEVEL%"=="2" exit /b 1
+          exit /b 0

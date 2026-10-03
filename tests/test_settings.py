@@ -136,3 +136,23 @@ def test_with_value_accepts_every_allowed_value(key: str, data: st.DataObject) -
     value = data.draw(st.sampled_from(choices))
     updated = with_value(Settings(), key, value)
     assert updated.model_dump(mode="json")[key] == value
+
+
+def test_bom_file_from_notepad_is_accepted(isolated_home: AppPaths) -> None:
+    isolated_home.home.mkdir(parents=True)
+    isolated_home.settings_file.write_text('﻿{"world": "world_eu"}', encoding="utf-8")
+    assert load_settings(isolated_home.settings_file).world is World.EUROPE
+
+
+def test_failed_save_keeps_previous_file_and_no_temp(isolated_home: AppPaths, monkeypatch: pytest.MonkeyPatch) -> None:
+    save_settings(Settings(world=World.EUROPE), isolated_home.settings_file)
+
+    def refuse(self: Path, target: Path) -> Path:
+        raise PermissionError("locked by another process")
+
+    monkeypatch.setattr(Path, "replace", refuse)
+    with pytest.raises(PermissionError):
+        save_settings(Settings(world=World.JAPAN), isolated_home.settings_file)
+    monkeypatch.undo()
+    assert load_settings(isolated_home.settings_file).world is World.EUROPE
+    assert [p.name for p in isolated_home.home.iterdir()] == ["settings.json"]

@@ -8,17 +8,19 @@ Checkboxes: `[x]` done · `[ ]` pending. Milestones are small vertical slices; o
   - Acceptance: user approves the plan and answers the batched questions (SPEC §10). ✅ Approved 2026-10-03 (D11).
 
 ## Phase 1 — Roster storage
-- [x] **M1 Skeleton & tooling** — uv project (`orbis-codex`, package `e7ac`), ruff, mypy (strict for core), pytest + hypothesis, Typer CLI `e7`, `platformdirs` data dir, settings (client profile, region, display), Windows bootstrap launcher (installs uv → Python 3.12 → deps on first run), MIT licence, GitHub Actions (Windows + Ubuntu).
+- [x] **M1 Skeleton & tooling** — uv project (`orbis-codex`, package `e7ac`), ruff, mypy (strict for core), pytest + hypothesis, Typer CLI `e7`, `platformdirs` data dir, settings (client profile, region, display), Windows launcher `OrbisCodex.cmd` (installs uv → Python 3.12 → deps on first run), MIT licence, GitHub Actions (Windows + Ubuntu).
   - Acceptance: `uv run e7 --version` works; `e7 config show|set` persists settings; `e7 doctor` reports environment; `uv run pytest`, `uv run ruff check`, `uv run mypy` clean on CI for both OSes; `OrbisCodex.cmd --version` works on a clean Windows user account.
-  - ✅ Done 2026-10-03. **How to try:** run `OrbisCodex.cmd doctor` (first run installs everything), then
-    `OrbisCodex.cmd config set resolution 2560x1440` and `OrbisCodex.cmd config show`.
+  - ✅ Done 2026-10-03. Clean-machine criterion: verified by the CI launcher job (uv absent, uv-managed Python only) on a
+    hosted runner; **pending the user's first run on their own PC**.
+  - **How to try:** double-click `OrbisCodex.cmd` (first start installs everything, then shows `e7 doctor` and waits for a
+    key); from a terminal in that folder: `.\OrbisCodex.cmd config set resolution 2560x1440` then `.\OrbisCodex.cmd config show`.
 - [ ] **M2 Catalog v1** — Stove client (cache, rate limit, strict models), Fribbels herodata/artifactdata parsers, e7calc cross-check for base stats/multipliers, fact store + resolver, versioned snapshot in SQLite; `e7 catalog sync`, `e7 catalog show c2011`, `e7 catalog conflicts`.
   - Acceptance: synthetic-response tests; BBK resolves to `c2011` with base stats 1138/5871/462/111 and statuses; coverage report lists heroes missing any field; second sync is served from cache.
 - [ ] **M3 Roster core** — domain models, DB schema + first Alembic migration, validation rules (slot ↔ main, substats, ranges, caps), immutable snapshots + history, JSON export/import; `e7 roster add|show|list|history|export|import`.
   - Acceptance: property tests (hypothesis) for stat maths/validation; round-trip export → import is lossless; editing creates a new snapshot.
 - [ ] **M4 Fribbels save import** — schema derived from the user's real save file; strict models + raw passthrough; gear dedupe by id/fingerprint; mapping Fribbels names → hero codes with margin rule; `e7 import fribbels <file>`.
   - Acceptance: user's file imports with a report (imported/skipped/ambiguous); unknown fields preserved; test skips cleanly without the file; CP samples feed NV-06.
-- [ ] **M5 OCR spike & benchmark** (`spikes/ocr_bench/`) — template digits vs RapidOCR vs Windows OCR vs Tesseract on the fixtures (+ synthetic rescales).
+- [ ] **M5 OCR spike & benchmark** (`spikes/ocr_bench/`) — template digits vs RapidOCR vs Windows OCR on the fixtures (+ synthetic rescales); Tesseract excluded (separate installer, D17).
   - Acceptance: table of per-field accuracy/latency/install cost in `ARCHITECTURE.md`; engine decision logged in SPEC.
 - [ ] **M6 Hero Info OCR v1** — anchors + normalised regions, numeric fields, hero name → catalog match, per-field confidence; `e7 import screenshot <png>`.
   - Acceptance: golden BBK fixture (after the user confirms the transcription table) passes for all non-icon fields; works on 0.75×/1.25× rescaled copies.

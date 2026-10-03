@@ -28,10 +28,11 @@ uv run e7 --help             # CLI: --version, doctor, paths, config show|set|op
 uv run pytest                # tests (fixture tests skip if fixtures are missing; network tests need E7AC_NETWORK_TESTS=1)
 uv run ruff check . && uv run ruff format --check .
 uv run mypy                  # strict, src + tests
-OrbisCodex.cmd doctor        # Windows end-user launcher (bootstraps uv -> Python 3.12 -> deps)
+.\OrbisCodex.cmd doctor      # Windows end-user launcher (installs uv -> Python 3.12 -> deps; double-click = doctor + pause)
 python spikes/stove_probe.py c2011 --world world_global   # Stove API probe (spike)
 ```
-Tests isolate the app home via `E7AC_HOME` (autouse fixture in `tests/conftest.py`). Markers: `windows`, `fixtures`, `network`.
+Tests isolate the app home via `E7AC_HOME` (autouse fixture in `tests/conftest.py`). Markers (logic in `tests/markers.py`):
+`windows`, `network`, `fixtures("screenshots/x.png", …)` — skipped automatically when not applicable.
 
 ## Architecture summary (see docs/ARCHITECTURE.md)
 Python 3.12 + uv · pydantic v2 domain · SQLite via SQLAlchemy 2.0 + Alembic · httpx · Typer CLI `e7` ·
@@ -56,6 +57,7 @@ Key data facts (details in docs/DATA_SOURCES.md):
 ## Current status
 - Phase 0 approved 2026-10-03 (SPEC D11; user answers recorded as D10–D19).
 - **M1 Skeleton & tooling — done**: package `e7ac` (`paths`, `settings`, `doctor`, `domain.world`, `cli.app`),
-  Windows launcher `OrbisCodex.cmd` → `scripts/bootstrap.ps1`, GitHub Actions (Ubuntu + Windows + launcher smoke test), MIT.
-- Still missing: screenshots + Fribbels save file (SPEC Q2) — needed from M4/M6.
+  launcher `OrbisCodex.cmd` (+ `scripts/install-uv.ps1`), GitHub Actions (Ubuntu + Windows + clean-machine launcher job), MIT.
+  Reviewed by a multi-agent adversarial review (22 confirmed findings fixed).
+- Still missing: screenshots + Fribbels save file (SPEC Q2) — needed from M4/M6. The repo is **public**: never commit them.
 - Next milestone: **M2 Catalog v1**.

@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from e7ac import __version__
 from e7ac.cli.app import app
-from e7ac.paths import AppPaths
+from e7ac.paths import HOME_ENV_VAR, AppPaths
 
 runner = CliRunner()
 
@@ -101,3 +103,27 @@ def test_doctor_fails_on_corrupt_settings(isolated_home: AppPaths) -> None:
     result = runner.invoke(app, ["doctor"])
     assert result.exit_code == 1
     assert "[FAIL] settings" in result.stdout
+
+
+def test_doctor_shows_base_interpreter() -> None:
+    result = runner.invoke(app, ["doctor"])
+    assert "base interpreter:" in result.stdout
+
+
+def test_doctor_fails_when_data_dir_unusable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    blocker = tmp_path / "not-a-dir"
+    blocker.write_text("x", encoding="utf-8")
+    monkeypatch.setenv(HOME_ENV_VAR, str(blocker / "home"))
+    result = runner.invoke(app, ["doctor"])
+    assert result.exit_code == 1
+    assert "[FAIL] data dir" in result.stdout
+
+
+def test_config_set_reports_write_errors_without_traceback(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    blocker = tmp_path / "not-a-dir"
+    blocker.write_text("x", encoding="utf-8")
+    monkeypatch.setenv(HOME_ENV_VAR, str(blocker / "home"))
+    result = runner.invoke(app, ["config", "set", "world", "world_eu"])
+    assert result.exit_code == 2
+    assert "cannot write settings file" in result.stderr
+    assert "Traceback" not in result.output

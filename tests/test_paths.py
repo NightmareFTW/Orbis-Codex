@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -36,3 +37,10 @@ def test_ensure_is_idempotent(isolated_home: AppPaths) -> None:
     isolated_home.ensure()
     isolated_home.ensure()
     assert all(Path(d).is_dir() for d in isolated_home.directories())
+
+
+@pytest.mark.windows
+def test_windows_default_home_is_localappdata(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The documented location (README/SPEC): %LOCALAPPDATA%\\OrbisCodex, not roaming, no author sub-folder."""
+    monkeypatch.delenv(HOME_ENV_VAR, raising=False)
+    assert default_home() == Path(os.environ["LOCALAPPDATA"]) / APP_DIR_NAME

@@ -40,9 +40,10 @@ def run_checks(paths: AppPaths) -> list[CheckResult]:
 
 def _check_python() -> CheckResult:
     version = ".".join(str(part) for part in sys.version_info[:3])
+    detail = f"{version} (base interpreter: {sys.base_prefix})"
     if sys.version_info[:2] >= MIN_PYTHON:
-        return CheckResult("python", CheckStatus.OK, version)
-    return CheckResult("python", CheckStatus.FAIL, f"{version} (need >= {MIN_PYTHON[0]}.{MIN_PYTHON[1]})")
+        return CheckResult("python", CheckStatus.OK, detail)
+    return CheckResult("python", CheckStatus.FAIL, f"{detail}; need >= {MIN_PYTHON[0]}.{MIN_PYTHON[1]}")
 
 
 def _check_os() -> CheckResult:

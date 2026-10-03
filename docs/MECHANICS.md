@@ -131,12 +131,14 @@ skills vs speed buffs (Speed Up = +30% speed per e7calc `spdUp 1.3`, `community`
 |---|---|---|---|
 | NV-01 | Stove histogram bin edges (MECH via DATA_SOURCES §1) | All opponent stat percentiles | Compare with the user's own heroes' stats / percentile plausibility; contact Stove? |
 | NV-02 | Which population `hero-detail` vs `wearing-status` rankings use | Opponent set/artifact priors | Compare shares across weeks/regions; ask community |
-| NV-03 | Crushing hit chance (MECH-HIT-01) | Damage variance | Count hit types in recorded battles |
+| NV-03 | Crushing hit chance and hit-resolution order (MECH-HIT-01/02) | Damage variance | Count hit types in recorded battles |
 | NV-04 | Starting CR randomness range in PvP (MECH-CR-02) | Turn-order probability | Speed-tuning observations from recorded battles |
-| NV-05 | Defence AI targeting & skill policy (MECH-ARENA-02..04) | Simulator accuracy | Log battles (Phase 5/6) |
+| NV-05 | Defence AI targeting & skill policy, auto-battle attacker policy (D15), turn limit / NPC teams (MECH-ARENA-02..06) | Simulator accuracy | Log battles (Phase 5/6) |
 | NV-06 | CP enhancement factor (MECH-CP-02) | CP→percentile calibration | Many heroes from the Fribbels save + Hero Info OCR |
 | NV-07 | Artifact effect per-level steps (MECH-ART-03) | Artifact effects in sim | epic7db / in-game tooltip |
 | NV-08 | EE stat value range (BBK: Fribbels 0.06 vs user's 12% Crit Chance) and option texts (MECH-EE-01) | Roster validation, sim | In-game EE tooltip / epic7db / Fribbels save |
 | NV-09 | Dual attack/counter details (MECH-DUAL-01, MECH-CNT-01) | Minor damage | Observation |
 | NV-10 | Fixture residuals: with Fribbels base stats, final − "gear contribution" leaves ATK +35, DEF +15, HP +100, CD +4%, ER +4%, SPD 0, CC 0 for BBK, while imprint (+18% ≈ +205 ATK) and artifact (+18 ≈ +172 ATK / +262 HP) are expected on top | Consistency check design | Inspect `hero_manage_bbk.png` (what "gear contribution" includes) |
 | NV-11 | Gear set piece counts (MECH-GEAR-05) and full main-stat table | Validation | In-game tooltips / OCR fixtures |
+| NV-12 | How the Weakening set's "+15% chance to inflict debuffs" combines with EFF/ER (MECH-EFF-02) | Debuff landing | Observation / official notes |
+| NV-13 | CR tie-break when units reach 100% together (MECH-CR-03) | Turn order | Recorded battles |
