@@ -20,11 +20,17 @@ Method
    '+N' badge (top), item level (top-left number), score (bottom number). Icon centre x = score centre (or the
    column median). Missing/odd fields -> second OCR pass on an upscaled crop around the expected spot.
    No badge after both passes -> +0, confirmed by the absence of the bright red badge pill (colour test).
-6. Grade: hue votes of the saturated, not-bright pixels in the icon interior: red vs purple clusters.
-   Cross-check (community knowledge, unverified): at +0 epic has 4 subs, heroic 3.
+6. Grade: two independent cues that must agree, else REVIEW:
+   a) hue votes of the saturated, not-bright pixels on edge strips of the icon interior: red vs purple clusters;
+   b) the gold corner ornament left of the item level (present on every red piece, absent on every purple one).
+   Mapping red=epic / purple=heroic is community knowledge (status assumed). Cross-check (community, unverified):
+   at +0 epic has 4 subs, heroic 3.
 7. Artifact: "Lv.X/Y" line above the anchor and right of it; name = the line just below; '+N' = above-left of the Lv
-   line (second pass if missing; absent -> +0). Name -> catalog code: exact normalised, else fuzzy with margin.
-8. EE: a value line ("12%") with a text line below it, above the anchor and LEFT of the artifact box.
+   line (second pass on the tight pill window if missing; no red/orange pill -> +0). Name -> catalog code: exact
+   normalised, else fuzzy with margin. Lv vs +N consistency (community rule, unverified) -> REVIEW both on mismatch.
+8. EE: a value line ("12%") with a text line below it, above the anchor and LEFT of the artifact box (3h+ gap).
+   Its stat icon (inside the value line box) is matched against the 8 stat-label icons of the left panel of the
+   same capture (grey-level glyph, cosine, best vs second margin).
 
 Usage:
     E7AC_HOME=.../m7/home uv run python spikes/m7_gear_layout.py               # 6 captures x scales 0.64 1.0 1.28
@@ -87,6 +93,7 @@ RIGHT_COL_MIN = 9.4  # single column: x1 - anchor.x0 > 9.4h -> right column
 VALUE_RE = re.compile(r"^\d{1,3}(?:,\d{3})*%?$")
 VALUE_TAIL_RE = re.compile(r"(\d{1,3}(?:,\d{3})*%?)$")
 BADGE_RE = re.compile(r"^\+\s?(\d{1,2})$")
+PLUS_TAIL_RE = re.compile(r"\+\d{1,2}$")
 INT_RE = re.compile(r"^\d{1,3}$")
 ANCHOR_RE = re.compile(r"Average\s*Equipment\s*Score\s*[:;.]?\s*(\d{1,3})?", re.I)
 LV_RE = re.compile(r"^Lv\s*\.?\s*(Max|\d{1,2})\s*/\s*(\d{1,2})?$", re.I)  # the max may hide on the art
@@ -348,14 +355,27 @@ def icon_fields(panel: Panel, img: Any, lines: list[TextLine], h: float, second:
 # and on the item art (read as a trailing '1'). A tight crop drops both; several renderings vote.
 LEVEL_TIGHT = (-1.08, -0.35, -0.33, 0.65)  # (x0, y0, x1, y1) around (icon cx, main-row cy), in h
 LEVEL_MID = (-1.15, -0.45, -0.25, 0.75)
+LEVEL_TIGHT2 = (-1.05, -0.3, -0.38, 0.55)
+# 5 renderings chosen by a sweep (dbg2/lvl_variants.py: 3 windows x 6 renderings x 2 upscales on 90 pieces x 3
+# scales): each of these had 0 wrong 2-digit reads and 85-88/90 right; the binary rendering of v1 had 1 wrong.
+# Single renderings DO misread 90 as 70/20/50 (cream 9 on gold art): the vote (>= 2, unique top) is what protects.
+LEVEL_VARIANTS = [(LEVEL_TIGHT, "col"), (LEVEL_TIGHT, "gray"), (LEVEL_TIGHT2, "lowsat"), (LEVEL_MID, "gray"),
+                  (LEVEL_MID, "clahe")]
 
 
-def _render(crop: Any, h: float, mode: str) -> Any:
-    f = max(1.5, 100.0 / h)
+def _render(crop: Any, h: float, mode: str, target: float = 100.0) -> Any:
+    f = max(1.5, target / h)
     up = cv2.resize(crop, None, fx=f, fy=f, interpolation=cv2.INTER_CUBIC)
     border = (0, 0, 0)
     if mode == "gray":  # HSV value channel: digits are the brightest thing, hue of the art no longer matters
         up = cv2.cvtColor(cv2.cvtColor(up, cv2.COLOR_BGR2HSV)[..., 2], cv2.COLOR_GRAY2BGR)
+    elif mode == "lowsat":  # V * (1 - S): cream digits stay bright, golden/red/purple art darkens
+        hsv = cv2.cvtColor(up, cv2.COLOR_BGR2HSV)
+        v = hsv[..., 2].astype(np.float32) * (1 - hsv[..., 1].astype(np.float32) / 255)
+        up = cv2.cvtColor(np.clip(v * 1.6, 0, 255).astype(np.uint8), cv2.COLOR_GRAY2BGR)
+    elif mode == "clahe":  # local contrast on the value channel
+        v = cv2.createCLAHE(2.0, (4, 4)).apply(cv2.cvtColor(up, cv2.COLOR_BGR2HSV)[..., 2])
+        up = cv2.cvtColor(v, cv2.COLOR_GRAY2BGR)
     elif mode == "bin":  # bright and not too saturated (cream digits) -> black on white
         hsv = cv2.cvtColor(up, cv2.COLOR_BGR2HSV)
         m = ((hsv[..., 2] > 190) & (hsv[..., 1] < 150)).astype(np.uint8) * 255
@@ -369,7 +389,9 @@ def _read_variants(img: Any, cx: float, ry: float, h: float,
     out = []
     for (a, b, c, d), mode in variants:
         crop = _region(img, cx + a * h, ry + b * h, cx + c * h, ry + d * h)
-        out.append([l.text.strip() for l in _reader.read(_render(crop, h, mode))] if crop.size else [])
+        # trailing punctuation is a frequent artefact of the ornament/art ('85.', '90,'): dropped before voting
+        out.append([re.sub(r"[.,:;'`]+$", "", l.text.strip()) for l in _reader.read(_render(crop, h, mode))]
+                   if crop.size else [])
     return out
 
 
@@ -463,8 +485,7 @@ def second_pass(panel: Panel, p: Piece, img: Any, h: float, verify: bool = False
     slot = p.slot.value if p.slot else "?"
     need_level = p.level is None or p.level.conf < 0.5
     if need_level or verify:
-        reads = _read_variants(img, cx, ry, h, [(LEVEL_TIGHT, "col"), (LEVEL_TIGHT, "gray"), (LEVEL_TIGHT, "bin"),
-                                                (LEVEL_MID, "gray")])
+        reads = _read_variants(img, cx, ry, h, LEVEL_VARIANTS)
         v, n, tally = vote(reads, r"\d{2}")
         before = str(p.level) if p.level else "missing"
         if need_level:
@@ -533,19 +554,46 @@ def grade_colour(img: Any, p: Piece, h: float) -> tuple[Fld, dict[str, float]]:
     hsv = cv2.cvtColor(reg, cv2.COLOR_BGR2HSV)
     hh, s, v = hsv[..., 0].astype(int), hsv[..., 1], hsv[..., 2]
     sel = (s > 90) & (v > 40) & (v < 210) & m
-    red = int((sel & ((hh <= 10) | (hh >= 172))).sum())
-    purple = int((sel & (hh >= 135) & (hh < 172)).sum())
+    red_m = sel & ((hh <= 10) | (hh >= 172))
+    pur_m = sel & (hh >= 135) & (hh < 172)
+    red, purple = int(red_m.sum()), int(pur_m.sum())
     tot = red + purple
     cov = tot / max(1, int(m.sum()))
     pf = purple / tot if tot else 0.0
-    stats = {"pfrac": pf, "cov": cov}
+    orn = ornament(img, p, h)
+    # circular mean hue (OpenCV 0..180) of each cluster, for the report
+    def _mean_hue(mask: Any) -> float:
+        if not mask.any():
+            return float("nan")
+        a = hh[mask] * (np.pi / 90)
+        return float((np.degrees(np.arctan2(np.sin(a).mean(), np.cos(a).mean())) / 2) % 180)
+    stats = {"pfrac": pf, "cov": cov, "orn": orn, "hue_red": _mean_hue(red_m), "hue_pur": _mean_hue(pur_m),
+             "sat": float(s[sel].mean()) if sel.any() else 0.0, "val": float(v[sel].mean()) if sel.any() else 0.0}
     if cov < 0.2:
         return Fld(None, 0.0, "colour", f"coverage {cov:.2f}"), stats
-    if pf >= PURPLE_MIN:
-        return Fld("purple", min(1.0, pf), "colour"), stats
-    if pf <= RED_MAX:
-        return Fld("red", min(1.0, 1 - pf), "colour"), stats
-    return Fld(None, 0.0, "colour", f"REVIEW mixed purple fraction {pf:.2f}"), stats
+    colour = "purple" if pf >= PURPLE_MIN else "red" if pf <= RED_MAX else None
+    frame = "red" if orn >= ORN_MIN else "purple" if orn <= ORN_MAX_ABSENT else None  # ornament = red-style frame
+    if colour is None:
+        hint = f", ornament {orn:.2f} -> red-style frame" if frame == "red" else ""
+        return Fld(None, 0.0, "colour", f"REVIEW mixed purple fraction {pf:.2f}{hint}"), stats
+    if frame != colour:  # the two cues disagree (or the ornament is ambiguous): never pick one silently
+        return Fld(None, 0.0, "colour+frame", f"REVIEW colour {colour} pf={pf:.2f} vs ornament {orn:.2f}"), stats
+    return Fld(colour, min(1.0, pf if colour == "purple" else 1 - pf), "colour+frame"), stats
+
+
+ORN_MIN, ORN_MAX_ABSENT = 0.08, 0.04  # gold fraction in the ornament window: red 0.16-0.30, purple 0.00-0.01
+
+
+def ornament(img: Any, p: Piece, h: float) -> float:
+    """Gold fraction left of the item level (the small gold corner ornament + gold inner frame seen on every red
+    piece and on no purple piece of the 5 captures; meaning unverified). Window measured on the zoomed corners:
+    x cx-1.25h..cx-1.0h, y ref-0.45h..ref+0.15h; the cream level digits are not saturated enough to count."""
+    reg = _region(img, p.icon_cx - 1.25 * h, p.ref_y - 0.45 * h, p.icon_cx - 1.0 * h, p.ref_y + 0.15 * h)
+    if reg.size == 0:
+        return 0.0
+    hsv = cv2.cvtColor(reg, cv2.COLOR_BGR2HSV)
+    hh, s, v = hsv[..., 0].astype(int), hsv[..., 1], hsv[..., 2]
+    return float(((hh >= 12) & (hh <= 32) & (s > 70) & (v > 120)).mean())
 
 
 # --------------------------------------------------------------------------------------------- artifact / EE
@@ -612,12 +660,19 @@ def parse_artifact(panel: Panel, img: Any, lines: list[TextLine], arts: dict[str
     else:
         v = None
         if second:
+            # tight pill window (measured pill: x lv.x0-0.78h..lv.x0, y lv.cy-0.94h..-0.41h), colour rendering at 3
+            # upscales + 1 wider window. The art left of the pill is often read as a glyph glued to the '+N'
+            # ('7+4', 'Z|+4'): the '+N' token is taken from the END of a line; a line without '+' never votes
+            # (binary renderings drop the 0 of '+30' -> '+3', so they are not used here).
             reads = []
-            for (x0, y0, x1, y1), mode in [((-1.5, -1.4, 0.3, -0.1), "col"), ((-1.0, -1.1, 0.1, -0.3), "col"),
-                                           ((-1.0, -1.1, 0.1, -0.3), "gray")]:
+            for (x0, y0, x1, y1), mode, tgt in [((-0.9, -1.0, 0.05, -0.33), "col", 120.0),
+                                                ((-0.9, -1.0, 0.05, -0.33), "col", 180.0),
+                                                ((-0.9, -1.0, 0.05, -0.33), "col", 240.0),
+                                                ((-1.2, -1.15, 0.2, -0.2), "col", 120.0)]:
                 crop = _region(img, lv.box.x0 + x0 * h, lv.box.cy + y0 * h, lv.box.x0 + x1 * h, lv.box.cy + y1 * h)
-                reads.append([l.text.strip() for l in _reader.read(_render(crop, h, mode))] if crop.size else [])
-            v, n, tally = vote(reads, r"\+\s?\d{1,2}")
+                texts = [l.text.replace(" ", "") for l in _reader.read(_render(crop, h, mode, tgt))] if crop.size else []
+                reads.append([m.group(0) for t in texts if (m := PLUS_TAIL_RE.search(t))])
+            v, n, tally = vote(reads, r"\+\d{1,2}")
             panel.second_pass.append(f"artifact badge: missing -> {reads} -> {v} (pill {pill:.3f})")
         if v is not None:
             art["enhance"] = Fld(int(v.lstrip("+").strip()), 0.5 + 0.1 * n, "ocr2", f"votes {tally}")
@@ -642,18 +697,35 @@ LABELS = {"Attack": "atk", "Defense": "def", "Health": "hp", "Speed": "spd", "Cr
           "Critical Hit Damage": "cd", "Effectiveness": "eff", "Effect Resistance": "er"}
 
 
-def _icon_mask(crop: Any) -> Any:
+def _icon_mask(crop: Any, up: int = 4) -> Any:
+    """Grey-level glyph image, scale-normalised: upscale, 'bright AND unsaturated' = V * (1 - S), minus the
+    background median; keep components above 45 % of the max, dropping small ones that touch the left/right crop
+    border (box edges, the next character); bounding box -> centred square -> 32x32, max-normalised.
+    (A binary mask lost the glyph at 0.64x: the first version abstained there; this one separates cc at 0.93+.)"""
+    crop = cv2.resize(crop, None, fx=up, fy=up, interpolation=cv2.INTER_CUBIC)
     hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
-    m = ((hsv[..., 1] < 70) & (hsv[..., 2] > 120)).astype(np.uint8)
-    ys, xs = np.nonzero(m)
+    v = hsv[..., 2].astype(np.float32) * (1 - hsv[..., 1].astype(np.float32) / 255)
+    v = np.clip(v - np.median(v), 0, None)
+    m = (v > 0.45 * v.max()).astype(np.uint8) if v.max() > 0 else np.zeros(v.shape, np.uint8)
+    n, lab, st, _ = cv2.connectedComponentsWithStats(m, connectivity=8)
+    W = m.shape[1]
+    keep = np.zeros_like(m)
+    tot = st[1:, cv2.CC_STAT_AREA].sum() if n > 1 else 0
+    for i in range(1, n):
+        x, _, w, _, a = st[i]
+        if (x == 0 or x + w == W) and a < 0.3 * tot:
+            continue
+        keep[lab == i] = 1
+    ys, xs = np.nonzero(keep)
     if len(xs) < 5:
         return np.zeros((32, 32), np.float32)
-    m = m[ys.min():ys.max() + 1, xs.min():xs.max() + 1]
-    hh, ww = m.shape
+    sub = (v * keep)[ys.min():ys.max() + 1, xs.min():xs.max() + 1]
+    hh, ww = sub.shape
     side = max(hh, ww)
-    pad = np.zeros((side, side), np.uint8)
-    pad[(side - hh) // 2:(side - hh) // 2 + hh, (side - ww) // 2:(side - ww) // 2 + ww] = m
-    return cv2.GaussianBlur(cv2.resize(pad.astype(np.float32), (32, 32), interpolation=cv2.INTER_AREA), (3, 3), 0)
+    pad = np.zeros((side, side), np.float32)
+    pad[(side - hh) // 2:(side - hh) // 2 + hh, (side - ww) // 2:(side - ww) // 2 + ww] = sub
+    r = cv2.resize(pad, (32, 32), interpolation=cv2.INTER_AREA)
+    return r / (r.max() + 1e-6)
 
 
 def classify_icon(crop: Any, lines: list[TextLine], img: Any) -> Fld:
@@ -673,7 +745,7 @@ def classify_icon(crop: Any, lines: list[TextLine], img: Any) -> Fld:
     sims = sorted(((float((q * t).sum() / (np.sqrt((q * q).sum() * (t * t).sum()) + 1e-6)), k)
                    for k, t in temps.items()), reverse=True)
     (s1, k1), (s2, k2) = sims[0], sims[1]
-    ok = s1 >= 0.7 and s1 - s2 >= 0.08
+    ok = s1 >= 0.7 and s1 - s2 >= 0.15
     return Fld(k1 if ok else None, s1, "icon", f"2nd {k2} {s2:.2f} margin {s1 - s2:.2f}" + ("" if ok else " REVIEW"))
 
 
@@ -741,6 +813,7 @@ def scaled(name: str, scale: float) -> Any:
 # --------------------------------------------------------------------------------------------- evaluation
 FIELDS = ["slot", "main", "subs", "level", "enhance", "score", "grade"]
 PILLS: dict[str, list[float]] = {}
+GRADE_STATS: list[tuple[Any, ...]] = []
 
 
 def evaluate(panel: Panel, truth: dict[str, Any], tally: dict[str, list[int]], fails: list[str],
@@ -786,6 +859,8 @@ def evaluate(panel: Panel, truth: dict[str, Any], tally: dict[str, list[int]], f
                 count(k + "_1st", None if ff is None or ff.how == "absent" and k != "enhance" else ff.value == want_v,
                       f"{s} {ff} vs {want_v}")
         g = p.grade.value if p.grade else None
+        GRADE_STATS.append((panel.scale, grades[i], f"{panel.name[9:]}/{s}", p.hue, len(p.subs) if p.main_ok else -1,
+                            tp["enhance"], g))
         if grades[i] == "X":
             count("grade_odd_review", g is None, f"{s} {p.grade} (odd frame, REVIEW expected) hue={p.hue}")
         else:
@@ -815,6 +890,11 @@ def evaluate(panel: Panel, truth: dict[str, Any], tally: dict[str, list[int]], f
               f"{panel.ee and panel.ee['value']}")
         count("ee_name", bool(panel.ee and panel.ee["name"].value == ee["name_text"]),
               f"{panel.ee and panel.ee['name']}")
+        # truth.json: "probably cc (to verify)"; eye check in this spike (EE icon next to the 8 left-panel label
+        # icons, dbg2/ee_vs_labels.png): same glyph as Critical Hit Chance -> expected "cc"
+        got_icon = panel.ee["icon_stat"] if panel.ee else None
+        count("ee_icon", None if got_icon is None or got_icon.value is None else got_icon.value == "cc",
+              f"{got_icon}")
 
 
 # --------------------------------------------------------------------------------------------- contact sheet
@@ -985,6 +1065,21 @@ def main() -> int:
     print("\n==== pill fractions by truth")
     for k, v in sorted(PILLS.items()):
         print(f"  {k:10s} n={len(v):2d} min={min(v):.3f} max={max(v):.3f}")
+    print("\n==== grade clusters (eye label R=red, P=purple, X=odd): purple fraction, ornament gold, mean hues")
+    for sc in sorted({r[0] for r in GRADE_STATS}):
+        for lab in "RPX":
+            rs = [r for r in GRADE_STATS if r[0] == sc and r[1] == lab]
+            if not rs:
+                continue
+            def rng(k: str, rs: list[tuple[Any, ...]] = rs) -> str:
+                v = [r[3][k] for r in rs if r[3].get(k) == r[3].get(k)]  # drop NaN
+                return f"{min(v):.2f}..{max(v):.2f}" if v else "-"
+            print(f"  x{sc} {lab} n={len(rs):2d} pfrac {rng('pfrac')} orn {rng('orn')} hue_red {rng('hue_red')} "
+                  f"hue_pur {rng('hue_pur')} sat {rng('sat')} val {rng('val')}")
+    print("  substat count at +0 vs colour (community: epic starts with 4 subs, heroic with 3; unverified):")
+    for r in GRADE_STATS:
+        if r[5] == 0:
+            print(f"    x{r[0]} {r[2]:18s} eye={r[1]} parsed={r[6]} subs={r[4]}")
     print("\n==== failures")
     for f in fails:
         print("  ", f)
