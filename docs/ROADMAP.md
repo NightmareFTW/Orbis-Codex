@@ -33,7 +33,7 @@ Checkboxes: `[x]` done · `[ ]` pending. Milestones are small vertical slices; o
 > other program. Screen extraction therefore comes first (M5a → M5b → M6 → M7 → M9); the Fribbels save import (M4)
 > becomes optional and comes later, for users who already have a Fribbels file.
 
-- [ ] **M4 Fribbels save import** *(optional, later)* — schema derived from a real save file; strict models + raw passthrough; gear dedupe by id/fingerprint; mapping Fribbels names → hero codes with margin rule; `e7 import fribbels <file>`.
+- [ ] **M4 Fribbels save import** *(next after M7 — SPEC D44: bulk first load of ~400 heroes; needs the user's save file)* — schema derived from a real save file; strict models + raw passthrough; gear dedupe by id/fingerprint; mapping Fribbels names → hero codes with margin rule; `e7 import fribbels <file>`.
   - Acceptance: user's file imports with a report (imported/skipped/ambiguous); unknown fields preserved; test skips cleanly without the file; CP samples feed NV-06.
 - [x] **M5a Capture tooling** — read-only game-window locator (window title/class + system process list, never a handle to the game), `mss` capture of the window's client area, blank-frame check, lossless PNG, `e7 capture` (one shot, `--delay`, `--list-windows`, `--hwnd`) and a `--hotkey` scan mode (RegisterHotKey, no keyboard hook); `e7 doctor` reports the game window; a guard test forbids process handles, memory access, input injection, keyboard hooks and packet capture anywhere in the code.
   - Acceptance: tests with fake windows/backends on every OS, real window listing and screen grab on the Windows CI runner; the user captures the screens listed in SPEC Q2 with it.
