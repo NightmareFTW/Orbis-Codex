@@ -20,7 +20,7 @@ from typing import Final
 from e7ac.domain.codes import Stat
 from e7ac.settings import GameLanguage
 from e7ac.vision.labels import IMPRINT_LOCKED, LEVEL_PREFIX, NO_SET_EFFECT, STAT_LABELS, match_label, normalise
-from e7ac.vision.ocr import TextLine, Word
+from e7ac.vision.ocr import Box, TextLine, Word
 
 FLAT_STATS: Final = frozenset({Stat.ATK, Stat.DEF, Stat.HP, Stat.SPEED})
 _NUMBER: Final = re.compile(r"\d[\d,]*(?:\.\d+)?%?")
@@ -52,6 +52,19 @@ class StatReading:
 
 
 @dataclass(slots=True)
+class ScreenAnchors:
+    """Boxes of the texts the panel was read from: the image readers (icons, stars) work relative to them."""
+
+    labels: dict[Stat, Box] = field(default_factory=dict)
+    """Stat label boxes; their icon sits left of each label (the stat-icon templates, M7)."""
+    name: Box | None = None
+    level: Box | None = None
+    imprint: tuple[Box, ...] = ()
+    """The imprint text block (one box per wrapped line), or the "Locked" block."""
+    cp: Box | None = None
+
+
+@dataclass(slots=True)
 class HeroScreenReading:
     kind: ScreenKind
     name: str | None = None
@@ -67,6 +80,7 @@ class HeroScreenReading:
     stats: dict[Stat, StatReading] = field(default_factory=dict)
     set_names: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    anchors: ScreenAnchors = field(default_factory=ScreenAnchors)
 
 
 def parse_hero_screen(lines: Sequence[TextLine], language: GameLanguage = GameLanguage.EN) -> HeroScreenReading:
@@ -82,6 +96,7 @@ def parse_hero_screen(lines: Sequence[TextLine], language: GameLanguage = GameLa
     reading = HeroScreenReading(kind=ScreenKind.HERO_INFO)
     for stat, row in column.rows.items():
         reading.stats[stat] = _stat_values(stat, row, column)
+        reading.anchors.labels[stat] = row.box
     missing = [s.value for s in labels.values() if s not in reading.stats]
     if missing:
         reading.warnings.append(f"stat rows not found: {', '.join(missing)}")
@@ -89,6 +104,7 @@ def parse_hero_screen(lines: Sequence[TextLine], language: GameLanguage = GameLa
         reading.kind = ScreenKind.EQUIPMENT
     panel = [ln for ln in lines if column.contains(ln) and ln not in column.rows.values()]
     level_line = _read_level(reading, panel, column.top, language)
+    reading.anchors.level = level_line.box if level_line is not None else None
     upper_limit = level_line.box.y1 if level_line is not None else 0.0
     _read_cp(reading, panel, upper_limit, column)
     _read_imprint(reading, panel, upper_limit, column.top, language)
@@ -238,6 +254,7 @@ def _read_cp(reading: HeroScreenReading, panel: list[TextLine], upper: float, co
         return
     best = max(candidates, key=lambda ln: ln.box.y0)  # the CP sits right above the stat rows
     reading.cp = int(best.text.strip().replace(",", ""))
+    reading.anchors.cp = best.box
 
 
 def _read_imprint(
@@ -246,11 +263,14 @@ def _read_imprint(
     labels = STAT_LABELS[language]
     region = sorted((ln for ln in panel if upper <= ln.box.y0 and ln.box.y1 <= top), key=lambda ln: ln.box.y0)
     locked = normalise(IMPRINT_LOCKED.get(language, ""))
-    if locked and any(normalise(ln.text) == locked for ln in region):
+    locked_line = next((ln for ln in region if locked and normalise(ln.text) == locked), None)
+    if locked_line is not None:
         reading.imprint_locked = True
+        reading.anchors.imprint = tuple(ln.box for ln in _text_block(locked_line, region))
         return
     for line in (ln for ln in region if "+" in ln.text):
-        text = " ".join(ln.text.strip() for ln in _text_block(line, region))
+        block = _text_block(line, region)
+        text = " ".join(ln.text.strip() for ln in block)
         match = _IMPRINT.match(text)
         if match is None:
             continue
@@ -268,6 +288,7 @@ def _read_imprint(
             reading.warnings.append(f"imprint without % for a rate stat: {text!r}")
             return
         reading.imprint_raw = text
+        reading.anchors.imprint = tuple(ln.box for ln in block)
         return
     reading.warnings.append("imprint not found (neither a value nor 'Locked')")
 
@@ -316,6 +337,7 @@ def _read_name(reading: HeroScreenReading, panel: list[TextLine], level_line: Te
     # star icons next to the name are sometimes read as symbols: keep letters, digits, spaces and ' & . -
     cleaned = re.sub(r"[^\w\s'&.-]", " ", best.text)
     reading.name = re.sub(r"\s+", " ", cleaned).strip()
+    reading.anchors.name = best.box
     reading.name_confidence = round(best.score, 3)
 
 
