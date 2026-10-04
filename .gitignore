@@ -1,0 +1,38 @@
+# --- Game assets, screenshots and personal data: never commit ---
+fixtures/screenshots/
+fixtures/saves/
+fixtures/stove/
+fixtures/private/
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.bmp
+!docs/**/*.png
+
+# Local runtime data (DB, caches, captures)
+/data/
+/.cache/
+/captures/
+*.sqlite3
+*.db
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.hypothesis/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
