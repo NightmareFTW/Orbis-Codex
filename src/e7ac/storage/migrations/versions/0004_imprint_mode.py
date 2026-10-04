@@ -23,5 +23,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    with op.batch_alter_table("hero_snapshot") as batch:
+    # ALTER TABLE ... DROP COLUMN (SQLite >= 3.35), never a table copy: with foreign keys on, dropping the old table
+    # would cascade-delete every snapshot_gear row (M6.1 review)
+    with op.batch_alter_table("hero_snapshot", recreate="never") as batch:
         batch.drop_column("imprint_mode")

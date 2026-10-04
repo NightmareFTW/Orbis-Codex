@@ -245,6 +245,39 @@ def test_the_imprint_mode_is_inferred_only_from_clear_catalog_evidence() -> None
     assert no_table is not None and no_table.mode is None and any("no imprint table" in n for n in notes)
 
 
+def test_a_flat_percent_twin_is_not_taken_for_a_team_imprint() -> None:
+    hero = entity("c1193", **_renoa_fields(imprint__stat="max_hp_rate", imprint__values={"B": 0.07, "SSS": 0.15}))
+    lost_percent = [line("Health +", 172, 404), line("7", 172, 434)]  # "7%" with the "%" misread
+    result = build_from_screen(
+        parse_hero_screen(equipment_screen(imprint=lost_percent)), {"c1193": hero}, captured_at=NOW
+    )
+    assert result.build is not None and result.build.imprint == Imprint(grade=None, stat=Stat.HP, value=7.0)
+    assert any("flat/percent twin" in n for n in result.notes)
+    assert result.build.confidence["imprint.mode"] == ASSUMED
+
+
+def test_a_rescan_keeps_a_known_imprint_mode_and_grade() -> None:
+    no_table = entity("c1193", **_renoa_fields(imprint__stat=None, imprint__values=None))
+    first = build_from_screen(parse_hero_screen(equipment_screen()), {"c1193": no_table}, captured_at=NOW)
+    assert first.build is not None and first.build.imprint is not None
+    known = first.build.imprint.model_copy(update={"mode": ImprintMode.TEAM, "grade": ImprintGrade.SSS})
+    confidence = {k: v for k, v in first.build.confidence.items() if not k.startswith("imprint.")}  # typed by hand
+    existing = first.build.model_copy(update={"imprint": known, "confidence": confidence})
+    again = build_from_screen(
+        parse_hero_screen(equipment_screen()), {"c1193": no_table}, captured_at=NOW, existing=existing
+    )
+    assert again.build is not None and again.build.imprint == known
+    assert again.build.confidence["imprint.mode"] == again.build.confidence["imprint.grade"] == 1.0
+    # a hand-typed mode beats the catalog inference, and the disagreement is reported
+    self_known = existing.model_copy(update={"imprint": known.model_copy(update={"mode": ImprintMode.SELF})})
+    team_hero = entity("c1193", **_renoa_fields(imprint__stat="def_rate"))
+    kept = build_from_screen(
+        parse_hero_screen(equipment_screen()), {"c1193": team_hero}, captured_at=NOW, existing=self_known
+    )
+    assert kept.build is not None and kept.build.imprint is not None and kept.build.imprint.mode is ImprintMode.SELF
+    assert any("the catalog suggests team, the roster has self (kept" in n for n in kept.notes)
+
+
 def test_locked_or_unread_imprints_are_never_silent() -> None:
     locked_lines = [line("Locked", 172, 400, height=44), line("Health %", 172, 440)]
     first = build_from_screen(parse_hero_screen(equipment_screen()), {"c1193": RENOA}, captured_at=NOW)
@@ -256,6 +289,7 @@ def test_locked_or_unread_imprints_are_never_silent() -> None:
         existing=first.build,
     )
     assert locked.build is not None and locked.build.imprint is None and locked.build.confidence["imprint"] == 1.0
+    assert not {"imprint.mode", "imprint.grade"} & set(locked.build.confidence)  # nothing left about a missing imprint
     assert any("shows 'Locked'" in n for n in locked.notes)
     kept = build_from_screen(
         parse_hero_screen(equipment_screen(imprint=[])), {"c1193": RENOA}, captured_at=NOW, existing=first.build
@@ -327,6 +361,35 @@ def test_image_arguments_are_expanded_like_a_shell_would(tmp_path: Path, monkeyp
     empty.mkdir()
     with pytest.raises(ImageError, match="no images"):
         expand_image_paths([empty])
+
+
+def test_image_arguments_run_oldest_first_and_odd_arguments_are_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import os
+
+    newer, older = tmp_path / "Screenshot (10).png", tmp_path / "Screenshot (9).png"
+    for path, stamp in ((older, 1_000_000), (newer, 2_000_000)):
+        path.write_bytes(b"x")
+        os.utime(path, (stamp, stamp))
+    # already-expanded files in name order (as a Windows shell or glob gives them) still run oldest first
+    assert expand_image_paths([newer, older]) == [older, newer]
+    assert expand_image_paths([str(tmp_path / "*.png")]) == [older, newer]
+    with pytest.raises(ImageError, match="empty image argument"):
+        expand_image_paths([""])
+    monkeypatch.chdir(tmp_path)
+    tilde = tmp_path / "~draft.png"
+    tilde.write_bytes(b"x")
+    assert expand_image_paths(["~draft.png"]) == [Path("~draft.png")]  # an existing path is taken literally
+
+
+def test_typer_never_expands_arguments_before_e7_does(monkeypatch: pytest.MonkeyPatch) -> None:
+    from e7ac.cli import app as app_module
+
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr(app_module, "app", lambda **kwargs: calls.append(kwargs))
+    app_module.main()
+    assert calls == [{"windows_expand_args": False}]
 
 
 @pytest.mark.windows

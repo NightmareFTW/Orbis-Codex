@@ -36,6 +36,15 @@ FINAL_FIELDS: Final[Mapping[Stat, str]] = {
 }
 BASE_FIELDS: Final[Mapping[Stat, str]] = {stat: f"base.{stat.value}" for stat in FINAL_FIELDS}
 _FLAT: Final = frozenset({Stat.ATK, Stat.DEF, Stat.HP, Stat.SPEED})
+_TWINS: Final[Mapping[Stat, str]] = {
+    Stat.ATK: Stat.ATK_PERCENT.value,
+    Stat.ATK_PERCENT: Stat.ATK.value,
+    Stat.DEF: Stat.DEF_PERCENT.value,
+    Stat.DEF_PERCENT: Stat.DEF.value,
+    Stat.HP: Stat.HP_PERCENT.value,
+    Stat.HP_PERCENT: Stat.HP.value,
+}
+"""Flat and percent versions of a stat: a lost '%' turns one into the other."""
 ASSUMED: Final = 0.0
 """Confidence of a field the screen does not show and that had no previous value (a placeholder to correct)."""
 INFERRED_MODE: Final = 0.8
@@ -206,48 +215,97 @@ def _imprint(
     if reading.imprint_locked:
         if had is not None:
             result.notes.append(f"imprint: the screen shows 'Locked' (none); the roster had {_describe(had)}")
-        data["imprint"] = None
-        confidence["imprint"] = 1.0
+        _no_imprint(data, confidence, 1.0)
         return
     if reading.imprint_stat is None or reading.imprint_value is None:
         if had is not None:
             result.notes.append(f"imprint not read: kept from the current build ({_describe(had)})")
         else:
-            data["imprint"] = None
-            confidence["imprint"] = ASSUMED
+            _no_imprint(data, confidence, ASSUMED)
             result.notes.append("imprint not read: stored as none (check it on the screen)")
         return
+    mode, grade = _infer_mode(reading, hero, result)
+    shown_stat, shown_value = reading.imprint_stat, reading.imprint_value
+    confidence["imprint"] = 1.0
+    confidence["imprint.mode"] = INFERRED_MODE if mode is not None else ASSUMED
+    confidence["imprint.grade"] = INFERRED_MODE if grade is not None else ASSUMED
+    if had is not None and existing is not None and had.stat is shown_stat and abs(had.value - shown_value) < 1e-9:
+        # same imprint as the roster: what the screen cannot tell (yet) is kept, and a disagreement is reported
+        mode = _keep_known("mode", mode, had.mode, existing.confidence, confidence, result)
+        grade = _keep_known("grade", grade, had.grade, existing.confidence, confidence, result)
+    data["imprint"] = Imprint(grade=grade, stat=shown_stat, value=shown_value, mode=mode)
+
+
+def _infer_mode(
+    reading: HeroScreenReading, hero: ResolvedEntity, result: ScreenBuild
+) -> tuple[ImprintMode | None, ImprintGrade | None]:
+    """Self/team and grade from the catalog's self-imprint table (SPEC D42); None when the evidence is not clear."""
+    assert reading.imprint_stat is not None and reading.imprint_value is not None
     shown = f"imprint {reading.imprint_raw!r}"
     own_stat = hero.value("imprint.stat")
-    grades = hero.value("imprint.values")
-    mode: ImprintMode | None = None
-    grade: ImprintGrade | None = None
     if not isinstance(own_stat, str):
         result.notes.append(f"{shown}: the catalog has no imprint table for this hero, so self/team is unknown")
-    elif own_stat != reading.imprint_stat.value:
-        mode = ImprintMode.TEAM  # a self imprint always gives the hero's own imprint stat
+        return None, None
+    if own_stat != reading.imprint_stat.value:
+        if _TWINS.get(reading.imprint_stat) == own_stat:
+            result.notes.append(
+                f"{shown}: the flat/percent twin of this hero's own imprint ({own_stat}); a misread '%' or a team "
+                "imprint - self/team unknown (check the icon)"
+            )
+            return None, None
         result.notes.append(
             f"{shown}: not this hero's own imprint ({own_stat}), so it is the team imprint (MECH-IMP-02); "
             "its grade is shown as an icon only"
         )
-    else:
-        value = reading.imprint_value
-        matches = [
-            g
-            for g, v in (grades.items() if isinstance(grades, dict) else ())
-            if isinstance(v, (int, float)) and abs(v - value) < 1e-6
-        ]
-        if len(matches) == 1 and matches[0] in ImprintGrade._value2member_map_:
-            mode, grade = ImprintMode.SELF, ImprintGrade(matches[0])
-        else:
-            result.notes.append(
-                f"{shown}: this hero's own imprint stat, but the value is not exactly one grade of the catalog "
-                "table, so self/team and the grade are unknown"
-            )
-    data["imprint"] = Imprint(grade=grade, stat=reading.imprint_stat, value=reading.imprint_value, mode=mode)
-    confidence["imprint"] = 1.0
-    confidence["imprint.mode"] = INFERRED_MODE if mode is not None else ASSUMED
-    confidence["imprint.grade"] = INFERRED_MODE if grade is not None else ASSUMED
+        return ImprintMode.TEAM, None  # a self imprint always gives the hero's own imprint stat
+    grades = hero.value("imprint.values")
+    value = reading.imprint_value
+    matches = [
+        g
+        for g, v in (grades.items() if isinstance(grades, dict) else ())
+        if isinstance(v, (int, float)) and abs(v - value) < 1e-6
+    ]
+    if len(matches) == 1 and matches[0] in ImprintGrade._value2member_map_:
+        return ImprintMode.SELF, ImprintGrade(matches[0])
+    result.notes.append(
+        f"{shown}: this hero's own imprint stat, but the value is not exactly one grade of the catalog table, "
+        "so self/team and the grade are unknown"
+    )
+    return None, None
+
+
+def _keep_known[T: (ImprintMode, ImprintGrade)](
+    name: str,
+    inferred: T | None,
+    known: T | None,
+    known_confidence: Mapping[str, float],
+    confidence: dict[str, float],
+    result: ScreenBuild,
+) -> T | None:
+    key = f"imprint.{name}"
+    if known is None or inferred == known:
+        if known is not None:
+            confidence[key] = max(confidence[key], known_confidence.get(key, 1.0))
+        return inferred
+    old = known_confidence.get(key, 1.0)
+    if inferred is None:
+        confidence[key] = old
+        return known
+    if old > confidence[key]:
+        result.notes.append(
+            f"imprint {name}: the catalog suggests {inferred.value}, the roster has {known.value} (kept: more certain)"
+        )
+        confidence[key] = old
+        return known
+    result.notes.append(f"imprint {name}: the roster had {known.value}, the catalog suggests {inferred.value} (taken)")
+    return inferred
+
+
+def _no_imprint(data: dict[str, Any], confidence: dict[str, float], certainty: float) -> None:
+    data["imprint"] = None
+    confidence["imprint"] = certainty
+    confidence.pop("imprint.mode", None)
+    confidence.pop("imprint.grade", None)
 
 
 def _describe(imprint: Imprint) -> str:

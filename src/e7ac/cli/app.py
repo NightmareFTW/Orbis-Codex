@@ -127,4 +127,6 @@ def _load_or_exit() -> Settings:
 
 
 def main() -> None:
-    app()
+    # Typer would expand globs, ~ and %VAR% itself on Windows only, in directory order and without filtering; the
+    # commands that take image patterns do it themselves on every OS (SPEC D43), so arguments arrive as typed.
+    app(windows_expand_args=False)

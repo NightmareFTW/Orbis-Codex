@@ -499,6 +499,26 @@ def test_migration_repairs_duplicate_current_snapshots(tmp_path: Path) -> None:
     engine.dispose()
 
 
+def test_imprint_mode_migration_keeps_rows_both_ways(tmp_path: Path) -> None:
+    engine = open_database(tmp_path / "db.sqlite3")
+    team = Imprint(grade=None, stat=Stat.EFFECTIVENESS, value=0.06, mode=ImprintMode.TEAM)
+    with session_scope(engine) as session:
+        owned = add_owned_hero(session, bbk(gear={GearSlot.WEAPON: weapon()}, imprint=team))
+        row = current_snapshot(session, owned.id)
+        assert row is not None and build_from_row(session, row).imprint == team
+    command.downgrade(alembic_config(engine), "0003_one_current_snapshot")  # in place: gear links must survive
+    with engine.connect() as connection:
+        assert connection.exec_driver_sql("SELECT COUNT(*) FROM snapshot_gear").scalar() == 1
+        assert connection.exec_driver_sql("SELECT COUNT(*) FROM hero_snapshot").scalar() == 1
+    command.upgrade(alembic_config(engine), "head")
+    with session_scope(engine) as session:
+        row = current_snapshot(session, owned.id)
+        assert row is not None
+        restored = build_from_row(session, row)
+        assert restored.imprint == team.model_copy(update={"mode": None}) and GearSlot.WEAPON in restored.gear
+    engine.dispose()
+
+
 # ------------------------------------------------------------------------------------------------ backup / import
 
 
