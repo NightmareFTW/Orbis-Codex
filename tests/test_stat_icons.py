@@ -267,8 +267,9 @@ def test_stat_templates_validate_their_content() -> None:
         StatTemplates({Stat.ATK: crop, Stat.ATK_PERCENT: crop}, 40.0)
     with pytest.raises(IconError, match="positive"):
         StatTemplates({Stat.ATK: crop, Stat.HP: crop}, 0.0)
-    with pytest.raises(IconError, match="BGR image"):
-        StatTemplates({Stat.ATK: crop, Stat.HP: crop[:, :, 0]}, 40.0)
+    for bad in (crop[:, :, 0], crop.astype(np.float32), crop[:2]):
+        with pytest.raises(IconError, match="BGR uint8 image"):
+            StatTemplates({Stat.ATK: crop, Stat.HP: bad}, 40.0)  # type: ignore[dict-item]
 
 
 # ------------------------------------------------------------------------------------------------ matching
@@ -323,21 +324,24 @@ def test_single_window_group_uses_its_own_column_and_scale() -> None:
     assert matches[-1].family == Stat.CRIT_CHANCE
 
 
-LOOKALIKE: Final = (Stat.EFFECT_RESISTANCE, Stat.HP)
-"""Synthetic diamond and heart share their V-shaped lower half (in the game: the heart and the shield)."""
+LOOKALIKES: Final = {Stat.EFFECT_RESISTANCE: Stat.HP, Stat.DEF: Stat.HP}
+"""Synthetic glyphs sharing a V-shaped lower half (diamond, shield, heart); in the game: the heart and the shield."""
 
 
 def test_icons_without_their_template_abstain_unless_a_lookalike_exists() -> None:
     """The true template removed (an icon the templates do not know): the margin rule rejects the impostor, except
     for a lookalike, which can win clearly (the game's heart without its template became the shield with margins up
-    to 0.22). That is why build_templates fails closed instead of returning an incomplete set."""
+    to 0.22 on degraded copies). That is why build_templates fails closed instead of returning an incomplete set."""
     image, windows = gear_screen({"L.sub": (560, SUBS), "R.main": (820, MAINS)})
     templates = build_templates(image, label_boxes())
+    accepted: dict[Stat, list[Stat | None]] = {}
     for index, stat in enumerate(ICON_STATS):
         reduced = StatTemplates({s: c for s, c in templates.crops.items() if s != stat}, templates.pitch)
-        found = match_icons(image, reduced, windows)
-        expected = LOOKALIKE[1] if stat == LOOKALIKE[0] else None
-        assert [found[index].family, found[9 + index].family] == [expected, expected], stat
+        found = families(match_icons(image, reduced, windows))
+        accepted[stat] = [found[index], found[9 + index]]  # the substat and the main-stat icon of that family
+    for stat, got in accepted.items():
+        assert set(got) <= {None, LOOKALIKES.get(stat)}, (stat, got)
+    assert accepted[Stat.EFFECT_RESISTANCE] == [Stat.HP, Stat.HP]  # the lookalike wins by > 0.2: fail closed
 
 
 def test_group_of_blank_windows_abstains_everywhere() -> None:
@@ -598,12 +602,22 @@ def test_real_exclusive_equipment_icon(name: str, scale: float) -> None:
     assert [m.family for m in run.ee] == ([EE_FAMILY[name]] if name in EE_FAMILY else [])
 
 
+REAL_LOOKALIKES: Final = {H: D, D: H}
+"""Heart and shield: with the HP template removed, heart icons came within 0.003 of the margin as DEF (clean copies)
+and were accepted as DEF on degraded copies. The only pair seen; build_templates fails closed for this reason."""
+
+
 @pytest.mark.parametrize("name", CAPTURES)
 def test_real_icons_without_their_template_abstain(name: str) -> None:
+    """The prototype's "unknown icon" control: remove the true family's template; nothing but a lookalike is accepted
+    (measured: none at all on these clean captures)."""
     run = golden_run(name, 1.0)
-    assert set(run.unknown) == set(truth(name))
+    expected = truth(name)
+    assert set(run.unknown) == set(expected)
     accepted = {
-        k: (m.family, round(m.score, 3), round(m.margin, 3)) for k, m in run.unknown.items() if m.family is not None
+        k: (expected[k][1], m.family, round(m.score, 3), round(m.margin, 3))
+        for k, m in run.unknown.items()
+        if m.family is not None and m.family != REAL_LOOKALIKES.get(expected[k][1])
     }
     assert accepted == {}
 

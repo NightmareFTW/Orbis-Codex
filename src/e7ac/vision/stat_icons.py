@@ -105,6 +105,10 @@ MIN_MARGIN: Final = 0.15
 whose true template was removed reached 0.147 with a score >= MIN_SCORE (0 of 447 accepted)."""
 
 
+_NO_GRADIENT: Final = 1e-6
+"""Added to the gradient magnitude so flat areas give a zero field instead of 0 / 0."""
+
+
 class IconError(Exception):
     """The stat-icon templates cannot be built from this capture (the matching would not be trustworthy)."""
 
@@ -130,8 +134,8 @@ class StatTemplates:
         if not self.pitch > 0:
             raise IconError(f"label pitch must be positive (got {self.pitch})")
         for stat, crop in self.crops.items():
-            if crop.ndim != 3 or crop.shape[2] != 3 or min(crop.shape[:2]) < 3:
-                raise IconError(f"template {stat.name} is not a BGR image of at least 3x3 pixels")
+            if crop.dtype != np.uint8 or crop.ndim != 3 or crop.shape[2] != 3 or min(crop.shape[:2]) < 3:
+                raise IconError(f"template {stat.name} is not a BGR uint8 image of at least 3x3 pixels")
 
     @property
     def size(self) -> float:
@@ -280,7 +284,7 @@ def _gradient_field(bgr: BgrImage, sigma: float) -> GradientField:
     strongest = (gx * gx + gy * gy).argmax(axis=2)[..., None]
     gx = np.take_along_axis(gx, strongest, axis=2)[..., 0]
     gy = np.take_along_axis(gy, strongest, axis=2)[..., 0]
-    magnitude = np.sqrt(gx * gx + gy * gy) + 1e-6
+    magnitude = np.sqrt(gx * gx + gy * gy) + _NO_GRADIENT
     return np.dstack([(gx * gx - gy * gy) / magnitude, 2 * gx * gy / magnitude]).astype(np.float32)
 
 

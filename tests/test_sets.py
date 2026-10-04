@@ -404,29 +404,31 @@ def shield_polygon(width: int, height: int) -> npt.NDArray[np.int32]:
 
 
 def _glyph(canvas: Image, kind: str) -> None:
+    """Bold, clearly different gold glyphs (the real ones fill most of the shield too)."""
     w, h = canvas.shape[1], canvas.shape[0]
-    cx, cy, r = w // 2, int(h * 0.42), int(w * 0.22)
-    t = max(2, w // 14)
-    if kind == "circle":
+    cx, cy, r = w // 2, int(h * 0.42), int(w * 0.3)
+    t = max(2, w // 8)
+    if kind == "disc":
         cv2.circle(canvas, (cx, cy), r, GOLD, -1)
     elif kind == "ring":
-        cv2.circle(canvas, (cx, cy), r, GOLD, t)
-    elif kind == "cross":
+        cv2.circle(canvas, (cx, cy), r - t // 2, GOLD, t)
+    elif kind == "plus":
         cv2.line(canvas, (cx - r, cy), (cx + r, cy), GOLD, t)
         cv2.line(canvas, (cx, cy - r), (cx, cy + r), GOLD, t)
     elif kind == "x":
         cv2.line(canvas, (cx - r, cy - r), (cx + r, cy + r), GOLD, t)
         cv2.line(canvas, (cx - r, cy + r), (cx + r, cy - r), GOLD, t)
-    elif kind == "vbar":
-        cv2.rectangle(canvas, (cx - t, cy - r), (cx + t, cy + r), GOLD, -1)
-    elif kind == "bars":
-        for k in (-1, 0, 1):
-            cv2.rectangle(canvas, (cx - r, cy + k * 2 * t - t // 2), (cx + r, cy + k * 2 * t + t // 2), GOLD, -1)
-    elif kind == "square":
-        cv2.rectangle(canvas, (cx - r, cy - r), (cx + r, cy + r), GOLD, t)
+    elif kind == "chevron":
+        cv2.polylines(canvas, [np.array([(cx - r, cy - r), (cx, cy + r), (cx + r, cy - r)], np.int32)], False, GOLD, t)
+    elif kind == "hbars":
+        for k in (-1, 1):
+            cv2.line(canvas, (cx - r, cy + k * r * 2 // 3), (cx + r, cy + k * r * 2 // 3), GOLD, t)
+    elif kind == "vbars":
+        for k in (-1, 1):
+            cv2.line(canvas, (cx + k * r * 2 // 3, cy - r), (cx + k * r * 2 // 3, cy + r), GOLD, t)
     elif kind == "dots":
         for dx, dy in ((-1, -1), (1, -1), (-1, 1), (1, 1)):
-            cv2.circle(canvas, (cx + dx * r // 2, cy + dy * r // 2), t, GOLD, -1)
+            cv2.circle(canvas, (cx + dx * r * 2 // 3, cy + dy * r * 2 // 3), t, GOLD, -1)
     else:
         raise AssertionError(kind)
 
@@ -449,13 +451,13 @@ def synthetic_icon(glyph: str, fill: str, size: tuple[int, int] = ICON_SIZE) -> 
 
 
 SYNTHETIC_SETS: dict[str, tuple[str, str]] = {
-    "set_aaa": ("circle", "red"),
-    "set_bbb": ("cross", "red"),
-    "set_ccc": ("vbar", "red"),
-    "set_ddd": ("bars", "red"),
+    "set_aaa": ("disc", "red"),
+    "set_bbb": ("plus", "red"),
+    "set_ccc": ("chevron", "red"),
+    "set_ddd": ("hbars", "red"),
     "set_eee": ("ring", "blue"),
     "set_fff": ("x", "blue"),
-    "set_ggg": ("square", "blue"),
+    "set_ggg": ("vbars", "blue"),
     "set_hhh": ("dots", "blue"),
 }
 
@@ -556,7 +558,7 @@ def test_unknown_set_is_never_read_as_a_look_alike() -> None:
 
 def test_colour_gate_rejects_a_badge_with_the_wrong_fill() -> None:
     """A red-set glyph on a blue fill: the grey glyph matches, the fill does not -> REVIEW."""
-    recoloured = synthetic_icon("vbar", "blue")
+    recoloured = synthetic_icon("chevron", "blue")
     scene, box, _ = piece_scene(None, 46, icon=recoloured)
     match = synthetic_matcher().piece_set(scene, box)
     assert (match.best, match.fill, match.set_code) == ("set_ccc", "blue", None)
@@ -564,7 +566,7 @@ def test_colour_gate_rejects_a_badge_with_the_wrong_fill() -> None:
 
 
 def test_badge_without_fill_colour_is_review() -> None:
-    grey = synthetic_icon("cross", "grey")
+    grey = synthetic_icon("plus", "grey")
     scene, box, _ = piece_scene(None, 46, icon=grey)
     match = synthetic_matcher().piece_set(scene, box)
     assert (match.fill, match.set_code) == ("unknown", None)
@@ -573,7 +575,7 @@ def test_badge_without_fill_colour_is_review() -> None:
 def test_same_fill_look_alikes_go_to_review() -> None:
     """Two references of the same fill whose glyphs differ by a few pixels: the margin rule abstains."""
     icons = {code: png(icon) for code, icon in synthetic_icons().items()}
-    twin = synthetic_icon("circle", "red")
+    twin = synthetic_icon("disc", "red")
     cv2.circle(twin, (ICON_SIZE[0] // 2, int(ICON_SIZE[1] * 0.42)), 2, (35, 30, 165), -1)
     icons["set_twin"] = png(twin)
     matcher = SetIconMatcher.from_png(icons)
@@ -586,7 +588,7 @@ def test_same_fill_look_alikes_go_to_review() -> None:
 def test_same_fill_margin_ignores_the_other_fill() -> None:
     """Identical glyph in both fills: the colour gate decides, the margin is taken among same-fill sets only."""
     icons = {code: png(icon) for code, icon in synthetic_icons().items()}
-    icons["set_bluecircle"] = png(synthetic_icon("circle", "blue"))
+    icons["set_bluedisc"] = png(synthetic_icon("disc", "blue"))
     matcher = SetIconMatcher.from_png(icons)
     scene, box, _ = piece_scene("set_aaa", 46)
     match = matcher.piece_set(scene, box)
@@ -638,7 +640,7 @@ def test_regions_outside_the_image_find_nothing() -> None:
 
 
 def test_matcher_needs_two_png_icons_with_transparency() -> None:
-    icon = synthetic_icon("circle", "red")
+    icon = synthetic_icon("disc", "red")
     with pytest.raises(SetIconError, match="at least two"):
         SetIconMatcher.from_png({"set_aaa": png(icon)})
     with pytest.raises(SetIconError, match="set_bbb: not a PNG with an alpha channel"):
@@ -827,10 +829,14 @@ def test_golden_every_stove_icon_painted_over_real_badges() -> None:
         box = item_icon_boxes(lines)["weapon"]
         badge = matcher.piece_set(image, box).box
         assert badge is not None
+        side = round(box.x1 - box.x0)
+        rows = slice(max(0, round(box.y0) - side), round(box.y1) + side)
+        columns = slice(max(0, round(box.x0) - side), round(box.x1) + side)
         for code, icon in icons.items():
             scene = image.copy()
             paste(scene, icon, round(badge.x0), round(badge.y0), round(badge.y1 - badge.y0))
-            match = matcher.piece_set(like_a_capture(scene), box)
+            scene[rows, columns] = like_a_capture(scene[rows, columns])  # only around the piece: fast
+            match = matcher.piece_set(scene, box)
             if match.set_code != code:
                 wrong.append(f"{name} {code}: {match}")
     assert wrong == []
