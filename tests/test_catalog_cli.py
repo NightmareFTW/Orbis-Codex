@@ -6,7 +6,9 @@ import shutil
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
+import cv2
 import httpx
+import numpy as np
 import pytest
 from typer.testing import CliRunner
 
@@ -29,6 +31,20 @@ class Calls(list[str]):
     fail: Callable[[str], int | None] | None = None
 
 
+# A tiny RGBA PNG: the set icons fetched after a sync (sources.assets) are served by the fake too.
+ICON_PNG = cv2.imencode(".png", np.zeros((2, 2, 4), np.uint8))[1].tobytes()
+
+
+def with_set_icons(handler: Callable[[httpx.Request], httpx.Response]) -> Callable[[httpx.Request], httpx.Response]:
+    def serve(request: httpx.Request) -> httpx.Response:
+        response = handler(request)
+        if response.status_code == 404 and request.url.path.endswith(".png") and "/sets/" in request.url.path:
+            return httpx.Response(200, content=ICON_PNG, headers={"Content-Type": "image/png"})
+        return response
+
+    return serve
+
+
 @pytest.fixture
 def calls(monkeypatch: pytest.MonkeyPatch) -> Iterator[Calls]:
     """Route the CLI's HTTP through the synthetic handler; record every request."""
@@ -39,7 +55,7 @@ def calls(monkeypatch: pytest.MonkeyPatch) -> Iterator[Calls]:
             cache_dir=paths.cache_dir,
             config=HttpConfig(min_interval=0.0, max_retries=0),
             offline=offline,
-            transport=httpx.MockTransport(make_handler(calls=seen, fail=seen.fail)),
+            transport=httpx.MockTransport(with_set_icons(make_handler(calls=seen, fail=seen.fail))),
             sleep=lambda s: None,
         )
 
