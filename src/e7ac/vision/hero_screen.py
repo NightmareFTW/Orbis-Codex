@@ -4,7 +4,8 @@ Positions are never hard-coded in pixels: the nine stat labels are the anchors, 
 each label on the same row. Every field keeps the raw text and a confidence; nothing is guessed silently.
 Layout facts come from the user's captures (Stove PC, English, 2026-10-04):
 - stat rows in a fixed order with the final value, then (Equipment tab only) an orange "▲" bonus;
-- "Lv. Max/60" or "Lv. 52/60" above the imprint line ("Effectiveness + 15%") and the CP ("123,120");
+- "Lv. Max/60" or "Lv. 52/60" above the imprint text and the CP ("123,120"); the imprint text wraps on up to three
+  left-aligned lines ("Effect" / "Resistance +" / "15%") or reads "Locked" when the hero has none (MECH-IMP-02);
 - active set names ("Speed Set") under the stats.
 """
 
@@ -18,7 +19,7 @@ from typing import Final
 
 from e7ac.domain.codes import Stat
 from e7ac.settings import GameLanguage
-from e7ac.vision.labels import LEVEL_PREFIX, NO_SET_EFFECT, STAT_LABELS, match_label, normalise
+from e7ac.vision.labels import IMPRINT_LOCKED, LEVEL_PREFIX, NO_SET_EFFECT, STAT_LABELS, match_label, normalise
 from e7ac.vision.ocr import TextLine, Word
 
 FLAT_STATS: Final = frozenset({Stat.ATK, Stat.DEF, Stat.HP, Stat.SPEED})
@@ -60,6 +61,8 @@ class HeroScreenReading:
     imprint_stat: Stat | None = None
     imprint_value: float | None = None
     imprint_raw: str = ""
+    imprint_locked: bool = False
+    """The screen says "Locked": the hero has no imprint."""
     cp: int | None = None
     stats: dict[Stat, StatReading] = field(default_factory=dict)
     set_names: list[str] = field(default_factory=list)
@@ -241,20 +244,13 @@ def _read_imprint(
     reading: HeroScreenReading, panel: list[TextLine], upper: float, top: float, language: GameLanguage
 ) -> None:
     labels = STAT_LABELS[language]
-    candidates = sorted(
-        (ln for ln in panel if upper <= ln.box.y0 and ln.box.y1 <= top and "+" in ln.text), key=lambda ln: ln.box.y0
-    )
-    for line in candidates:
-        text = line.text.strip()
-        if text.endswith("+"):  # wrapped: "Effectiveness +" / "15%" (the boxes may overlap a little)
-            below = [
-                ln
-                for ln in panel
-                if ln is not line
-                and -0.5 * line.box.height <= ln.box.y0 - line.box.y1 < line.box.height
-                and abs(ln.box.x0 - line.box.x0) < line.box.height
-            ]
-            text = " ".join([text, *(ln.text.strip() for ln in below)])
+    region = sorted((ln for ln in panel if upper <= ln.box.y0 and ln.box.y1 <= top), key=lambda ln: ln.box.y0)
+    locked = normalise(IMPRINT_LOCKED.get(language, ""))
+    if locked and any(normalise(ln.text) == locked for ln in region):
+        reading.imprint_locked = True
+        return
+    for line in (ln for ln in region if "+" in ln.text):
+        text = " ".join(ln.text.strip() for ln in _text_block(line, region))
         match = _IMPRINT.match(text)
         if match is None:
             continue
@@ -273,6 +269,34 @@ def _read_imprint(
             return
         reading.imprint_raw = text
         return
+    reading.warnings.append("imprint not found (neither a value nor 'Locked')")
+
+
+def _text_block(line: TextLine, region: list[TextLine]) -> list[TextLine]:
+    """`line` with the left-aligned lines wrapped around it: label words above, the value below a trailing "+"
+    ("Effect" / "Resistance +" / "15%"). Wrapped boxes may overlap a little."""
+
+    def next_to(a: TextLine, b: TextLine) -> bool:  # b directly below a, same left edge
+        return -0.5 * a.box.height <= b.box.y0 - a.box.y1 < a.box.height and abs(b.box.x0 - a.box.x0) < a.box.height
+
+    block = [line]
+    while True:
+        above = [
+            ln
+            for ln in region
+            if ln not in block
+            and next_to(ln, block[0])
+            and "+" not in ln.text
+            and not any(c.isdigit() for c in ln.text)
+        ]
+        if not above:
+            break
+        block.insert(0, max(above, key=lambda ln: ln.box.y1))
+    if line.text.strip().endswith("+"):
+        below = [ln for ln in region if ln not in block and next_to(line, ln)]
+        if below:
+            block.append(min(below, key=lambda ln: ln.box.y0))
+    return block
 
 
 def _read_name(reading: HeroScreenReading, panel: list[TextLine], level_line: TextLine | None) -> None:

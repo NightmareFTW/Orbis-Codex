@@ -18,7 +18,7 @@ from enum import StrEnum
 from typing import Final
 
 from e7ac.domain.codes import Stat
-from e7ac.domain.roster import Gear, GearGrade, GearSlot, HeroBuild
+from e7ac.domain.roster import Gear, GearGrade, GearSlot, HeroBuild, ImprintMode
 
 
 class Severity(StrEnum):
@@ -150,7 +150,10 @@ def validate_build(build: HeroBuild, catalog: CatalogContext | None = None) -> l
     if build.imprint is not None:
         if build.imprint.stat.is_rate and build.imprint.value > MAX_COMPONENT_RATE:
             issues.append(_unit_rate("imprint.value", build.imprint.value))
-        imprint_stat, imprint_values = ctx.imprint_stat, ctx.imprint_values
+        # the catalog table is the self imprint (Fribbels self_devotion); a team imprint has its own stat and values
+        own = build.imprint.mode is not ImprintMode.TEAM
+        imprint_stat = ctx.imprint_stat if own else None
+        imprint_values = ctx.imprint_values if own else None
         if imprint_stat is not None and build.imprint.stat is not imprint_stat:
             issues.append(
                 Issue(

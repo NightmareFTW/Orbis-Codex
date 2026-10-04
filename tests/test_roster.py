@@ -26,6 +26,7 @@ from e7ac.domain.roster import (
     HeroBuild,
     Imprint,
     ImprintGrade,
+    ImprintMode,
     StatValue,
     Substat,
 )
@@ -324,6 +325,14 @@ def test_imprint_and_ee_mismatches_warn() -> None:
     assert all(i.severity is Severity.WARNING for i in found)
     right = CatalogContext(imprint_stat=Stat.ATK_PERCENT, imprint_values={"SSS": 0.16}, ee_stat=Stat.SPEED)
     assert validate_build(build, right) == []
+
+
+def test_a_team_imprint_is_not_checked_against_the_self_imprint_table() -> None:
+    context = CatalogContext(imprint_stat=Stat.HP_PERCENT, imprint_values={"B": 0.07})
+    team = bbk(imprint=Imprint(grade=None, stat=Stat.EFFECTIVENESS, value=0.06, mode=ImprintMode.TEAM))
+    assert [i.rule for i in validate_build(team, context) if i.rule == "MECH-IMP-01"] == []
+    unknown = bbk(imprint=Imprint(grade=None, stat=Stat.EFFECTIVENESS, value=0.06))
+    assert [i.field for i in validate_build(unknown, context) if i.rule == "MECH-IMP-01"] == ["imprint.stat"]
 
 
 def test_codes_unknown_to_the_catalog_warn() -> None:

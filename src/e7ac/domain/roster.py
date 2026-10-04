@@ -50,6 +50,15 @@ class ImprintGrade(StrEnum):
     SSS = "SSS"
 
 
+class ImprintMode(StrEnum):
+    """Which Memory Imprint the hero uses; the hero screens show the active one (MECH-IMP-02)."""
+
+    SELF = "self"
+    """The bonus goes to the hero itself (crosshair icon; community name "Imprint Concentration")."""
+    TEAM = "team"
+    """The bonus goes to allies in the positions lit on the four-square icon (community name "Imprint Release")."""
+
+
 class BuildSource(StrEnum):
     OCR = "ocr"
     FRIBBELS = "fribbels"
@@ -128,6 +137,8 @@ class Imprint(_Frozen):
     """None when not known: the screen shows the grade as an icon only (read later by icon matching, M7)."""
     stat: Stat
     value: float
+    mode: ImprintMode | None = None
+    """None when not known (manual entries, older backups, or a screen the mode could not be told from)."""
 
 
 class ExclusiveEquipment(_Frozen):

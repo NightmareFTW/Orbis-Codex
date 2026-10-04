@@ -110,6 +110,7 @@ class HeroSnapshotRow(Base):
     imprint_grade: Mapped[str | None] = mapped_column(String(4))
     imprint_stat: Mapped[str | None] = mapped_column(String(16))
     imprint_value: Mapped[float | None] = mapped_column(Float)
+    imprint_mode: Mapped[str | None] = mapped_column(String(8))
     ee_stat: Mapped[str | None] = mapped_column(String(16))
     ee_value: Mapped[float | None] = mapped_column(Float)
     ee_option_code: Mapped[str | None] = mapped_column(String(32))

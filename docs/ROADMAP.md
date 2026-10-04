@@ -59,7 +59,12 @@ Checkboxes: `[x]` done · `[ ]` pending. Milestones are small vertical slices; o
     Gear details on Hero Info (substat values with icon types) come with M7.
   - **How to try:** `.\OrbisCodex.cmd capture --hotkey ctrl+shift+s`, press it on each hero's Equipment tab or Hero Info,
     then `.\OrbisCodex.cmd roster scan "%LOCALAPPDATA%\OrbisCodex\captures\*.png"` and `... roster list`.
-- [ ] **M7 Icon classifiers + labelling tool** — substat icons (templates taken from the stat-label icons of the same Hero Info capture), "%" detection, set icons (bootstrapped from Stove icons + screenshots), imprint grade, grade from frame colour, constraint-based disambiguation; then Hero Info gear: item level, +enhance, score, main stat and 4 substats per piece.
+  - Follow-up 2026-10-04 (M6.1):
+    - `roster scan` expands patterns, folders and `%VAR%` itself (Windows shells do not; D43);
+    - imprint text wrapped on three lines, "Locked" = no imprint;
+    - imprint mode self/team stored (MECH-IMP-02, D42; migration 0004);
+    - Hero Info golden test (Closer Charles).
+- [ ] **M7 Icon classifiers + labelling tool** — substat icons (templates taken from the stat-label icons of the same Hero Info capture), "%" detection, set icons (bootstrapped from Stove icons + screenshots), imprint icon (self/team, lit positions, grade letter; MECH-IMP-02), awakened stars (MECH-HERO-03), grade from frame colour, constraint-based disambiguation; then Hero Info gear: item level, +enhance, score, main stat and 4 substats per piece, artifact name/level and EE.
   - Acceptance: golden BBK fixture passes 100% including substats, EE stat, artifact level; ambiguous crops produce review items instead of guesses.
 - [ ] **M8 Roster UI** — PySide6 main window: roster list (search, element/class filters, sort by any stat), hero page mirroring the game layout, edit form with validation, history view, review queue (crop + value), JSON backup.
   - Acceptance: pytest-qt smoke tests; manual checklist for the user on Windows.

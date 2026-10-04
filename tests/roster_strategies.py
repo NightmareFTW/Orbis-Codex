@@ -19,6 +19,7 @@ from e7ac.domain.roster import (
     HeroBuild,
     Imprint,
     ImprintGrade,
+    ImprintMode,
     SkillEnhancements,
     StatValue,
     Substat,
@@ -43,7 +44,8 @@ _EE_STATS = [Stat.CRIT_CHANCE, Stat.SPEED, Stat.ATK_PERCENT, Stat.EFFECT_RESISTA
 def imprints(draw: st.DrawFn) -> Imprint:
     stat = draw(st.sampled_from(_IMPRINT_STATS))
     grade = draw(st.none() | st.sampled_from(list(ImprintGrade)))
-    return Imprint(grade=grade, stat=stat, value=draw(stat_value(stat)))
+    mode = draw(st.none() | st.sampled_from(list(ImprintMode)))
+    return Imprint(grade=grade, stat=stat, value=draw(stat_value(stat)), mode=mode)
 
 
 @st.composite

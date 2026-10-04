@@ -14,12 +14,12 @@ from e7ac.catalog.resolve import ResolvedEntity, resolve
 from e7ac.cli import roster as roster_cli
 from e7ac.cli.app import app
 from e7ac.domain.codes import DataStatus, SourceId, Stat
-from e7ac.domain.roster import BuildSource, ImprintGrade
+from e7ac.domain.roster import BuildSource, Imprint, ImprintGrade, ImprintMode
 from e7ac.paths import AppPaths
-from e7ac.roster.screen_import import ASSUMED, build_from_screen
+from e7ac.roster.screen_import import ASSUMED, INFERRED_MODE, build_from_screen
 from e7ac.settings import GameLanguage
 from e7ac.vision.hero_screen import ScreenError, ScreenKind, parse_hero_screen
-from e7ac.vision.image import captured_at
+from e7ac.vision.image import ImageError, captured_at, expand_image_paths
 from e7ac.vision.labels import match_label
 from e7ac.vision.ocr import Box, TextLine, Word
 from tests.markers import FIXTURES_DIR
@@ -51,7 +51,15 @@ STAT_ROWS = [
 ]
 
 
-def equipment_screen(*, rows: Sequence[tuple[str, str, str | None]] = STAT_ROWS, name: str = "Renoa") -> list[TextLine]:
+IMPRINT_LINES = [line("Effectiveness +", 280, 411), line("15%", 282, 441)]  # wrapped on two lines
+
+
+def equipment_screen(
+    *,
+    rows: Sequence[tuple[str, str, str | None]] = STAT_ROWS,
+    name: str = "Renoa",
+    imprint: Sequence[TextLine] = IMPRINT_LINES,
+) -> list[TextLine]:
     """Equipment tab like the user's capture, with every distraction that broke early versions."""
     lines = [
         line(name, 98, 48),  # top bar title
@@ -61,8 +69,7 @@ def equipment_screen(*, rows: Sequence[tuple[str, str, str | None]] = STAT_ROWS,
         line(f"{name} ☆", 158, 192, height=72),  # big name, a star read as a symbol
         line("AAAAA", 330, 200),  # star row read as letters
         line("Lv. Max/60", 162, 315, height=55),
-        line("Effectiveness +", 280, 411),  # imprint wrapped on two lines
-        line("15%", 282, 441),
+        *imprint,
         line("123,120", 162, 598, height=52),
     ]
     y = 660.0
@@ -124,6 +131,35 @@ def test_wrong_units_are_not_accepted_silently() -> None:
     assert parse_hero_screen(equipment_screen(rows=rows)).stats[Stat.CRIT_CHANCE].confidence == 0.6
 
 
+@pytest.mark.parametrize(
+    ("imprint", "expected"),
+    [
+        # Lady of the Scales (Hero Info, 2026-10-04): the label itself wraps
+        (
+            [line("Effect", 172, 404), line("Resistance +", 172, 433), line("15%", 172, 462)],
+            (Stat.EFFECT_RESISTANCE, 0.15),
+        ),
+        # crop sent by the user: the label wraps before "+"
+        ([line("Critical Hit", 172, 404), line("Chance +6%", 172, 434)], (Stat.CRIT_CHANCE, 0.06)),
+        ([line("Health+15%", 172, 420)], (Stat.HP_PERCENT, 0.15)),
+        ([line("Defense + 64", 172, 420)], (Stat.DEF, 64.0)),
+    ],
+)
+def test_imprint_text_wrapped_on_several_lines(imprint: list[TextLine], expected: tuple[Stat, float]) -> None:
+    reading = parse_hero_screen(equipment_screen(imprint=imprint))
+    assert (reading.imprint_stat, reading.imprint_value) == expected
+    assert not reading.imprint_locked and reading.warnings == []
+
+
+def test_a_locked_imprint_means_none_and_a_missing_one_is_reported() -> None:
+    locked = [line("Locked", 172, 400, height=44), line("Health %", 172, 440), line("Additional", 172, 470)]
+    reading = parse_hero_screen(equipment_screen(imprint=[*locked, line("Effect", 172, 500)]))
+    assert reading.imprint_locked and reading.imprint_stat is None and reading.warnings == []
+    missing = parse_hero_screen(equipment_screen(imprint=[]))
+    assert not missing.imprint_locked and missing.imprint_stat is None
+    assert missing.warnings == ["imprint not found (neither a value nor 'Locked')"]
+
+
 def test_not_a_hero_screen_or_unknown_language() -> None:
     with pytest.raises(ScreenError, match="stat rows"):
         parse_hero_screen([line("Attack", 160, 660), line("Defense", 160, 696), line("Arena", 400, 100)])
@@ -156,21 +192,26 @@ def entity(code: str, **fields: object) -> ResolvedEntity:
     return resolve(facts)[0]
 
 
-RENOA = entity(
-    "c1193",
-    name="Renoa",
-    base__att=970,
-    base__def=603,
-    base__max_hp=5299,
-    base__speed=122,
-    base__cri=0.27,
-    base__cri_dmg=1.5,
-    base__acc=0,
-    base__res=0,
-    base__coop=0.03,
-    imprint__stat="acc",
-    imprint__values={"B": 0.07, "SSS": 0.15},
-)
+def _renoa_fields(**changes: object) -> dict[str, object]:
+    fields: dict[str, object] = {
+        "name": "Renoa",
+        "base__att": 970,
+        "base__def": 603,
+        "base__max_hp": 5299,
+        "base__speed": 122,
+        "base__cri": 0.27,
+        "base__cri_dmg": 1.5,
+        "base__acc": 0,
+        "base__res": 0,
+        "base__coop": 0.03,
+        "imprint__stat": "acc",
+        "imprint__values": {"B": 0.07, "SSS": 0.15},
+    }
+    fields.update(changes)
+    return {k: v for k, v in fields.items() if v is not None}
+
+
+RENOA = entity("c1193", **_renoa_fields())
 NOW = datetime(2026, 10, 4, 12, 0, tzinfo=UTC)
 
 
@@ -182,7 +223,47 @@ def test_equipment_screen_build_is_cross_checked_with_the_catalog() -> None:
     assert summary == ("c1193", 60, 6, 123120, BuildSource.OCR)
     assert all(check.ok for check in result.base_checks) and len(result.base_checks) == 9
     assert build.confidence["final_stats.atk"] == 1.0 and build.confidence["awakening"] == ASSUMED
-    assert build.imprint is not None and build.imprint.grade is ImprintGrade.SSS  # catalog value table: unique match
+    assert build.imprint == Imprint(grade=ImprintGrade.SSS, stat=Stat.EFFECTIVENESS, value=0.15, mode=ImprintMode.SELF)
+    assert build.confidence["imprint.mode"] == build.confidence["imprint.grade"] == INFERRED_MODE
+
+
+def test_the_imprint_mode_is_inferred_only_from_clear_catalog_evidence() -> None:
+    def scan(hero: ResolvedEntity, imprint: list[TextLine] = IMPRINT_LINES) -> tuple[Imprint | None, list[str]]:
+        result = build_from_screen(
+            parse_hero_screen(equipment_screen(imprint=imprint)), {"c1193": hero}, captured_at=NOW
+        )
+        assert result.build is not None
+        return result.build.imprint, result.notes
+
+    team, notes = scan(entity("c1193", **_renoa_fields(imprint__stat="def_rate")))
+    assert team == Imprint(grade=None, stat=Stat.EFFECTIVENESS, value=0.15, mode=ImprintMode.TEAM)
+    assert any("so it is the team imprint" in n for n in notes)
+    off_table, notes = scan(entity("c1193", **_renoa_fields(imprint__values={"B": 0.07, "SSS": 0.16})))
+    assert off_table is not None and (off_table.mode, off_table.grade) == (None, None)
+    assert any("self/team and the grade are unknown" in n for n in notes)
+    no_table, notes = scan(entity("c1193", **_renoa_fields(imprint__stat=None, imprint__values=None)))
+    assert no_table is not None and no_table.mode is None and any("no imprint table" in n for n in notes)
+
+
+def test_locked_or_unread_imprints_are_never_silent() -> None:
+    locked_lines = [line("Locked", 172, 400, height=44), line("Health %", 172, 440)]
+    first = build_from_screen(parse_hero_screen(equipment_screen()), {"c1193": RENOA}, captured_at=NOW)
+    assert first.build is not None and first.build.imprint is not None
+    locked = build_from_screen(
+        parse_hero_screen(equipment_screen(imprint=locked_lines)),
+        {"c1193": RENOA},
+        captured_at=NOW,
+        existing=first.build,
+    )
+    assert locked.build is not None and locked.build.imprint is None and locked.build.confidence["imprint"] == 1.0
+    assert any("shows 'Locked'" in n for n in locked.notes)
+    kept = build_from_screen(
+        parse_hero_screen(equipment_screen(imprint=[])), {"c1193": RENOA}, captured_at=NOW, existing=first.build
+    )
+    assert kept.build is not None and kept.build.imprint == first.build.imprint
+    assert any("imprint not read: kept" in n for n in kept.notes)
+    new = build_from_screen(parse_hero_screen(equipment_screen(imprint=[])), {"c1193": RENOA}, captured_at=NOW)
+    assert new.build is not None and new.build.imprint is None and new.build.confidence["imprint"] == ASSUMED
 
 
 def test_a_misread_value_lowers_confidence_and_is_reported() -> None:
@@ -223,6 +304,36 @@ def test_capture_time_comes_from_the_file_name(tmp_path: Path) -> None:
     other = tmp_path / "shot.png"
     other.write_bytes(b"x")
     assert captured_at(other).tzinfo is UTC
+
+
+def test_image_arguments_are_expanded_like_a_shell_would(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    folder = tmp_path / "caps [1]"
+    folder.mkdir()
+    for name in ("20261004-120000-b.png", "20261004-110000-a.webp", "notes.txt"):
+        (folder / name).write_bytes(b"x")
+    ordered = [folder / "20261004-110000-a.webp", folder / "20261004-120000-b.png"]
+    assert expand_image_paths([folder]) == ordered  # a folder: its images, oldest capture first
+    monkeypatch.setenv("E7AC_TEST_CAPTURES", str(tmp_path))
+    pattern = f"${{E7AC_TEST_CAPTURES}}/{folder.name}/*"
+    with pytest.raises(ImageError, match="no image matches"):
+        expand_image_paths([pattern])  # "[1]" is a glob class here, so nothing matches: an error, not a silent skip
+    escaped = "${E7AC_TEST_CAPTURES}/caps [[]1]/*.png"
+    assert expand_image_paths([escaped, folder / "20261004-120000-b.png"]) == [ordered[1]]  # deduplicated
+    literal = folder / "20261004-110000-a.webp"
+    assert expand_image_paths([str(literal)]) == [literal]
+    missing = tmp_path / "missing.png"
+    assert expand_image_paths([missing]) == [missing]  # reported when loaded
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    with pytest.raises(ImageError, match="no images"):
+        expand_image_paths([empty])
+
+
+@pytest.mark.windows
+def test_windows_percent_variables_are_expanded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "shot.png").write_bytes(b"x")
+    monkeypatch.setenv("E7AC_TEST_CAPTURES", str(tmp_path))
+    assert expand_image_paths(["%E7AC_TEST_CAPTURES%\\*.png"]) == [tmp_path / "shot.png"]
 
 
 # ------------------------------------------------------------------------------------------------ CLI
@@ -273,6 +384,14 @@ def test_scan_saves_then_reports_unchanged(scan_files: Path, synthetic_catalog: 
     assert "1 hero(es)" in runner.invoke(app, ["roster", "list"]).stdout
 
 
+def test_scan_takes_folders_and_patterns(scan_files: Path, synthetic_catalog: list[str]) -> None:
+    by_pattern = runner.invoke(app, ["roster", "scan", str(scan_files.parent / "*.png"), "--dry-run"])
+    assert by_pattern.exit_code == 0, by_pattern.output
+    assert f"{scan_files.name}:" in by_pattern.stdout
+    nothing = runner.invoke(app, ["roster", "scan", str(scan_files.parent / "*.jpg")])
+    assert nothing.exit_code == 2 and "no image matches" in nothing.stderr
+
+
 def test_scan_needs_a_catalog_and_reports_bad_images(scan_files: Path, isolated_home: AppPaths, tmp_path: Path) -> None:
     no_catalog = runner.invoke(app, ["roster", "scan", str(scan_files)])
     assert no_catalog.exit_code == 2 and "needs the catalog" in no_catalog.stderr
@@ -294,29 +413,45 @@ def test_scan_never_guesses_between_copies(scan_files: Path, synthetic_catalog: 
 # ------------------------------------------------------------------------------------------------ real captures
 
 
-# Transcribed from the user's captures (2026-10-04); every stat agrees with the catalog base-stat check.
-# name, CP, imprint stat and value, final ATK DEF HP SPD CC CD EFF ER DAC
+# Transcribed from the user's captures (2026-10-04). Equipment tabs: every stat agrees with the catalog base stats.
+# kind, name, level, CP, imprint stat and value, final ATK DEF HP SPD CC CD EFF ER DAC
+EQUIP, INFO = ScreenKind.EQUIPMENT, ScreenKind.HERO_INFO
 GOLDEN = {
     "screenshots/equip_renoa.webp": (
+        EQUIP,
         "Renoa",
+        60,
         123120,
         Stat.EFFECTIVENESS,
         0.15,
         [1721, 1879, 13517, 230, 0.36, 1.85, 0.38, 0.69, 0.03],
     ),
     "screenshots/equip_haru.webp": (
+        EQUIP,
         "Haru",
+        60,
         124427,
         Stat.HP_PERCENT,
         0.04,
         [1800, 1139, 22370, 189, 0.75, 3.25, 0.0, 0.30, 0.03],
     ),
     "screenshots/equip_straze.webp": (
+        EQUIP,
         "Straze",
+        60,
         139544,
         Stat.ATK_PERCENT,
         0.21,
         [5063, 863, 9321, 124, 1.0, 3.30, 0.23, 0.09, 0.03],
+    ),
+    "screenshots/heroinfo_charles.webp": (  # no gear, 5 stars, not awakened, "Lv. Max/50"
+        INFO,
+        "Closer Charles",
+        50,
+        14628,
+        Stat.EFFECTIVENESS,
+        0.06,
+        [793, 381, 4267, 113, 0.15, 1.5, 0.0, 0.0, 0.03],
     ),
 }
 
@@ -329,13 +464,14 @@ def test_real_capture(fixture: str, scale: float) -> None:
     from e7ac.vision.image import load_image
     from e7ac.vision.ocr import RapidOcrReader
 
-    name, cp, imprint_stat, imprint_value, finals = GOLDEN[fixture]
+    kind, name, level, cp, imprint_stat, imprint_value, finals = GOLDEN[fixture]
     image = load_image(FIXTURES_DIR / fixture)
     if scale != 1.0:
         interpolation = cv2.INTER_AREA if scale < 1 else cv2.INTER_CUBIC
         image = cv2.resize(image, None, fx=scale, fy=scale, interpolation=interpolation)
     reading = parse_hero_screen(RapidOcrReader().read(image))
-    assert (reading.kind, reading.name, reading.level, reading.cp) == (ScreenKind.EQUIPMENT, name, 60, cp)
+    assert (reading.kind, reading.name, reading.level, reading.cp) == (kind, name, level, cp)
+    assert reading.warnings == []
     assert (reading.imprint_stat, reading.imprint_value) == (imprint_stat, imprint_value)
     assert [
         reading.stats[s].final

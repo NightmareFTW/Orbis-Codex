@@ -210,6 +210,8 @@ ATK 21→273, HP 32→416.
 - **`data/cache/herodata.json`** (390 heroes, keyed by display name):
   `code` (`c2011`), `_id` (slug), `name`, `rarity`, `attribute`, `role`, `zodiac`,
   `self_devotion` (imprint concentration: `type` e.g. `att_rate` + per-grade values C…SSS),
+  **no team imprint**: the upstream `devotion {type, grades, slots}` block (seen in the app's sample hero in
+  `app/js/lib/saves.js`) is missing from every one of the 390 cached entries (checked 2026-10-04; NV-21),
   `ex_equip` (`[{stat:{type,value}}]` — value semantics unclear: BBK shows `cri 0.06` while the user's EE shows 12%),
   `skills.S1..S3` (`hitTypes`, `rate`, `pow`, `targets`, optional `selfHpScaling`/`selfDefScaling`/`selfSpdScaling`/`penetration`, `options[]`),
   `calculatedStatus.lv50FiveStarFullyAwakened` / `lv60SixStarFullyAwakened` (`cp, atk, hp, spd, def, chc, chd, dac, eff, efr`).

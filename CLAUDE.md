@@ -81,7 +81,10 @@ Key data facts (details in docs/DATA_SOURCES.md):
   - `roster/screen_import.py`: base check final − ▲ = catalog base (MECH-STAT-06), merge with the current build;
   - `e7 roster scan`;
   - golden tests on the user's captures (local fixtures `fixtures/screenshots/equip_*.webp`, never committed).
-- Next: **M7** — Hero Info gear (substat icons via templates from the same capture), imprint grade, artifact icon.
+- **M6.1**: `roster scan` expands patterns/folders/`%VAR%` (D43); imprint mode self/team + "Locked" (MECH-IMP-02,
+  D42, migration 0004).
+- Next: **M7** — Hero Info gear (substat icons via templates from the same capture), imprint icon (mode, grade,
+  positions), awakened stars (MECH-HERO-03), artifact and EE. Waiting for the 4 Hero Info captures as files.
 - Game client language: English, sometimes Portuguese → `game_language` setting (D39). Windows version shown by doctor.
 - Network import "like Fribbels" (D38): approved by the user, **paused**. This session's safety system blocked building a
   traffic-capture + third-party-upload tool. Resume only after the user explicitly allows it; until then the golden

@@ -40,7 +40,7 @@ from e7ac.settings import SettingsError, load_settings
 from e7ac.storage.db import open_database, session_scope
 from e7ac.storage.models import CatalogEntityRow, HeroSnapshotRow
 from e7ac.vision.hero_screen import ScreenError, ScreenKind, parse_hero_screen
-from e7ac.vision.image import ImageError, captured_at, load_image
+from e7ac.vision.image import ImageError, captured_at, expand_image_paths, load_image
 from e7ac.vision.ocr import RapidOcrReader, TextReader
 
 roster_app = typer.Typer(help="Your heroes: builds with history, validation and JSON backup.")
@@ -439,7 +439,8 @@ def show(owned_id: Annotated[int, typer.Argument()], as_json: Annotated[bool, ty
         )
     if build.imprint:
         grade = build.imprint.grade.value if build.imprint.grade else "?"
-        typer.echo(f"  Imprint {grade} {build.imprint.stat.value} {build.imprint.value:g}")
+        mode = f" ({build.imprint.mode.value})" if build.imprint.mode else ""
+        typer.echo(f"  Imprint {grade} {build.imprint.stat.value} {build.imprint.value:g}{mode}")
     if build.exclusive_equipment:
         ee = build.exclusive_equipment
         typer.echo(
@@ -574,7 +575,12 @@ reader_factory: Callable[[], TextReader] = RapidOcrReader
 
 @roster_app.command("scan")
 def scan(
-    images: Annotated[list[Path], typer.Argument(help="Captures of the hero screen (e7 capture, PNG/WebP/JPEG).")],
+    images: Annotated[
+        list[str],
+        typer.Argument(
+            help="Captures of the hero screen (PNG/WebP/JPEG): files, folders or patterns like captures\\*.png."
+        ),
+    ],
     owned_id: Annotated[int | None, typer.Option("--id", help="Roster id, when you own several copies.")] = None,
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Read and check only; save nothing.")] = False,
     force: Annotated[bool, typer.Option(help="Store even if validation finds errors.")] = False,
@@ -583,7 +589,11 @@ def scan(
 
     Final stats, level, CP and imprint come from the screen. Gear, artifact and EE are kept from the hero's
     current build. On the Equipment tab every stat is checked against the catalog base stats."""
-    if owned_id is not None and len(images) != 1:
+    try:
+        paths = expand_image_paths(images)
+    except ImageError as exc:
+        _fail(str(exc))
+    if owned_id is not None and len(paths) != 1:
         _fail("--id works with one image at a time")
     try:
         language = load_settings(default_paths().settings_file).game_language
@@ -592,7 +602,7 @@ def scan(
     engine = _engine()
     reader = reader_factory()
     failed = 0
-    for path in images:
+    for path in paths:
         typer.echo(f"{path.name}:")
         try:
             reading = parse_hero_screen(reader.read(load_image(path)), language)
@@ -671,7 +681,8 @@ def _print_scan(result: ScreenBuild, kind: str) -> None:
         typer.echo("  " + "  ".join(parts))
         if build.imprint is not None:
             grade = build.imprint.grade.value if build.imprint.grade else "?"
-            typer.echo(f"  imprint {build.imprint.stat.value} {build.imprint.value:g} (grade {grade})")
+            mode = build.imprint.mode.value if build.imprint.mode else "self/team unknown"
+            typer.echo(f"  imprint {build.imprint.stat.value} {build.imprint.value:g} (grade {grade}, {mode})")
         if result.base_checks:
             good = sum(c.ok for c in result.base_checks)
             typer.echo(f"  base-stat check vs catalog: {good}/{len(result.base_checks)} agree")

@@ -4,6 +4,9 @@
 - On the Equipment tab, "final - ▲ bonus" must equal the catalog base stat (Lv60 6★ awakened, MECH-STAT-03): this
   checks the OCR and the catalog at once (MECH-STAT-06).
 - Fields the screen does not show are kept from the hero's current build, or assumed and reported (confidence 0).
+- The imprint shown is the active one, self or team (MECH-IMP-02). Until the icon is read (M7) the mode is inferred
+  from the catalog's self-imprint table (SPEC D42): another stat means team; the own stat with a value of exactly one
+  grade means self.
 """
 
 from __future__ import annotations
@@ -16,7 +19,7 @@ from typing import Any, Final
 from e7ac.catalog.names import NameIndex
 from e7ac.catalog.resolve import ResolvedEntity
 from e7ac.domain.codes import Stat
-from e7ac.domain.roster import BuildSource, FinalStats, HeroBuild, Imprint, ImprintGrade
+from e7ac.domain.roster import BuildSource, FinalStats, HeroBuild, Imprint, ImprintGrade, ImprintMode
 from e7ac.vision.hero_screen import HeroScreenReading, ScreenKind
 from e7ac.vision.labels import match_label
 
@@ -35,6 +38,8 @@ BASE_FIELDS: Final[Mapping[Stat, str]] = {stat: f"base.{stat.value}" for stat in
 _FLAT: Final = frozenset({Stat.ATK, Stat.DEF, Stat.HP, Stat.SPEED})
 ASSUMED: Final = 0.0
 """Confidence of a field the screen does not show and that had no previous value (a placeholder to correct)."""
+INFERRED_MODE: Final = 0.8
+"""Confidence of an imprint mode inferred from the catalog (the icon, read in M7, is the direct evidence)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -196,26 +201,59 @@ def _imprint(
     data: dict[str, Any],
     result: ScreenBuild,
 ) -> None:
-    if reading.imprint_stat is None or reading.imprint_value is None:
-        if existing is None or existing.imprint is None:
-            data["imprint"] = None
+    confidence: dict[str, float] = data["confidence"]
+    had = existing.imprint if existing is not None else None
+    if reading.imprint_locked:
+        if had is not None:
+            result.notes.append(f"imprint: the screen shows 'Locked' (none); the roster had {_describe(had)}")
+        data["imprint"] = None
+        confidence["imprint"] = 1.0
         return
+    if reading.imprint_stat is None or reading.imprint_value is None:
+        if had is not None:
+            result.notes.append(f"imprint not read: kept from the current build ({_describe(had)})")
+        else:
+            data["imprint"] = None
+            confidence["imprint"] = ASSUMED
+            result.notes.append("imprint not read: stored as none (check it on the screen)")
+        return
+    shown = f"imprint {reading.imprint_raw!r}"
     own_stat = hero.value("imprint.stat")
     grades = hero.value("imprint.values")
+    mode: ImprintMode | None = None
     grade: ImprintGrade | None = None
-    if own_stat == reading.imprint_stat.value and isinstance(grades, dict):
-        value = reading.imprint_value
-        matches = [g for g, v in grades.items() if isinstance(v, (int, float)) and abs(v - value) < 1e-6]
-        if len(matches) == 1 and matches[0] in ImprintGrade._value2member_map_:
-            grade = ImprintGrade(matches[0])
-    elif isinstance(own_stat, str):
+    if not isinstance(own_stat, str):
+        result.notes.append(f"{shown}: the catalog has no imprint table for this hero, so self/team is unknown")
+    elif own_stat != reading.imprint_stat.value:
+        mode = ImprintMode.TEAM  # a self imprint always gives the hero's own imprint stat
         result.notes.append(
-            f"imprint shown: {reading.imprint_raw!r}, but this hero's own imprint is {own_stat} "
-            "(the screen may show Imprint Release, the bonus given to allies) - stored as shown"
+            f"{shown}: not this hero's own imprint ({own_stat}), so it is the team imprint (MECH-IMP-02); "
+            "its grade is shown as an icon only"
         )
-    data["imprint"] = Imprint(grade=grade, stat=reading.imprint_stat, value=reading.imprint_value)
-    if grade is None:
-        result.notes.append("imprint grade not determined (shown as an icon only)")
+    else:
+        value = reading.imprint_value
+        matches = [
+            g
+            for g, v in (grades.items() if isinstance(grades, dict) else ())
+            if isinstance(v, (int, float)) and abs(v - value) < 1e-6
+        ]
+        if len(matches) == 1 and matches[0] in ImprintGrade._value2member_map_:
+            mode, grade = ImprintMode.SELF, ImprintGrade(matches[0])
+        else:
+            result.notes.append(
+                f"{shown}: this hero's own imprint stat, but the value is not exactly one grade of the catalog "
+                "table, so self/team and the grade are unknown"
+            )
+    data["imprint"] = Imprint(grade=grade, stat=reading.imprint_stat, value=reading.imprint_value, mode=mode)
+    confidence["imprint"] = 1.0
+    confidence["imprint.mode"] = INFERRED_MODE if mode is not None else ASSUMED
+    confidence["imprint.grade"] = INFERRED_MODE if grade is not None else ASSUMED
+
+
+def _describe(imprint: Imprint) -> str:
+    grade = imprint.grade.value if imprint.grade is not None else "?"
+    mode = f", {imprint.mode.value}" if imprint.mode is not None else ""
+    return f"{imprint.stat.value} {imprint.value:g} (grade {grade}{mode})"
 
 
 def _kept_confidence(existing: HeroBuild | None) -> dict[str, float]:

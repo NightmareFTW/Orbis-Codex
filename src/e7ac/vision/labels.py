@@ -34,6 +34,8 @@ STAT_LABELS: Final[Mapping[GameLanguage, Mapping[str, Stat]]] = {
 }
 NO_SET_EFFECT: Final[Mapping[GameLanguage, str]] = {GameLanguage.EN: "No set effect"}
 LEVEL_PREFIX: Final[Mapping[GameLanguage, str]] = {GameLanguage.EN: "Lv."}
+IMPRINT_LOCKED: Final[Mapping[GameLanguage, str]] = {GameLanguage.EN: "Locked"}
+"""Shown instead of the imprint when the hero has none (with a padlock icon; user capture 2026-10-04)."""
 
 
 def normalise(text: str) -> str:
