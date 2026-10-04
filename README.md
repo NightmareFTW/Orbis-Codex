@@ -20,7 +20,7 @@ From a terminal opened in that folder (cmd or PowerShell), run commands as `.\Or
 | `e7 doctor` | Check Python, OS, data folder and settings |
 | `e7 paths` | Show where data is stored (`%LOCALAPPDATA%\OrbisCodex`) |
 | `e7 config show` / `e7 config options` | Show settings / allowed values |
-| `e7 config set world world_eu` | Change a setting (client, world, display_mode, resolution) |
+| `e7 config set world world_eu` | Change a setting (client, world, display_mode, resolution, game_language) |
 | `e7 catalog sync` | Download the game catalog (heroes, skills, artifacts, sets) from Stove, Fribbels and e7calc (cached) |
 | `e7 catalog show "Blood Blade Karin"` | Show one hero/artifact/set with the source and status of every value |
 | `e7 roster add "Blood Blade Karin" --atk 4116 ... --cc 100 --cd 357` | Add one of your heroes (rates in percent) |

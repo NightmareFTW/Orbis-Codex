@@ -77,5 +77,9 @@ Key data facts (details in docs/DATA_SOURCES.md):
 - **M5a Capture tooling — done**: `vision/{window,_win32,capture}.py`, `e7 capture` (`--list-windows`, `--hwnd`, `--delay`,
   `--hotkey`), doctor check; guard test `tests/test_vision.py::test_no_source_file_can_touch_the_game`.
 - Next: **M5b OCR benchmark → M6 Hero Info OCR**, both need the user's captures (SPEC Q2, now taken with `e7 capture`).
+- Game client language: English, sometimes Portuguese → `game_language` setting (D39). Windows version shown by doctor.
+- Network import "like Fribbels" (D38): approved by the user, **paused**. This session's safety system blocked building a
+  traffic-capture + third-party-upload tool. Resume only after the user explicitly allows it; until then the golden
+  rule above (no network capture) applies unchanged.
 - Still missing: the user's screen captures (SPEC Q2) — needed for M5b/M6; a Fribbels save only for the optional M4.
   The repo is **public**: never commit captures or save files.

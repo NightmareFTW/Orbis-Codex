@@ -49,11 +49,24 @@ def _check_python() -> CheckResult:
     return CheckResult("python", CheckStatus.FAIL, f"{detail}; need >= {MIN_PYTHON[0]}.{MIN_PYTHON[1]}")
 
 
+WINDOWS_11_BUILD = 22000
+"""Windows 11 still reports version '10.0'; its build numbers start at 22000."""
+
+
 def _check_os() -> CheckResult:
     system = platform.system()
     if system == "Windows":
-        return CheckResult("os", CheckStatus.OK, f"Windows {platform.release()}")
+        return CheckResult("os", CheckStatus.OK, windows_name(platform.version()))
     return CheckResult("os", CheckStatus.WARN, f"{system}: core/CLI features work; capture and overlay need Windows")
+
+
+def windows_name(version: str) -> str:
+    """'10.0.26100' -> 'Windows 11 (build 26100)'."""
+    parts = version.split(".")
+    build = int(parts[2]) if len(parts) >= 3 and parts[2].isdigit() else None
+    if build is None:
+        return f"Windows (version {version})"
+    return f"Windows {11 if build >= WINDOWS_11_BUILD else 10} (build {build})"
 
 
 def _check_home(paths: AppPaths) -> CheckResult:
@@ -76,7 +89,8 @@ def _check_settings(paths: AppPaths) -> CheckResult:
         "settings",
         CheckStatus.OK,
         f"{source}: client={settings.client.value}, world={settings.world.value}, "
-        f"display={settings.display_mode.value}, resolution={settings.resolution or 'auto'}",
+        f"display={settings.display_mode.value}, resolution={settings.resolution or 'auto'}, "
+        f"game language={settings.game_language.value}",
     )
 
 

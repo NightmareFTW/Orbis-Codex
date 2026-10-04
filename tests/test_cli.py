@@ -127,3 +127,23 @@ def test_config_set_reports_write_errors_without_traceback(tmp_path: Path, monke
     assert result.exit_code == 2
     assert "cannot write settings file" in result.stderr
     assert "Traceback" not in result.output
+
+
+@pytest.mark.parametrize(
+    ("version", "name"),
+    [
+        ("10.0.19045", "Windows 10 (build 19045)"),
+        ("10.0.22631", "Windows 11 (build 22631)"),
+        ("10.0.26100", "Windows 11 (build 26100)"),
+        ("weird", "Windows (version weird)"),
+    ],
+)
+def test_windows_10_and_11_are_told_apart(version: str, name: str) -> None:
+    from e7ac.doctor import windows_name
+
+    assert windows_name(version) == name
+
+
+def test_game_language_can_be_set(isolated_home: AppPaths) -> None:
+    assert runner.invoke(app, ["config", "set", "game_language", "pt"]).exit_code == 0
+    assert "game language=pt" in runner.invoke(app, ["doctor"]).stdout

@@ -34,6 +34,13 @@ class ClientKind(StrEnum):
     EMULATOR = "emulator"
 
 
+class GameLanguage(StrEnum):
+    """Language of the game client's text: selects the OCR label tables (stat names, set names, screen titles; D39)."""
+
+    EN = "en"
+    PT = "pt"
+
+
 class DisplayMode(StrEnum):
     BORDERLESS = "borderless"
     WINDOWED = "windowed"
@@ -51,6 +58,7 @@ class Settings(BaseModel):
     display_mode: DisplayMode = DisplayMode.BORDERLESS
     resolution: str | None = None
     """`WIDTHxHEIGHT` of the game window, or None to auto-detect it from the window (default)."""
+    game_language: GameLanguage = GameLanguage.EN
 
     @field_validator("schema_version")
     @classmethod

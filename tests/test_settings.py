@@ -101,6 +101,7 @@ def test_invalid_enum_value_lists_allowed_values() -> None:
 
 def test_allowed_values() -> None:
     assert allowed_values("client") == ["stove_pc", "steam", "google_play_games", "emulator"]
+    assert allowed_values("game_language") == ["en", "pt"]
     assert allowed_values("resolution") is None
 
 
