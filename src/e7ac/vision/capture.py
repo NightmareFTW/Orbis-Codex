@@ -56,7 +56,7 @@ class MssBackend:
 
         area = window.client
         try:
-            with mss.mss() as screen:
+            with mss.MSS() as screen:
                 shot = screen.grab({"left": area.left, "top": area.top, "width": area.width, "height": area.height})
         except mss.exception.ScreenShotError as exc:
             raise CaptureError(f"screen capture failed: {exc}") from exc
