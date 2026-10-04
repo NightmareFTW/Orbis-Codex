@@ -183,6 +183,8 @@ Cross-checks done without the images (details in MECHANICS.md):
 | D33 | 2026-10-03 | Backups: uid-based, idempotent merge. A hero new to the roster keeps the backup's current build; an existing hero only switches to an imported snapshot captured after its current one (reported). Any uid conflict or hero-code mismatch aborts the whole import. Export writes atomically, refuses to overwrite without `--force` and never targets the database | M3 review STOR-04/05/07, CLI-01/08 | accepted |
 | D34 | 2026-10-03 | CLI input: rate options are percent (`--cc 100`), stored as fractions; omitted stars/awakening/level default to 6/6/60 and the CLI says so; a typed value drops that field's OCR confidence; `--from-json` for another hero is refused; JSON files may be UTF-8/16/32 (PowerShell) and may be `show --json` output | M3 review CLI-03..06, CLI-12 | accepted |
 | D35 | 2026-10-03 | Gear rows are shared between snapshots when (content fingerprint, external id, score) are equal | M3 review STOR-06 (Fribbels rescoring) | accepted |
+| D36 | 2026-10-04 | Roster import comes from the **screen**: the app reads Hero Info (one capture per hero) and gear-detail screens itself, with no other program. The Fribbels save import becomes optional (M4 later). Network capture "like Fribbels" was investigated after the user allowed it if Fribbels does the same. Fribbels' importer is passive, but it sends the raw game traffic to Fribbels' closed server for decoding, which goes beyond "passive and local". Local decoding would need reverse engineering of the protocol (the EULA forbids it). It also needs Npcap, and Stove support is undocumented. Not adopted; decision put to the user (Q9) | User request 2026-10-04; DATA_SOURCES §7 (verified research) | accepted (screen) / Q9 open (network) |
+| D37 | 2026-10-04 | Capture rules: <ul><li>find the game window by window class, title and executable name from the system process list; **never open a handle to the game process**;</li><li>never guess between several windows;</li><li>hotkeys only via RegisterHotKey;</li><li>backend: mss now, Windows Graphics Capture with the overlay (M9);</li><li>every frame checked for blank/scaled output;</li><li>captures stay local.</li></ul> A guard test forbids process/memory/input/hook/packet APIs in `src/` | Golden rule; research CAPTURE-*; anti-cheat software watches process handles | accepted |
 
 ## 10. Open questions
 Answered on 2026-10-03 (see D10–D19): Q1 client/region/display, Q3 Arena play style/league, Q4 hero priority,
@@ -190,8 +192,15 @@ Q5 dependencies, Q6 licence + Stove API, Q7 EE stat.
 
 Still open:
 - **Q2** The screenshots (`hero_info_bbk.png`, `hero_manage_bbk.png`, `stove_guide_lisette.png`) and the Fribbels save file are
-  still not in this environment (git-ignored → not cloned). Needed from M4 (save import) and M6 (OCR golden fixture).
+  still not in this environment (git-ignored → not cloned). Needed from M5b/M6 (OCR) — now easy to take with
+  `e7 capture` (Hero Info, Manage Equipment with a piece selected, a reforged and a modified piece in Equipment Details,
+  the hero's EE, the Skill Enhance screen, and one capture at another window size); the save file only for the
+  optional M4.
   Attach them in the chat (or share them through a private channel outside this repository). **Never push them to this
   repository**: it is public, GitHub has no private branches, and deleted branches stay reachable by commit SHA;
   `fixtures/` stays local and git-ignored.
 - **Q8** Does the Arena opponent list show CP (and/or artifact/stars) per opponent team? (Determines Phase 2 calibration inputs.)
+- **Q9** Network import through Fribbels' server (D36): do you still want it, knowing it sends your raw game traffic to
+  a third-party server and needs Npcap? Recommended: no, screen import only.
+- **Q10** Game client language, Windows version (10/11) and HDR on/off? These decide the stat/set label tables for OCR
+  and the capture backend default.

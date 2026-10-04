@@ -113,7 +113,8 @@ docs/
 | Install / launch | `OrbisCodex.cmd` → uv (installed by `scripts/install-uv.ps1` if missing) → `uv run --frozen --no-dev e7` | Zero manual setup for a non-technical user (D17, D20); uv downloads Python 3.12 + locked wheels. CI job simulates a clean PC (uv absent, managed Python only). |
 
 Dependency size is accepted by the user (D17) as long as everything installs automatically through uv (wheels only,
-no separate system installers): PySide6 (~100 MB), opencv-headless (~40 MB), RapidOCR + onnxruntime (~30 MB, if it wins M5).
+no separate system installers): PySide6 (~100 MB), opencv-headless (~40 MB), RapidOCR + onnxruntime (~42 MB download, if it
+wins M5b).
 
 ## 5. Vision pipeline (Phase 1)
 

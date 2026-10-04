@@ -22,7 +22,7 @@ Status vocabulary used for every datum (see `docs/MECHANICS.md` for rules):
 | **epic7db.com** | Skill text, cooldowns, soul gain, enhancement steps, imprint table, awakening, base stats | HTML only (no JSON API found) | Active (BETA) | robots allow all; no licence stated | Skill text / cooldowns (scrape politely, cache) | 2026-10-03 |
 | epic7x.com | Character pages, skill multipliers page | HTML (WordPress) | Unknown | robots allow; copyright | Secondary reference only | 2026-10-03 |
 | EpicSevenDB API | (was) full hero/artifact DB | `api.epicsevendb.com` | **Dead**: 502 on 2026-10-03; GitHub repo archived 2023-02-18 | — | Not used | 2026-10-03 |
-| In-game screens (user) | Ground truth for owned heroes; skill text | Screen capture + OCR (read-only) | Live | User's own data | Roster import, verification | — |
+| In-game screens (user) | Ground truth for owned heroes: Hero Info (final stats, CP, level, imprint, artifact, 6 gear pieces), gear details, skill text | Screen capture + OCR (read-only, `e7 capture`, §7) | Live | User's own data | **Primary roster import** (D36), verification | 2026-10-04 (research) |
 
 Evaluated and rejected / low value: `maphe/e7-damage-calc` (unmaintained, points to e7calc),
 `PThanapon/e7herodata` (scraped epic7x, last update 2025-08), Fandom wiki "Combat Power" page
@@ -225,8 +225,8 @@ ATK 21→273, HP 32→416.
   (`ef315`, `ef427`, `ef506`, `efr20`, `efr25`, `efw28`) — some are renames with identical stats, some are different
   artifacts (`ef506` "Guide to a Decision" vs "Blood-Seared Moon"). Fields on which duplicates disagree are dropped with
   a warning. Several old artifacts have 0 ATK/HP where Stove has values (official wins, conflict kept).
-- ⚠️ Fribbels' *auto-importer* sniffs game network traffic (scapy). **We never do that.** We only read
-  the save file the user exports.
+- ⚠️ Fribbels' *auto-importer* sniffs game network traffic and has it decoded on Fribbels' server (§7). **We do not
+  do that** (SPEC D36). We only read a save file the user already has (optional M4).
 
 ### Save file (to be derived from the user's real file)
 - From the code: `{"heroes": [...], "items": [...]}` written by "Save all optimizer data"
@@ -276,6 +276,68 @@ ATK 21→273, HP 32→416.
 
 ## 6. EpicSevenDB API
 - `api.epicsevendb.com` returned 502 on 2026-10-03; repo `EpicSevenDB/api` archived 2023-02-18. Not used.
+
+---
+
+## 7. Roster import from the game: how other tools do it (researched 2026-10-04)
+
+Researched with source reading plus an adversarial re-check of every claim (workflow `screen-extraction-research`).
+Statuses: **verified** = seen in the source, *inferred* = our reading.
+
+**Fribbels Optimizer, auto importer** (the method the current UI offers):
+- **verified** — `data/py/scanner.py` (commit `4e2f6a0`) sniffs the game's TCP traffic passively with scapy over Npcap:
+  `sniff(..., filter="tcp and ( port 5222 or port 3333 )", session=TCPSession)`. The user starts the scan, then opens
+  the game and loads into the lobby. It needs Npcap and a separately installed Python.
+- **verified** — the reassembled raw payloads (hex) are POSTed by `app/js/lib/scanner.js` to Fribbels' own server
+  (`https://krivpfvxi0.execute-api.us-west-2.amazonaws.com/dev/getItems`), which returns decoded `equips` and `units`.
+  No decoding or decryption code exists in the public repo, so the **raw game traffic leaves the user's PC** and the
+  decoder is closed. *Inferred*: that server decrypts the game protocol.
+- **verified** — the data obtained:
+  - gear: main stat, per-roll substat entries (giving roll counts), a "modified" flag, set, grade, level, enhance,
+    the in-game item id and the in-game id of the hero wearing it;
+  - heroes: name, id, stars, awakening.
+
+  No artifacts, imprint, EE or skill enhancements; the user types those in ("Add Bonus Stats").
+- **verified** — the README documents it only for Google Play Games Beta, emulators, phones and M1+ Macs. A question
+  about the Stove PC client (issue #233) was closed with no visible answer, so whether it works on Stove is unknown.
+- The old Fribbels **screenshot importer** worked differently. The user tapped each gear piece in an emulator at
+  exactly 1600×900 and took screenshots; Tesseract then read fixed pixel rectangles. It sent no input. It is hidden in
+  today's UI and broke with UI updates. Its fuzzy correction always takes the best match with no margin, which is the
+  silent near-miss our golden rule forbids.
+
+**Other tools**:
+- offline Tesseract OCR of fixed-resolution screenshots or videos (mting314, wsauret, e7-tools/gear-reader, which
+  needs a recorded mp4);
+- consumers of Fribbels' gear.txt with ADB automation (Meowtoko);
+- one recent PC-client scanner, STRDSpartan/E7-projects ("e7showcase"). It reads the **Hero Info** screen (final
+  stats, 6 gear pieces, artifact, imprint) with mss + RapidOCR, which validates our design. It cannot be reused as
+  is: its hotkey uses a global keyboard hook, it has an optional click-automation mode, it was calibrated on a French
+  client at 1919×1009, and there is no LICENSE file.
+
+**Game client windows** (community-sourced, to confirm with `e7 capture --list-windows`):
+- Stove PC: `EpicSeven.exe`, window class `GLFW30`, title "Epic Seven" / "에픽세븐" (sometimes empty).
+- The Steam page lists the kernel-level anti-cheat UNCHEATER for the coming Steam build. The anti-cheat of the current
+  Stove client is unverified.
+- No public source says screen capture triggers it. The EULA forbids reverse engineering, protocol interception and
+  modification, and says nothing about screen capture.
+
+**Screens** (public sources and official notice images; to confirm on the user's own captures):
+- **Hero Info**, one capture per hero, shows:
+  - name, stars, level ("Lv. Max / 60"), imprint, CP;
+  - the 9 final stats in a fixed order (ATK, DEF, HP, SPD, CC, CD, EFF, ER, Dual Attack);
+  - the artifact (name, +enhance);
+  - all 6 gear pieces: item level, +enhance, set icon, score, main stat and 4 substats. Substat *types* are icons
+    there, not text.
+- **Equipment Details** popup (Manage Equipment or Inventory) shows substats with text labels, plus grade, slot, set
+  name and score.
+- The Equipment tab shows totals with a "▲" bonus; what the bonus includes is unknown (NV-10).
+- Substat roll counts appear only in the Reforging UI (since Oct 2025).
+- EE: reachable from the hero page, layout not yet seen.
+- Skill enhancement levels: screen not yet identified.
+- The UI seems to scale with the window height, with panels anchored to the left and right edges (not a letterboxed
+  16:9 canvas). Unverified at 21:9 or 16:10.
+- Two copies of the same hero are possible, and Hero Info carries no instance id, so copies must never be merged by
+  name.
 
 ---
 
