@@ -57,7 +57,6 @@ M7 = Path("/tmp/claude-0/-home-user-Orbis-Codex/d44236ee-bada-567e-a707-c7890345
 OUT = M7 / "gear_layout"
 CATALOG = M7 / "home" / "e7ac.sqlite3"
 TRUTH = M7 / "truth.json"
-OTHER_CACHE = M7 / "sets" / "ocr_cache"  # same capture+scale+resize method -> reused read-only when present
 
 CAPTURES = ["heroinfo_haru", "heroinfo_lots", "heroinfo_ainz", "heroinfo_straze", "heroinfo_politis",
             "heroinfo_charles"]
@@ -166,9 +165,8 @@ def _lines_from_json(data: list[dict[str, Any]]) -> list[TextLine]:
 
 def ocr(name: str, scale: float, img: Any) -> list[TextLine]:
     mine = OUT / "ocr_cache" / f"{name}_{scale:.2f}.json"
-    for cache in (mine, OTHER_CACHE / f"{name}_{scale:.2f}.json"):
-        if cache.exists():
-            return _lines_from_json(json.loads(cache.read_text()))
+    if mine.exists():
+        return _lines_from_json(json.loads(mine.read_text()))
     lines = _reader.read(img)
     mine.parent.mkdir(parents=True, exist_ok=True)
     mine.write_text(json.dumps([

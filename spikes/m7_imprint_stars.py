@@ -307,6 +307,10 @@ class IconReading:
     letters_valleys: int | None = None
     letters: int | None = None
     letters_conf: float = 0.0
+    letters_blobs_band: int | None = None  # experiment
+    letters_blobs_naive: int | None = None  # experiment
+    letter_hue: int = -1
+    letter_family: str = "unknown"
     grade: str = "unknown"
     grade_conf: float = 0.0
     feats: dict[str, float] = field(default_factory=dict)
@@ -326,7 +330,7 @@ def analyse_icon(win: np.ndarray, text_h: float | None = None) -> IconReading:
     smooth = np.array([hist[[(i + k) % 180 for k in range(-4, 5)]].sum() for i in range(180)])
     hd = int(smooth.argmax())
     r.hue = hd
-    r.family = "red" if hue_diff(hd, 0) <= 10 else "blue" if 95 <= hd <= 115 else f"other(h={hd})"
+    r.family = _family(hd)
     core = bright & (hue_diff(H, hd) <= HUE_TOL)
     vlit = float(np.percentile(V[core], 95))
     smed = float(np.median(S[core]))
@@ -356,14 +360,22 @@ def analyse_icon(win: np.ndarray, text_h: float | None = None) -> IconReading:
         r.mode_conf = round(0.8 * r.mode_conf, 2)
     if r.mode == "team":
         r.lit = _lit_squares(m, V, vlit, cx, cy, rx, ry)
-    _letters(r, m, V, vlit, cx, cy, rx, ry)
+    _letters(r, m, H, S, V, vlit, cx, cy, rx, ry)
+    if r.letter_family != r.family:
+        r.warnings.append(f"letter colour {r.letter_family} (h={r.letter_hue}) differs from icon colour {r.family}")
     key = (r.family, r.letters)
-    if r.letters is not None and key in KNOWN_GRADES:
+    if r.letters is not None and key in KNOWN_GRADES and r.letter_family == r.family:
         r.grade = KNOWN_GRADES[key]
         r.grade_conf = r.letters_conf
     else:
-        r.grade = f"unknown({r.family},{r.letters} letters)"
+        r.grade = f"unknown({r.family}/{r.letter_family},{r.letters} letters)"
     return r
+
+
+def _family(h: int) -> str:
+    """Colour family of a hue. Only red (SSS) and blue (B) are seen; any other hue is reported, never named."""
+    return "red" if hue_diff(h, 0) <= 10 else "blue" if 95 <= h <= 115 else f"other(h={h})"
+
 
 
 def _geometry(r: IconReading, m: np.ndarray, text_h: float | None) -> bool:
@@ -503,7 +515,16 @@ def _lit_squares(
 
 
 def _letters(
-    r: IconReading, m: np.ndarray, V: np.ndarray, vlit: float, cx: float, cy: float, rx: float, ry: float
+    r: IconReading,
+    m: np.ndarray,
+    H: np.ndarray,
+    S: np.ndarray,
+    V: np.ndarray,
+    vlit: float,
+    cx: float,
+    cy: float,
+    rx: float,
+    ry: float,
 ) -> None:
     z = _zone(cx, cy, rx, ry, LETTER_COLS[0], LETTER_COLS[1], LETTER_BAND[0], LETTER_BAND[1], m.shape)
     if z is None:
@@ -541,6 +562,28 @@ def _letters(
             inside = False
     r.letters_width, r.letters_valleys = by_width, segs
     r.feats["letters_px"] = float(xs.size)
+    # --- experiment: blob counts (not used in the decision)
+    # (a) in the same band: connected components of the letter fill (outlines split the letters' lower parts)
+    floor = 0.02 * ry * ry
+    nb, _, stb, _ = cv2.connectedComponentsWithStats(fill.astype(np.uint8), connectivity=8)
+    r.letters_blobs_band = int(sum(1 for i in range(1, nb) if stb[i, cv2.CC_STAT_AREA] >= floor))
+    # (b) naive: components of the same fill over the whole letter area (letters fragment, first letter merges with
+    #     the icon's bottom square) - kept only to show why it is not usable
+    za = _zone(cx, cy, rx, ry, LETTER_COLS[0], LETTER_COLS[1], 0.1, LETTER_BAND[1], m.shape)
+    if za is not None:
+        fa = m[za] & (V[za] >= 0.75 * fill_level)
+        na, _, sta, _ = cv2.connectedComponentsWithStats(fa.astype(np.uint8), connectivity=8)
+        r.letters_blobs_naive = int(sum(1 for i in range(1, na) if sta[i, cv2.CC_STAT_AREA] >= floor))
+    # --- letter colour, measured WITHOUT the icon's hue: bright saturated pixels of the band
+    Hz, Sz, Vb = H[z], S[z], V[z]
+    vtop = float(np.percentile(Vb, 99)) if Vb.size else 0.0
+    lp = (Sz >= BRIGHT_S) & (Vb >= 0.6 * vtop)
+    if lp.sum() >= floor:
+        hist = np.bincount(Hz[lp].ravel(), minlength=180)
+        sm = np.array([hist[[(i + k) % 180 for k in range(-4, 5)]].sum() for i in range(180)])
+        lh = int(sm.argmax())
+        r.letter_hue = lh
+        r.letter_family = _family(lh)
     # decision: the valley count, accepted only when the block width is compatible with it (never one over the other)
     lo, hi = LETTER_W_PER[0] * segs, LETTER_W_PER[1] * segs + LETTER_W_PER[2]
     if 1 <= segs <= 3 and lo <= width <= hi:
