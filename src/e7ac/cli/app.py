@@ -8,6 +8,7 @@ from typing import Annotated
 import typer
 
 from e7ac import __version__
+from e7ac.cli.capture import capture as capture_command
 from e7ac.cli.catalog import catalog_app
 from e7ac.cli.roster import roster_app
 from e7ac.doctor import CheckStatus, run_checks
@@ -32,6 +33,7 @@ config_app = typer.Typer(help="Show or change settings (client, region, display)
 app.add_typer(config_app, name="config")
 app.add_typer(catalog_app, name="catalog")
 app.add_typer(roster_app, name="roster")
+app.command("capture")(capture_command)
 
 
 def _version_callback(value: bool) -> None:

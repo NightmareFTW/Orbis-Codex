@@ -101,10 +101,10 @@ docs/
 | CLI | **Typer** | Small (click + rich), typed signatures. |
 | Fuzzy matching | **rapidfuzz** | Fast, MIT; used with a margin rule (best − second best ≥ threshold, else ask). |
 | CV | **opencv-python-headless**, **numpy** | *Headless* build avoids Qt plugin conflicts with PySide6. |
-| OCR | **decided by benchmark (M5)** — candidates: template digit reader (OpenCV), RapidOCR (`rapidocr-onnxruntime`, ~30 MB incl. models), Windows.Media.Ocr (via `winrt` packages, zero download, Windows-only). Tesseract excluded (needs a separate system installer, D17) | Game fonts are consistent → template digits likely win for numbers; a general engine is still needed for hero names/set names. Criteria: field accuracy on fixtures, latency, install friction. |
+| OCR | **decided by benchmark (M5b)** — leading candidate RapidOCR (`rapidocr` 3.x + `onnxruntime`, ≈ 42 MB download, PP-OCR models inside the wheel, run recognition-only on anchored regions); others: Windows.Media.Ocr (`winrt-*` packages, < 1 MB, Windows-only, no confidence), template digit reader (OpenCV, cross-check for numbers). Tesseract excluded (separate installer, D17); PaddleOCR/EasyOCR excluded (size/PyTorch) | OCR scores are not reliable confidences on small text, so every field is also checked against the catalog (margin rule) and value ranges. RapidOCR pulls the GUI `opencv-python`: override it to keep the headless build. |
 | Icons | Template matching (NCC) + tiny kNN on normalised crops | No deep learning, no PyTorch. Templates bootstrapped from user screenshots + Stove set icons. |
-| Capture | **mss** for M9 scan mode; **Windows Graphics Capture** (`windows-capture`) / **dxcam** benchmarked in Phase 5 | mss is tiny and fine at 1–2 fps for visible windowed/borderless games; WGC handles occlusion and higher fps. |
-| Window/DPI | ctypes (user32) | No pywin32 needed; process set to per-monitor-v2 DPI awareness. |
+| Capture | **mss** now (M5a: GDI copy of the window's client area, game must be visible); **Windows Graphics Capture** (`windows-capture`) added with the overlay (M9), because it captures only the game window (not our overlay on top); dxcam only as a benchmark candidate | mss is 70 KB, pure ctypes. WGC shows a yellow border on Windows 10. BitBlt of the window DC / PrintWindow are excluded (black frames on flip-model DirectX windows). |
+| Window/DPI | ctypes (user32, dwmapi, Toolhelp32 snapshot) | No pywin32 needed; process set to per-monitor-v2 DPI awareness. The executable name comes from the system process list: **no handle to the game process is ever opened** (anti-cheat software watches those). |
 | UI | **PySide6** (main window + overlay) | Overlay: frameless, `WindowStaysOnTopHint`, `Tool`, translucent background, `WindowTransparentForInput` toggle for click-through. Hotkey via `RegisterHotKey` + native event filter (no keyboard hooks). |
 | Numerics | numpy (Platt/isotonic implemented in ~50 lines) | Avoid scikit-learn/scipy (~70 MB) unless needed later. |
 | Simulator speed | pure Python + `multiprocessing` first | numba/Rust only after profiling. |
@@ -117,7 +117,8 @@ no separate system installers): PySide6 (~100 MB), opencv-headless (~40 MB), Rap
 
 ## 5. Vision pipeline (Phase 1)
 
-1. **Locate window** (title/process name configurable) → client rect in physical pixels.
+1. **Locate window** (client profile: executable / window class / title; `--hwnd` override; never guesses between
+   several candidates) → client rect in physical pixels. Implemented in M5a (`vision/window.py`, `vision/_win32.py`).
 2. **Classify screen** by a few cheap template anchors (e.g. Hero Info layout markers).
 3. **Normalise**: find 2+ anchors → affine transform to a reference layout (resolution independent);
    regions are defined in reference coordinates (fractions), never in raw pixels.

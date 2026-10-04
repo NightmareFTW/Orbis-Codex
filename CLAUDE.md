@@ -24,7 +24,7 @@
 ## Commands
 ```bash
 uv sync                      # install (dev group included)
-uv run e7 --help             # CLI: --version, doctor, paths, config show|set|options
+uv run e7 --help             # CLI: --version, doctor, paths, config, catalog, roster, capture
 uv run pytest                # tests (fixture tests skip if fixtures are missing; network tests need E7AC_NETWORK_TESTS=1)
 uv run ruff check . && uv run ruff format --check .
 uv run mypy                  # strict, src + tests
@@ -73,5 +73,9 @@ Key data facts (details in docs/DATA_SOURCES.md):
   - Severity policy (SPEC D31): only data-contract rules (units, positivity) are errors; every non-verified game rule
     is a warning.
   - Reviewed by a multi-agent adversarial review (39 findings fixed; the tests catch 13 deliberate code mutations).
-- Next milestone: **M4 Fribbels save import** (needs the user's save file, SPEC Q2).
-- Still missing: screenshots + Fribbels save file (SPEC Q2) — needed from M4/M6. The repo is **public**: never commit them.
+- **Order changed 2026-10-04 (SPEC D36):** screen extraction first, Fribbels import optional/later.
+- **M5a Capture tooling — done**: `vision/{window,_win32,capture}.py`, `e7 capture` (`--list-windows`, `--hwnd`, `--delay`,
+  `--hotkey`), doctor check; guard test `tests/test_vision.py::test_no_source_file_can_touch_the_game`.
+- Next: **M5b OCR benchmark → M6 Hero Info OCR**, both need the user's captures (SPEC Q2, now taken with `e7 capture`).
+- Still missing: the user's screen captures (SPEC Q2) — needed for M5b/M6; a Fribbels save only for the optional M4.
+  The repo is **public**: never commit captures or save files.

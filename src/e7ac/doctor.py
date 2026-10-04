@@ -11,6 +11,8 @@ from enum import StrEnum
 from e7ac import __version__
 from e7ac.paths import AppPaths
 from e7ac.settings import SettingsError, load_settings
+from e7ac.vision import _win32
+from e7ac.vision.window import PROFILES, WindowError, select_game_window
 
 MIN_PYTHON = (3, 12)
 
@@ -35,6 +37,7 @@ def run_checks(paths: AppPaths) -> list[CheckResult]:
         _check_os(),
         _check_home(paths),
         _check_settings(paths),
+        *_check_game_window(paths),
     ]
 
 
@@ -75,3 +78,22 @@ def _check_settings(paths: AppPaths) -> CheckResult:
         f"{source}: client={settings.client.value}, world={settings.world.value}, "
         f"display={settings.display_mode.value}, resolution={settings.resolution or 'auto'}",
     )
+
+
+def _check_game_window(paths: AppPaths) -> list[CheckResult]:
+    """Windows only: is the game window visible for capture? (Read-only: window titles/classes only.)"""
+    if sys.platform == "win32":
+        return [_game_window_result(paths)]
+    else:
+        return []
+
+
+def _game_window_result(paths: AppPaths) -> CheckResult:
+    try:
+        client = load_settings(paths.settings_file).client
+        _win32.set_dpi_aware()
+        game = select_game_window(_win32.list_windows(), PROFILES[client])
+    except (SettingsError, WindowError) as exc:
+        return CheckResult("game window", CheckStatus.WARN, f"{exc}")
+    size = f"{game.client.width}x{game.client.height}"
+    return CheckResult("game window", CheckStatus.OK, f"{game.title or '(no title)'} {size} ({game.exe or '?'})")

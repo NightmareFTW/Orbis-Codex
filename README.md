@@ -27,6 +27,8 @@ From a terminal opened in that folder (cmd or PowerShell), run commands as `.\Or
 | `e7 roster edit 1 --spd 140` / `e7 roster history 1` | Change a hero (keeps every previous build) / see its history |
 | `e7 roster list --sort speed --desc` | List your heroes (filters: `--element`, `--class`, `--arena`, `--search`) |
 | `e7 roster export backup.json` / `e7 roster import backup.json` | Back up / restore (or merge) the whole roster |
+| `e7 capture hero_info` | Save the game picture as PNG (read-only screen copy; `--hotkey ctrl+shift+s` to capture while you play) |
+| `e7 capture --list-windows` | Show the open windows and which one looks like the game |
 
 ## Develop
 ```bash

@@ -29,10 +29,19 @@ Checkboxes: `[x]` done · `[ ]` pending. Milestones are small vertical slices; o
   - **How to try:** `.\OrbisCodex.cmd roster add "Blood Blade Karin" --atk 4116 --def 829 --hp 12819 --spd 133 --cc 100
     --cd 357 --eff 0 --er 21 --dac 3 --cp 141750` (after `catalog sync`), then `... roster edit 1 --spd 140`,
     `... roster history 1`, `... roster export roster-backup.json`.
-- [ ] **M4 Fribbels save import** — schema derived from the user's real save file; strict models + raw passthrough; gear dedupe by id/fingerprint; mapping Fribbels names → hero codes with margin rule; `e7 import fribbels <file>`.
+> **Order changed 2026-10-04 (SPEC D36):** the user wants the app itself to extract the roster from the screen, with no
+> other program. Screen extraction therefore comes first (M5a → M5b → M6 → M7 → M9); the Fribbels save import (M4)
+> becomes optional and comes later, for users who already have a Fribbels file.
+
+- [ ] **M4 Fribbels save import** *(optional, later)* — schema derived from a real save file; strict models + raw passthrough; gear dedupe by id/fingerprint; mapping Fribbels names → hero codes with margin rule; `e7 import fribbels <file>`.
   - Acceptance: user's file imports with a report (imported/skipped/ambiguous); unknown fields preserved; test skips cleanly without the file; CP samples feed NV-06.
-- [ ] **M5 OCR spike & benchmark** (`spikes/ocr_bench/`) — template digits vs RapidOCR vs Windows OCR on the fixtures (+ synthetic rescales); Tesseract excluded (separate installer, D17).
-  - Acceptance: table of per-field accuracy/latency/install cost in `ARCHITECTURE.md`; engine decision logged in SPEC.
+- [x] **M5a Capture tooling** — read-only game-window locator (window title/class + system process list, never a handle to the game), `mss` capture of the window's client area, blank-frame check, lossless PNG, `e7 capture` (one shot, `--delay`, `--list-windows`, `--hwnd`) and a `--hotkey` scan mode (RegisterHotKey, no keyboard hook); `e7 doctor` reports the game window; a guard test forbids process handles, memory access, input injection, keyboard hooks and packet capture anywhere in the code.
+  - Acceptance: tests with fake windows/backends on every OS, real window listing and screen grab on the Windows CI runner; the user captures the screens listed in SPEC Q2 with it.
+  - ✅ Done 2026-10-04 (in-game check pending: the window identifiers of the Stove client are community-sourced).
+  - **How to try:** with the game open on the Hero Info screen: `.\OrbisCodex.cmd capture --list-windows`, then
+    `.\OrbisCodex.cmd capture hero_info` (or `.\OrbisCodex.cmd capture --hotkey ctrl+shift+s` and press the keys in game).
+- [ ] **M5b OCR spike & benchmark** (`spikes/ocr_bench/`) — RapidOCR (`rapidocr` + `onnxruntime`, recognition-only on anchored regions) vs Windows OCR vs a digit template reader, on the user's captures (+ synthetic rescales); Tesseract excluded (separate installer, D17).
+  - Acceptance: table of per-field accuracy, "confidently wrong" rate, latency and install cost in `ARCHITECTURE.md`; engine decision logged in SPEC.
 - [ ] **M6 Hero Info OCR v1** — anchors + normalised regions, numeric fields, hero name → catalog match, per-field confidence; `e7 import screenshot <png>`.
   - Acceptance: golden BBK fixture (after the user confirms the transcription table) passes for all non-icon fields; works on 0.75×/1.25× rescaled copies.
 - [ ] **M7 Icon classifiers + labelling tool** — substat icons, "%" detection, set icons (bootstrapped from Stove icons + screenshots), grade from frame colour, constraint-based disambiguation.
