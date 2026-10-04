@@ -97,9 +97,9 @@ MIN_BADGE_PX: Final = 12
 # --- piece badge, relative to the item icon box (side s = mean of its width and height) ---
 PIECE_REGION: Final = (0.40, 0.30, 0.40, 0.40)
 """Search region (left, top, right, bottom): x from box.x0 + 0.40 s to box.x1 + 0.40 s, y from box.y0 + 0.30 s to
-box.y1 + 0.40 s. Measured badge: x from box.x0 + 0.73 s to box.x1 + 0.10 s, y from box.y0 + 0.63 s to
-box.y1 + 0.07 s (it overlaps the frame). Still 90/90 with the box shifted by 0.2 s in any direction, scaled by
-0.8-1.3, or covering the whole card with the score strip below the artwork."""
+box.y1 + 0.40 s. Measured badge top-left: box.x0 + 0.69-0.72 s, box.y0 + 0.69-0.75 s; it ends about 0.12 s right of
+and 0.15 s below the box (it overlaps the frame). Still 90/90 with the box shifted by 0.2 s in any direction, scaled
+by 0.8-1.3, or covering the whole card with the score strip below the artwork."""
 PIECE_HEIGHT: Final = (0.32, 0.58)
 """Badge height in item-icon sides: measured 0.43-0.45 (46 px for a 105 px icon on a 2000 px wide capture)."""
 

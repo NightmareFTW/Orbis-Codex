@@ -138,7 +138,7 @@ class HttpConfig:
 
 @dataclass(slots=True)
 class CachedHttp:
-    """Fetch text resources through a disk cache. One instance per sync run."""
+    """Fetch text (`get_text`) and binary (`get_bytes`) resources through a disk cache. One instance per sync run."""
 
     cache_dir: Path
     config: HttpConfig = field(default_factory=HttpConfig)

@@ -34,6 +34,11 @@ STAT_LABELS: Final[Mapping[GameLanguage, Mapping[str, Stat]]] = {
 }
 NO_SET_EFFECT: Final[Mapping[GameLanguage, str]] = {GameLanguage.EN: "No set effect"}
 LEVEL_PREFIX: Final[Mapping[GameLanguage, str]] = {GameLanguage.EN: "Lv."}
+LEVEL_MAX: Final[Mapping[GameLanguage, str]] = {GameLanguage.EN: "Max"}
+"""Shown instead of the current level when it equals the cap ("Lv. Max/60" for heroes, "Lv.Max/6" for artifacts)."""
+EQUIPMENT_SCORE: Final[Mapping[GameLanguage, str]] = {GameLanguage.EN: "Average Equipment Score"}
+"""Hero Info: "Average Equipment Score: 89" above the six gear pieces; absent when the hero has no gear (user captures
+2026-10-04). The anchor of the gear-panel reader."""
 IMPRINT_LOCKED: Final[Mapping[GameLanguage, str]] = {GameLanguage.EN: "Locked"}
 """Shown instead of the imprint when the hero has none (with a padlock icon; user capture 2026-10-04)."""
 
