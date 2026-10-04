@@ -37,6 +37,7 @@ def run_checks(paths: AppPaths) -> list[CheckResult]:
         _check_os(),
         _check_home(paths),
         _check_settings(paths),
+        _check_ocr(),
         *_check_game_window(paths),
     ]
 
@@ -92,6 +93,23 @@ def _check_settings(paths: AppPaths) -> CheckResult:
         f"display={settings.display_mode.value}, resolution={settings.resolution or 'auto'}, "
         f"game language={settings.game_language.value}",
     )
+
+
+def _check_ocr() -> CheckResult:
+    """The OCR engine loads (onnxruntime needs the Microsoft Visual C++ runtime on Windows)."""
+    try:
+        import cv2
+        import onnxruntime
+        import rapidocr  # noqa: F401
+    except Exception as exc:  # any import failure (missing DLL, broken install) must be reported, not raised
+        return CheckResult(
+            "ocr",
+            CheckStatus.FAIL,
+            f"the OCR engine does not load ({type(exc).__name__}: {exc}). On Windows, install the Microsoft "
+            "Visual C++ Redistributable (x64), then run this again",
+        )
+    versions = f"RapidOCR, onnxruntime {onnxruntime.__version__}, OpenCV {cv2.__version__}"
+    return CheckResult("ocr", CheckStatus.OK, versions)
 
 
 def _check_game_window(paths: AppPaths) -> list[CheckResult]:

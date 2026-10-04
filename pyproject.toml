@@ -16,8 +16,12 @@ dependencies = [
     "alembic>=1.13",
     "httpx>=0.27",
     "mss>=10.2",
+    "numpy>=2",
+    "onnxruntime>=1.20",
+    "opencv-python-headless>=4.10",
     "platformdirs>=4.2",
     "pydantic>=2.7",
+    "rapidocr>=3.9,<4",
     "sqlalchemy>=2.0.30",
     "typer>=0.12",
 ]
@@ -32,6 +36,11 @@ dev = [
     "pytest>=8.2",
     "ruff>=0.5",
 ]
+
+[tool.uv]
+# rapidocr depends on the GUI build `opencv-python`; we use the headless build (no Qt plugin clash with PySide6),
+# which provides the same `cv2` module. The impossible marker drops the GUI build from the lock.
+override-dependencies = ["opencv-python; sys_platform == 'never'"]
 
 [build-system]
 requires = ["hatchling>=1.26"]
@@ -70,6 +79,10 @@ strict = true
 files = ["src", "tests"]
 plugins = ["pydantic.mypy"]
 warn_unreachable = true
+
+[[tool.mypy.overrides]]
+module = ["onnxruntime", "onnxruntime.*"]
+ignore_missing_imports = true  # no type information shipped; only imported to check it loads
 
 [tool.pydantic-mypy]
 init_forbid_extra = true

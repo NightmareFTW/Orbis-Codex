@@ -76,7 +76,12 @@ Key data facts (details in docs/DATA_SOURCES.md):
 - **Order changed 2026-10-04 (SPEC D36):** screen extraction first, Fribbels import optional/later.
 - **M5a Capture tooling — done**: `vision/{window,_win32,capture}.py`, `e7 capture` (`--list-windows`, `--hwnd`, `--delay`,
   `--hotkey`), doctor check; guard test `tests/test_vision.py::test_no_source_file_can_touch_the_game`.
-- Next: **M5b OCR benchmark → M6 Hero Info OCR**, both need the user's captures (SPEC Q2, now taken with `e7 capture`).
+- **M5b + M6 Hero screen OCR — done**:
+  - `vision/{ocr,labels,hero_screen,image}.py`: RapidOCR with English labels, anchored on the stat labels;
+  - `roster/screen_import.py`: base check final − ▲ = catalog base (MECH-STAT-06), merge with the current build;
+  - `e7 roster scan`;
+  - golden tests on the user's captures (local fixtures `fixtures/screenshots/equip_*.webp`, never committed).
+- Next: **M7** — Hero Info gear (substat icons via templates from the same capture), imprint grade, artifact icon.
 - Game client language: English, sometimes Portuguese → `game_language` setting (D39). Windows version shown by doctor.
 - Network import "like Fribbels" (D38): approved by the user, **paused**. This session's safety system blocked building a
   traffic-capture + third-party-upload tool. Resume only after the user explicitly allows it; until then the golden

@@ -40,11 +40,26 @@ Checkboxes: `[x]` done · `[ ]` pending. Milestones are small vertical slices; o
   - ✅ Done 2026-10-04 (in-game check pending: the window identifiers of the Stove client are community-sourced).
   - **How to try:** with the game open on the Hero Info screen: `.\OrbisCodex.cmd capture --list-windows`, then
     `.\OrbisCodex.cmd capture hero_info` (or `.\OrbisCodex.cmd capture --hotkey ctrl+shift+s` and press the keys in game).
-- [ ] **M5b OCR spike & benchmark** (`spikes/ocr_bench/`) — RapidOCR (`rapidocr` + `onnxruntime`, recognition-only on anchored regions) vs Windows OCR vs a digit template reader, on the user's captures (+ synthetic rescales); Tesseract excluded (separate installer, D17).
-  - Acceptance: table of per-field accuracy, "confidently wrong" rate, latency and install cost in `ARCHITECTURE.md`; engine decision logged in SPEC.
-- [ ] **M6 Hero Info OCR v1** — anchors + normalised regions, numeric fields, hero name → catalog match, per-field confidence; `e7 import screenshot <png>`.
-  - Acceptance: golden BBK fixture (after the user confirms the transcription table) passes for all non-icon fields; works on 0.75×/1.25× rescaled copies.
-- [ ] **M7 Icon classifiers + labelling tool** — substat icons, "%" detection, set icons (bootstrapped from Stove icons + screenshots), grade from frame colour, constraint-based disambiguation.
+- [x] **M5b OCR engine** — RapidOCR on the user's real captures; engine decision D41.
+  - ✅ Done 2026-10-04:
+    - 3 captures at 3 scales, every field correct;
+    - Windows OCR and template digits were not needed;
+    - `e7 doctor` checks that the engine loads.
+- [x] **M6 Hero screen OCR v1 (stats panel)** — anchored on the stat labels:
+  - reads hero name → catalog code, level, CP, imprint, active sets, and the 9 final stats (+ "▲" bonus on the Equipment
+    tab);
+  - every field carries a confidence;
+  - cross-check final − ▲ = catalog base (MECH-STAT-06);
+  - `e7 roster scan <images>` stores builds (D40).
+  - Acceptance: golden captures pass for all non-icon fields; works on rescaled copies.
+  - ✅ Done 2026-10-04:
+    - golden tests on Renoa, Haru and Straze at 0.64×, 1× and 1.28× (local fixtures; skipped in CI);
+    - 27/27 base-stat checks agree.
+
+    Gear details on Hero Info (substat values with icon types) come with M7.
+  - **How to try:** `.\OrbisCodex.cmd capture --hotkey ctrl+shift+s`, press it on each hero's Equipment tab or Hero Info,
+    then `.\OrbisCodex.cmd roster scan "%LOCALAPPDATA%\OrbisCodex\captures\*.png"` and `... roster list`.
+- [ ] **M7 Icon classifiers + labelling tool** — substat icons (templates taken from the stat-label icons of the same Hero Info capture), "%" detection, set icons (bootstrapped from Stove icons + screenshots), imprint grade, grade from frame colour, constraint-based disambiguation; then Hero Info gear: item level, +enhance, score, main stat and 4 substats per piece.
   - Acceptance: golden BBK fixture passes 100% including substats, EE stat, artifact level; ambiguous crops produce review items instead of guesses.
 - [ ] **M8 Roster UI** — PySide6 main window: roster list (search, element/class filters, sort by any stat), hero page mirroring the game layout, edit form with validation, history view, review queue (crop + value), JSON backup.
   - Acceptance: pytest-qt smoke tests; manual checklist for the user on Windows.

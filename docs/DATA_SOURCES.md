@@ -314,8 +314,10 @@ Statuses: **verified** = seen in the source, *inferred* = our reading.
   is: its hotkey uses a global keyboard hook, it has an optional click-automation mode, it was calibrated on a French
   client at 1919×1009, and there is no LICENSE file.
 
-**Game client windows** (community-sourced, to confirm with `e7 capture --list-windows`):
+**Game client windows**:
 - Stove PC: `EpicSeven.exe`, window class `GLFW30`, title "Epic Seven" / "에픽세븐" (sometimes empty).
+  **Verified** on the user's PC on 2026-10-04 (`e7 doctor` / `e7 capture --list-windows`: "Epic Seven", 2560×1494
+  client area).
 - The Steam page lists the kernel-level anti-cheat UNCHEATER for the coming Steam build. The anti-cheat of the current
   Stove client is unverified.
 - No public source says screen capture triggers it. The EULA forbids reverse engineering, protocol interception and

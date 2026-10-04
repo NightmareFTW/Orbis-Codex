@@ -82,7 +82,7 @@ def add_snapshot(
         skill_s1=build.skills.s1,
         skill_s2=build.skills.s2,
         skill_s3=build.skills.s3,
-        imprint_grade=build.imprint.grade.value if build.imprint else None,
+        imprint_grade=build.imprint.grade.value if build.imprint and build.imprint.grade else None,
         imprint_stat=build.imprint.stat.value if build.imprint else None,
         imprint_value=build.imprint.value if build.imprint else None,
         ee_stat=_opt_value(build.exclusive_equipment.stat) if build.exclusive_equipment else None,
@@ -164,8 +164,9 @@ def build_from_row(session: Session, row: HeroSnapshotRow) -> HeroBuild:
     for link in links:
         gear[GearSlot(link.slot)] = _gear_from_row(session, link.gear_id)
     imprint = None
-    if row.imprint_grade is not None and row.imprint_stat is not None and row.imprint_value is not None:
-        imprint = Imprint(grade=ImprintGrade(row.imprint_grade), stat=Stat(row.imprint_stat), value=row.imprint_value)
+    if row.imprint_stat is not None and row.imprint_value is not None:
+        grade = ImprintGrade(row.imprint_grade) if row.imprint_grade is not None else None
+        imprint = Imprint(grade=grade, stat=Stat(row.imprint_stat), value=row.imprint_value)
     ee = None
     if any(v is not None for v in (row.ee_stat, row.ee_value, row.ee_option_code, row.ee_option_text)):
         ee = ExclusiveEquipment(

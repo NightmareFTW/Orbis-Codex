@@ -124,7 +124,8 @@ FINAL_STAT_FIELDS: Final = tuple(FinalStats.model_fields)
 
 
 class Imprint(_Frozen):
-    grade: ImprintGrade
+    grade: ImprintGrade | None
+    """None when not known: the screen shows the grade as an icon only (read later by icon matching, M7)."""
     stat: Stat
     value: float
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import codecs
 import json
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any, Final, NoReturn
@@ -22,6 +23,7 @@ from e7ac.domain.roster import FINAL_STAT_FIELDS, MAX_INT, BuildSource, HeroBuil
 from e7ac.fileio import write_text_atomic
 from e7ac.paths import default_paths
 from e7ac.roster.backup import RosterExport, export_roster, import_roster
+from e7ac.roster.screen_import import FINAL_FIELDS, ScreenBuild, build_from_screen
 from e7ac.roster.store import (
     RosterError,
     add_owned_hero,
@@ -34,8 +36,12 @@ from e7ac.roster.store import (
     set_arena_relevant,
 )
 from e7ac.roster.validation import CatalogContext, Issue, Severity, validate_build
+from e7ac.settings import SettingsError, load_settings
 from e7ac.storage.db import open_database, session_scope
 from e7ac.storage.models import CatalogEntityRow, HeroSnapshotRow
+from e7ac.vision.hero_screen import ScreenError, ScreenKind, parse_hero_screen
+from e7ac.vision.image import ImageError, captured_at, load_image
+from e7ac.vision.ocr import RapidOcrReader, TextReader
 
 roster_app = typer.Typer(help="Your heroes: builds with history, validation and JSON backup.")
 
@@ -432,7 +438,8 @@ def show(owned_id: Annotated[int, typer.Argument()], as_json: Annotated[bool, ty
             f"DAC {s.dual_attack:.1%}"
         )
     if build.imprint:
-        typer.echo(f"  Imprint {build.imprint.grade.value} {build.imprint.stat.value} {build.imprint.value:g}")
+        grade = build.imprint.grade.value if build.imprint.grade else "?"
+        typer.echo(f"  Imprint {grade} {build.imprint.stat.value} {build.imprint.value:g}")
     if build.exclusive_equipment:
         ee = build.exclusive_equipment
         typer.echo(
@@ -559,6 +566,122 @@ def import_cmd(source: Annotated[Path, typer.Argument(help="JSON file written by
         typer.echo(f"Current build updated from newer backup snapshots for {len(report.current_changed)} hero(es)")
     for line in flagged:
         typer.echo(f"  warning: {line}", err=True)
+
+
+# OCR engine factory (tests replace it with canned text lines).
+reader_factory: Callable[[], TextReader] = RapidOcrReader
+
+
+@roster_app.command("scan")
+def scan(
+    images: Annotated[list[Path], typer.Argument(help="Captures of the hero screen (e7 capture, PNG/WebP/JPEG).")],
+    owned_id: Annotated[int | None, typer.Option("--id", help="Roster id, when you own several copies.")] = None,
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Read and check only; save nothing.")] = False,
+    force: Annotated[bool, typer.Option(help="Store even if validation finds errors.")] = False,
+) -> None:
+    """Read hero screens (Hero > Equipment tab, or Hero Info) and store the builds (source: ocr).
+
+    Final stats, level, CP and imprint come from the screen. Gear, artifact and EE are kept from the hero's
+    current build. On the Equipment tab every stat is checked against the catalog base stats."""
+    if owned_id is not None and len(images) != 1:
+        _fail("--id works with one image at a time")
+    try:
+        language = load_settings(default_paths().settings_file).game_language
+    except SettingsError as exc:
+        _fail(str(exc))
+    engine = _engine()
+    reader = reader_factory()
+    failed = 0
+    for path in images:
+        typer.echo(f"{path.name}:")
+        try:
+            reading = parse_hero_screen(reader.read(load_image(path)), language)
+        except (ImageError, ScreenError) as exc:
+            typer.echo(f"  Error: {exc}", err=True)
+            failed += 1
+            continue
+        with session_scope(engine) as session:
+            heroes = _catalog_heroes(session)
+            if heroes is None:
+                _fail("the hero is identified by name, which needs the catalog: run e7 catalog sync")
+            owned, current = _scan_target(session, reading.name, heroes, owned_id)
+            result = build_from_screen(reading, heroes, captured_at=captured_at(path), existing=current)
+            kind = "Equipment tab" if reading.kind is ScreenKind.EQUIPMENT else "Hero Info"
+            _print_scan(result, kind)
+            if result.build is None:
+                failed += 1
+                continue
+            issues = _issues(session, result.build, quiet=True)
+            _print_issues(issues)
+            if any(i.severity is Severity.ERROR for i in issues) and not force:
+                typer.echo("  Error: not saved: fix the errors above (or use --force)", err=True)
+                failed += 1
+                continue
+            if dry_run:
+                typer.echo("  (dry run: nothing saved)")
+                continue
+            if owned is None:
+                created = add_owned_hero(session, result.build)
+                typer.echo(f"  Saved as new roster hero #{created.id}")
+            elif current is not None and _same_build(result.build, current):
+                typer.echo(f"  #{owned.id}: unchanged")
+            else:
+                snapshot = add_snapshot(session, owned, result.build)
+                typer.echo(f"  #{owned.id}: new snapshot {snapshot.id}")
+    if failed:
+        raise typer.Exit(code=1)
+
+
+def _scan_target(
+    session: Session, name: str | None, heroes: dict[str, ResolvedEntity], owned_id: int | None
+) -> tuple[Any, HeroBuild | None]:
+    """(owned hero or None for a new one, its current build). Several copies of one hero need --id."""
+    if owned_id is not None:
+        owned = _owned_or_exit(session, owned_id)
+    else:
+        codes = {code for code, entity in heroes.items() if name and entity.name.casefold() == name.casefold()}
+        copies = [o for o, _ in list_owned(session) if o.hero_code in codes]
+        if len(copies) > 1:
+            listed = ", ".join(f"#{o.id}" for o in copies)
+            _fail(f"you own several copies of {name} ({listed}): scan them one at a time with --id")
+        owned = copies[0] if copies else None
+    if owned is None:
+        return None, None
+    row = current_snapshot(session, owned.id)
+    return owned, build_from_row(session, row) if row is not None else None
+
+
+def _print_scan(result: ScreenBuild, kind: str) -> None:
+    title = f"{result.hero_name or '?'} ({result.hero_code or 'unknown'})"
+    build = result.build
+    if build is None:
+        typer.echo(f"  {title} - {kind}")
+    else:
+        cp = f"{build.cp:,}" if build.cp is not None else "-"
+        typer.echo(f"  {title} - {kind} - Lv. {build.level}, CP {cp}")
+        checks = {c.stat: c for c in result.base_checks}
+        stats = build.final_stats
+        parts = []
+        for stat, name in FINAL_FIELDS.items():
+            value = getattr(stats, name) if stats is not None else None
+            shown = "-" if value is None else (f"{value:g}" if stat in _FLAT_SCAN else f"{value * 100:.1f}%")
+            check = checks.get(stat)
+            mark = "" if check is None else (" ok" if check.ok else " CHECK")
+            parts.append(f"{stat.value} {shown}{mark}")
+        typer.echo("  " + "  ".join(parts))
+        if build.imprint is not None:
+            grade = build.imprint.grade.value if build.imprint.grade else "?"
+            typer.echo(f"  imprint {build.imprint.stat.value} {build.imprint.value:g} (grade {grade})")
+        if result.base_checks:
+            good = sum(c.ok for c in result.base_checks)
+            typer.echo(f"  base-stat check vs catalog: {good}/{len(result.base_checks)} agree")
+    for note in result.notes:
+        typer.echo(f"  note: {note}", err=True)
+    for problem in result.problems:
+        typer.echo(f"  Error: {problem}", err=True)
+
+
+_FLAT_SCAN: Final = frozenset({Stat.ATK, Stat.DEF, Stat.HP, Stat.SPEED})
 
 
 def _owned_or_exit(session: Session, owned_id: int) -> Any:

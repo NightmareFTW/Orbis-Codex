@@ -21,6 +21,7 @@ Last reviewed: 2026-10-03.
 | MECH-STAT-03 | Base stats used are Lv60 6★ fully awakened. BBK = ATK 1138, HP 5871, DEF 462, SPD 111, CC 23%, CD 150%, DAC 3%. | Fribbels, e7calc, epic7db agree | `community` (3 sources) | |
 | MECH-STAT-04 | 5★-origin hero base ATK/HP/DEF are determined by class × horoscope (table). | e7calc `stat-tables.ts`; identical values observed across heroes | `community` | Useful sanity check for catalog base stats. |
 | MECH-STAT-05 | Crit Chance display is capped at 100%. | Fixture (100.0% shown with ≥100% of components) | `verified` (1 sample) | Excess is wasted. |
+| MECH-STAT-06 | On the hero **Equipment tab**, each stat shows its final value and an orange "▲" bonus: **final − ▲ = the Lv60 6★ awakened base stat** of the catalog (everything but the base is in ▲: gear, sets, artifact, imprint, EE). A stat whose bonus is 0 shows no ▲. | User captures 2026-10-04: Renoa c1193, Haru c1192, Straze c1034 — 27/27 stats equal Fribbels base stats exactly | `verified` (3 heroes) | Used by `e7 roster scan` as a cross-check of OCR and catalog; also confirms MECH-STAT-03 base stats for these heroes. |
 | MECH-STAT-06 | Crit Damage used in damage is capped at **350%** (some skill boosts are uncapped); the stat screen can show more (fixture 357%). | e7calc (`Math.min(…, 3.5)`), Fribbels (`min(350, chd)`) | `community` | |
 | MECH-STAT-07 | Speed set +25%, Revenge +12% (+0.5% per 1% HP lost), Reversal +15%, Weakening +15% are % of **base** speed. | Stove text (magnitudes) + Fribbels (base-relative) | magnitudes `verified`, application `community` | |
 
@@ -144,7 +145,7 @@ skills vs speed buffs (Speed Up = +30% speed per e7calc `spdUp 1.3`, `community`
 | NV-07 | Artifact effect per-level steps (MECH-ART-03) | Artifact effects in sim | epic7db / in-game tooltip |
 | NV-08 | EE stat value range (BBK: Fribbels 0.06 vs user's 12% Crit Chance) and option texts (MECH-EE-01) | Roster validation, sim | In-game EE tooltip / epic7db / Fribbels save |
 | NV-09 | Dual attack/counter details (MECH-DUAL-01, MECH-CNT-01) | Minor damage | Observation |
-| NV-10 | Fixture residuals: with Fribbels base stats, final − "gear contribution" leaves ATK +35, DEF +15, HP +100, CD +4%, ER +4%, SPD 0, CC 0 for BBK, while imprint (+18% ≈ +205 ATK) and artifact (+18 ≈ +172 ATK / +262 HP) are expected on top | Consistency check design | Inspect `hero_manage_bbk.png` (what "gear contribution" includes) |
+| NV-10 | Fixture residuals: with Fribbels base stats, final − "gear contribution" leaves ATK +35, DEF +15, HP +100, CD +4%, ER +4%, SPD 0, CC 0 for BBK, while imprint (+18% ≈ +205 ATK) and artifact (+18 ≈ +172 ATK / +262 HP) are expected on top | Consistency check design | Inspect `hero_manage_bbk.png` (what "gear contribution" includes) **Partly answered by MECH-STAT-06** (▲ = final − base); still open: the split of ▲ between gear, imprint, artifact and EE. |
 | NV-11 | Gear set piece counts (MECH-GEAR-05) and full main-stat table | Validation | In-game tooltips / OCR fixtures |
 | NV-12 | How the Weakening set's "+15% chance to inflict debuffs" combines with EFF/ER (MECH-EFF-02) | Debuff landing | Observation / official notes |
 | NV-13 | CR tie-break when units reach 100% together (MECH-CR-03) | Turn order | Recorded battles |
@@ -153,3 +154,5 @@ skills vs speed buffs (Speed Up = +30% speed per e7calc `spdUp 1.3`, `community`
 | NV-16 | Which stats the two Stove artifact fields hold for artifacts Fribbels cannot confirm (`ef506`, `ef427`: stored as an assumed ATK/HP reading, D26) | Final stats | In-game artifact screen / OCR |
 | NV-17 | Artifact effect values Stove leaves unknown (84 artifacts have a `null` in `effect_levels`, D27) | Predictor (artifact effects) | e7calc `artifacts.ts` (damage-relevant ones) / in-game artifact text at +0 and +30 |
 | NV-18 | Whether awakening can exceed the star count, and how awakening steps are gated by stars (MECH-HERO-02) | Roster validation | In-game awakening screen |
+| NV-19 | Which imprint the hero screens show: on 2 of 3 captures (Renoa "Effectiveness +15%", Haru "Health +4%") it is not the hero's own imprint in Fribbels' table, so it is probably Imprint Release (the bonus given to allies) | Roster (imprint field), stat composition | A capture of the imprint screen in both modes |
+| NV-20 | Awakening level: not readable on the Equipment tab / Hero Info (stars are icons) | Roster | Star icon colours or the awakening screen |

@@ -160,14 +160,16 @@ def validate_build(build: HeroBuild, catalog: CatalogContext | None = None) -> l
                     f"catalog says this hero's imprint is {imprint_stat.value}, not {build.imprint.stat.value}",
                 )
             )
-        expected = (imprint_values or {}).get(build.imprint.grade.value)
+        grade = build.imprint.grade
+        expected = (imprint_values or {}).get(grade.value) if grade is not None else None
         if expected is not None and abs(expected - build.imprint.value) > 1e-6:
             issues.append(
                 Issue(
                     Severity.WARNING,
                     "MECH-IMP-01",
                     "imprint.value",
-                    f"catalog says grade {build.imprint.grade.value} gives {expected:g}, not {build.imprint.value:g}",
+                    f"catalog says grade {grade.value if grade else '?'} gives {expected:g}, not "
+                    f"{build.imprint.value:g}",
                 )
             )
     ee = build.exclusive_equipment

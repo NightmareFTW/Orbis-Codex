@@ -42,7 +42,8 @@ _EE_STATS = [Stat.CRIT_CHANCE, Stat.SPEED, Stat.ATK_PERCENT, Stat.EFFECT_RESISTA
 @st.composite
 def imprints(draw: st.DrawFn) -> Imprint:
     stat = draw(st.sampled_from(_IMPRINT_STATS))
-    return Imprint(grade=draw(st.sampled_from(list(ImprintGrade))), stat=stat, value=draw(stat_value(stat)))
+    grade = draw(st.none() | st.sampled_from(list(ImprintGrade)))
+    return Imprint(grade=grade, stat=stat, value=draw(stat_value(stat)))
 
 
 @st.composite
