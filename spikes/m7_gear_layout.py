@@ -177,20 +177,6 @@ def ocr(name: str, scale: float, img: Any) -> list[TextLine]:
     return lines
 
 
-def ocr_crop(img: Any, x0: float, y0: float, x1: float, y1: float, h: float) -> tuple[list[TextLine], Any, float]:
-    """Second pass: OCR on a crop upscaled so the anchor-height text becomes ~100 px. Boxes in crop pixels."""
-    H, W = img.shape[:2]
-    xa, ya, xb, yb = max(0, int(x0)), max(0, int(y0)), min(W, int(x1)), min(H, int(y1))
-    if xb - xa < 4 or yb - ya < 4:
-        return [], None, 1.0
-    crop = img[ya:yb, xa:xb]
-    f = max(1.5, 100.0 / h)
-    up = cv2.resize(crop, None, fx=f, fy=f, interpolation=cv2.INTER_CUBIC)
-    pad = int(0.4 * 100)
-    up = cv2.copyMakeBorder(up, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=(0, 0, 0))
-    return _reader.read(up), up, f
-
-
 def clean_value(text: str) -> tuple[str, bool]:
     """Value text and whether characters were stripped (an icon glyph glued to the number)."""
     t = text.replace(" ", "")
@@ -236,7 +222,7 @@ def value_columns(lines: list[TextLine], a: TextLine, h: float, warn: list[str])
     cols = []
     for c in clusters:
         ys = sorted(l.box.cy for l in c)
-        if len(c) >= 2 and any(b - a_ < ROW_MAX * h for a_, b in zip(ys, ys[1:])):
+        if len(c) >= 2 and any(b - a_ < ROW_MAX * h for a_, b in zip(ys, ys[1:], strict=False)):
             cols.append((len(c), statistics.median(l.box.x1 for l in c)))
     if len(cols) > 2:
         warn.append(f"{len(cols)} value-column candidates, kept the 2 largest")
@@ -256,7 +242,7 @@ def row_pitch(lines: list[TextLine], cols: dict[str, float], a: TextLine, h0: fl
     for x1 in cols.values():
         ys = sorted(l.box.cy for l in lines if l.box.cy > a.box.y1 and abs(l.box.x1 - x1) <= COL_TOL * h0
                     and is_value(l))
-        diffs += [b - a_ for a_, b in zip(ys, ys[1:]) if 0.4 * h0 < b - a_ < 1.0 * h0]
+        diffs += [b - a_ for a_, b in zip(ys, ys[1:], strict=False) if 0.4 * h0 < b - a_ < 1.0 * h0]
     return statistics.median(diffs) if len(diffs) >= 3 else 0.0
 
 
@@ -280,7 +266,7 @@ def assign_slots(panel: Panel, h: float) -> None:
     diffs = []
     for col in ("L", "R"):
         ys = sorted(p.rows[0].box.cy for p in panel.pieces if p.col == col)
-        for y0, y1 in zip(ys, ys[1:]):
+        for y0, y1 in zip(ys, ys[1:], strict=False):
             n = round((y1 - y0) / (PITCH_FALLBACK * h))
             if n >= 1:
                 diffs.append((y1 - y0) / n)
@@ -301,14 +287,15 @@ def assign_slots(panel: Panel, h: float) -> None:
                      "grid", "" if ok else f"row fraction {f:.2f} -> REVIEW")
         if not ok:
             p.warnings.append(f"slot row fraction {f:.2f}")
-        row_y = statistics.median(grid[k])
+        others = [o for o in grid.get(k, []) if o != y]
+        row_y = statistics.median(others) if others else y_first + k * pitch
         p.main_ok = abs(y - row_y) < 0.35 * h
         if not p.main_ok:
             p.warnings.append("first row not on the piece grid: main stat probably missed")
         if len(p.rows) > 5:
             p.warnings.append(f"{len(p.rows)} rows > 5")
         r = panel.row_pitch or ROW_PITCH * h
-        if any(b.box.cy - a_.box.cy > 1.6 * r for a_, b in zip(p.rows, p.rows[1:])):
+        if any(b.box.cy - a_.box.cy > 1.6 * r for a_, b in zip(p.rows, p.rows[1:], strict=False)):
             p.warnings.append("gap inside the piece: a row was probably missed -> REVIEW")
         p.ref_y = y if p.main_ok else row_y
     d1s = [p.rows[1].box.cy - p.rows[0].box.cy for p in panel.pieces if p.main_ok and len(p.rows) > 1]
@@ -403,7 +390,7 @@ def vote(reads: list[list[str]], pattern: str) -> tuple[Any, int, dict[str, int]
     return None, n, tally
 
 
-ROW_INK_MIN = 0.4  # ink at an expected row / weakest ink of the piece's read rows above which a row exists
+ROW_INK_MIN = 0.2  # ink at an expected row / weakest read row of the piece; real rows >= 0.31, empty <= 0.17
 
 
 def row_ink(img: Any, x1: float, cy: float, h: float) -> float:
@@ -417,12 +404,41 @@ def row_ink(img: Any, x1: float, cy: float, h: float) -> float:
     return float(((v > np.median(v) + 45) & (hsv[..., 1] < 90)).mean())
 
 
+def read_row(img: Any, x1: float, cy: float, h: float, r: float, x0_h: float) -> tuple[Any, int, dict[str, int]]:
+    """OCR a value cell (right edge x1, centre cy) in two renderings; keep only lines whose centre maps back within
+    0.35 row pitches of cy and whose right edge is within 0.5h of x1 (a neighbour row is never taken), then vote."""
+    xa, ya = max(0, int(x1 - x0_h * h)), max(0, int(cy - 0.6 * h))
+    crop = _region(img, xa, ya, x1 + 0.2 * h, cy + 0.6 * h)
+    f = max(1.5, 100.0 / h)
+    reads = []
+    for mode in ("col", "gray"):
+        got = []
+        for l in (_reader.read(_render(crop, h, mode)) if crop.size else []):
+            lcy = ya + ((l.box.y0 + l.box.y1) / 2 - 40) / f
+            lx1 = xa + (l.box.x1 - 40) / f
+            if abs(lcy - cy) < 0.35 * r and abs(lx1 - x1) < 0.5 * h:
+                got.append(clean_value(l.text)[0])
+        reads.append(got)
+    return vote(reads, VALUE_RE.pattern.strip("^$")) + (reads,)  # type: ignore[return-value]
+
+
 def probe_rows(panel: Panel, p: Piece, img: Any, h: float) -> None:
     """A piece with < 4 subs may be legit (heroic +0 starts with 3) or an OCR miss: look for text ink at the
     expected sub positions (main + d1 + k*r) and re-read any that has ink. Never invents a row without a read."""
-    if not p.main_ok or not panel.d1:
+    if not panel.d1:
         return
-    x1, r, main_cy = panel.cols[p.col], panel.row_pitch, p.rows[0].box.cy
+    x1, r = panel.cols[p.col], panel.row_pitch
+    slot = p.slot.value if p.slot else "?"
+    if not p.main_ok:  # first row off the grid: read the main stat where the grid says it is
+        v, n, tally, reads = read_row(img, x1, p.ref_y, h, r, 3.0)
+        panel.second_pass.append(f"{slot} probe main: {reads} -> {v}")
+        if v is None:
+            p.warnings.append(f"main stat unreadable {reads} -> REVIEW")
+            return
+        p.rows.insert(0, TextLine(v, 0.5 + 0.1 * n, Box(x1 - 2.5 * h, p.ref_y - 0.45 * h, x1, p.ref_y + 0.45 * h), ()))
+        p.main_ok = True
+        p.warnings.append(f"main recovered by probe: {v} (votes {tally})")
+    main_cy = p.rows[0].box.cy
     known = [row_ink(img, x1, row.box.cy, h) for row in p.rows[1:]] or [0.6 * row_ink(img, x1, main_cy, h)]
     ref = min(known)
     p.probe = []
@@ -434,12 +450,7 @@ def probe_rows(panel: Panel, p: Piece, img: Any, h: float) -> None:
         p.probe.append((k + 1, round(ink / ref, 2) if ref else 0.0))
         if not ref or ink < ROW_INK_MIN * ref:
             continue
-        reads = []
-        for mode in ("col", "gray"):
-            crop = _region(img, x1 - 2.0 * h, cy - 0.45 * h, x1 + 0.2 * h, cy + 0.45 * h)
-            reads.append([clean_value(l.text)[0] for l in _reader.read(_render(crop, h, mode))] if crop.size else [])
-        v, n, tally = vote(reads, VALUE_RE.pattern.strip("^$"))
-        slot = p.slot.value if p.slot else "?"
+        v, n, tally, reads = read_row(img, x1, cy, h, r, 2.0)
         if v is not None:
             p.rows.append(TextLine(v, 0.5 + 0.1 * n, Box(x1 - 1.5 * h, cy - 0.35 * h, x1, cy + 0.35 * h), ()))
             p.rows[1:] = sorted(p.rows[1:], key=lambda l: l.box.cy)
@@ -629,6 +640,45 @@ def parse_artifact(panel: Panel, img: Any, lines: list[TextLine], arts: dict[str
     panel.artifact = art
 
 
+LABELS = {"Attack": "atk", "Defense": "def", "Health": "hp", "Speed": "spd", "Critical Hit Chance": "cc",
+          "Critical Hit Damage": "cd", "Effectiveness": "eff", "Effect Resistance": "er"}
+
+
+def _icon_mask(crop: Any) -> Any:
+    hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+    m = ((hsv[..., 1] < 70) & (hsv[..., 2] > 120)).astype(np.uint8)
+    ys, xs = np.nonzero(m)
+    if len(xs) < 5:
+        return np.zeros((32, 32), np.float32)
+    m = m[ys.min():ys.max() + 1, xs.min():xs.max() + 1]
+    hh, ww = m.shape
+    side = max(hh, ww)
+    pad = np.zeros((side, side), np.uint8)
+    pad[(side - hh) // 2:(side - hh) // 2 + hh, (side - ww) // 2:(side - ww) // 2 + ww] = m
+    return cv2.GaussianBlur(cv2.resize(pad.astype(np.float32), (32, 32), interpolation=cv2.INTER_AREA), (3, 3), 0)
+
+
+def classify_icon(crop: Any, lines: list[TextLine], img: Any) -> Fld:
+    """EE stat icon vs the stat-label icons of the left panel of the same capture (templates found by their OCR
+    label, icon left of the label at -1.45..-0.3 line heights). Cosine similarity, best vs second (margin rule)."""
+    temps = {}
+    for l in lines:
+        key = LABELS.get(l.text.strip())
+        if key and key not in temps:
+            lh = l.box.height
+            t = _region(img, l.box.x0 - 1.45 * lh, l.box.y0, l.box.x0 - 0.3 * lh, l.box.y1)
+            if t.size:
+                temps[key] = _icon_mask(t)
+    if len(temps) < 2 or crop.size == 0:
+        return Fld(None, 0.0, "icon", "no templates")
+    q = _icon_mask(crop)
+    sims = sorted(((float((q * t).sum() / (np.sqrt((q * q).sum() * (t * t).sum()) + 1e-6)), k)
+                   for k, t in temps.items()), reverse=True)
+    (s1, k1), (s2, k2) = sims[0], sims[1]
+    ok = s1 >= 0.7 and s1 - s2 >= 0.08
+    return Fld(k1 if ok else None, s1, "icon", f"2nd {k2} {s2:.2f} margin {s1 - s2:.2f}" + ("" if ok else " REVIEW"))
+
+
 def parse_ee(panel: Panel, img: Any, lines: list[TextLine]) -> None:
     a, h = panel.anchor, panel.h
     assert a is not None
@@ -640,12 +690,13 @@ def parse_ee(panel: Panel, img: Any, lines: list[TextLine]) -> None:
         names = [l for l in lines if abs(l.box.x0 - v.box.x0) < 0.6 * h and 0.3 * h < l.box.cy - v.box.cy < 1.4 * h
                  and re.search(r"[A-Za-z]{3}", l.text)]
         if names:
-            icon = _region(img, v.box.x0 - 1.1 * h, v.box.y0, v.box.x0 - 0.05 * h, v.box.y1)
+            # the stat icon is INSIDE the OCR line box (the detector boxes icon + text, the recogniser drops the icon)
+            icon = _region(img, v.box.x0 - 0.1 * h, v.box.y0, v.box.x0 + 0.65 * h, v.box.y1)
             panel.ee = {"value": Fld(v.text.replace(" ", ""), v.score, "ocr"),
                         "name": Fld(names[0].text, names[0].score, "ocr"),
                         "dx_from_artifact_h": (v.box.x0 - art_x0) / h if art_x0 else None,
                         "dy_from_artifact_h": (v.box.cy - panel.artifact["box"].cy) / h if art_x0 else None,
-                        "icon_crop": icon}
+                        "icon_crop": icon, "icon_stat": classify_icon(icon, lines, img)}
             return
     panel.ee = None
 
@@ -778,7 +829,7 @@ def sheet(panel: Panel, img: Any, path: Path) -> None:
     a = panel.anchor.box
     th = max(1, round(h / 20))
     cv2.rectangle(vis, (int(a.x0), int(a.y0)), (int(a.x1), int(a.y1)), (0, 255, 255), th)
-    for col, x1 in panel.cols.items():
+    for x1 in panel.cols.values():
         cv2.line(vis, (int(x1), int(a.y1)), (int(x1), vis.shape[0] - 1), (255, 255, 0), th)
         xa, xb = x1 - ICON_X[0] * h, x1 - ICON_X[1] * h
         cv2.line(vis, (int(xa), int(a.y1)), (int(xa), vis.shape[0] - 1), (128, 128, 128), th)
@@ -859,7 +910,7 @@ def stress(arts: dict[str, list[str]], scales: list[float], truth: dict[str, Any
                     sl, i = drop_row
                     pc = res[sl]
                     flagged = any("REVIEW" in w or "missed" in w or "recovered" in w for w in pc.warnings)
-                    want_main = None if i == 0 else tp[sl]["main"][0]
+                    want_main = tp[sl]["main"][0] if pc.main is not None else None  # recovered or REVIEW
                     full = [v for v, _ in tp[sl]["subs"]]
                     want_subs = [v for j, v in enumerate(full) if j != i - 1]
                     # a missed sub is either recovered (full list, flagged) or flagged; never silently dropped
@@ -914,9 +965,9 @@ def main() -> int:
             for w in panel.warnings:
                 print("   WARN", w)
             for p in panel.pieces:
-                print(f"   {p.col} {str(p.slot):28s} main={p.main:6s} subs={p.subs} lvl={p.level} enh={p.enhance} "
-                      f"score={p.score} grade={p.grade} pf={p.hue.get('pfrac', 0):.2f} pill={p.pill:.2f} probe={p.probe} "
-                      f"{'; '.join(p.warnings)}")
+                print(f"   {p.col} {str(p.slot):28s} main={str(p.main):6s} subs={p.subs} lvl={p.level} "
+                      f"enh={p.enhance} score={p.score} grade={p.grade} pf={p.hue.get('pfrac', 0):.2f} "
+                      f"pill={p.pill:.2f} probe={p.probe} {'; '.join(p.warnings)}")
             if panel.artifact:
                 pa = panel.artifact
                 print("   ART", {k: str(v) for k, v in pa.items() if k != "box"})
