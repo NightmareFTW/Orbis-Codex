@@ -553,3 +553,15 @@ def test_real_capture(fixture: str, scale: float) -> None:
             Stat.DUAL_ATTACK,
         )
     ] == pytest.approx(finals)
+
+
+def test_a_name_read_differently_never_creates_a_second_copy(
+    scan_files: Path, synthetic_catalog: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert runner.invoke(app, ["roster", "add", "c2011"]).exit_code == 0
+    lines = equipment_screen(rows=BBK_ROWS, name="Blood-Blade Karin")  # normalises to the catalog name
+    monkeypatch.setattr(roster_cli, "reader_factory", lambda: FakeReader(lines))
+    result = runner.invoke(app, ["roster", "scan", str(scan_files)])
+    assert result.exit_code == 0, result.output
+    assert "#1: new snapshot" in result.stdout  # M7 review: matched by code, not by the exact display name
+    assert "1 hero(es)" in runner.invoke(app, ["roster", "list"]).stdout

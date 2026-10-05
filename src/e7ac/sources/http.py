@@ -205,10 +205,10 @@ class CachedHttp:
 
         def cached_result(stale: bool, reason: str | None = None) -> _Fetched[T]:
             assert cached is not None and cached_body is not None
-            fetched = datetime.fromisoformat(cached["fetched_at"])
+            fetched = _fetched_at(cached)
             return _Fetched(full_url, cached_body, fetched, from_cache=True, stale=stale, stale_reason=reason)
 
-        if cached is not None and not refresh and self.now() - datetime.fromisoformat(cached["fetched_at"]) < max_age:
+        if cached is not None and not refresh and self.now() - _fetched_at(cached) < max_age:
             return cached_result(stale=False)
         if self.offline:
             if cached is None:
@@ -356,6 +356,13 @@ def _read_entry(path: Path) -> dict[str, Any] | None:
     except ValueError:
         return None
     return data
+
+
+def _fetched_at(entry: Mapping[str, Any]) -> datetime:
+    """The entry's fetch time; a time without a timezone (hand-edited or older entry) is taken as UTC instead of
+    crashing the comparison with an aware clock (M7 review)."""
+    fetched = datetime.fromisoformat(entry["fetched_at"])
+    return fetched if fetched.tzinfo is not None else fetched.replace(tzinfo=UTC)
 
 
 def _write_entry(path: Path, entry: dict[str, Any]) -> None:

@@ -856,3 +856,25 @@ def test_golden_every_stove_icon_painted_over_real_badges() -> None:
             if match.set_code != code:
                 wrong.append(f"{name} {code}: {match}")
     assert wrong == []
+
+
+def test_m7_review_truncated_pngs_and_single_bad_icons() -> None:
+    import cv2
+    import numpy as np
+
+    from e7ac.sources.assets import validate_png
+    from e7ac.vision.sets import SetIconMatcher
+
+    def icon(colour: tuple[int, int, int]) -> bytes:
+        image = np.zeros((40, 36, 4), dtype=np.uint8)
+        cv2.circle(image, (18, 20), 15, (*colour, 255), -1)
+        ok, data = cv2.imencode(".png", image)
+        assert ok
+        return bytes(data)
+
+    good = icon((0, 0, 200))
+    validate_png(good)
+    with pytest.raises(ValueError, match="truncated"):
+        validate_png(good[:-20])  # a cut download is never cached
+    matcher = SetIconMatcher.from_png({"set_att": good, "set_speed": icon((200, 0, 0)), "set_cri": b"not a png"})
+    assert matcher.codes == {"set_att", "set_speed"} and set(matcher.skipped) == {"set_cri"}

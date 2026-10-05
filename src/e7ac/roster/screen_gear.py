@@ -36,11 +36,14 @@ from e7ac.domain.roster import (
     StatValue,
     Substat,
 )
+from e7ac.roster.validation import Severity, validate_gear
 
 if TYPE_CHECKING:  # the image readers import OpenCV: loaded only when a capture is read
     from e7ac.vision.hero_info import HeroImageReading, PieceRead
     from e7ac.vision.imprint_icon import ImprintIconReading
 
+_BLOCKING: Final = ("-> REVIEW", "probably missed")
+"""Gear-panel warnings that make a piece unreliable as a whole (a cut column, a missed row)."""
 _SETTLED_BY_ICON: Final = ("self/team is unknown", "self/team and the grade are unknown", "so it is the team imprint")
 GRADE_OF_FRAME: Final[Mapping[str, GearGrade]] = {"red": GearGrade.EPIC, "purple": GearGrade.HEROIC}
 """MECH-GEAR-12: community knowledge, `assumed` (NV-26)."""
@@ -95,7 +98,13 @@ def apply_imprint_icon(icon: ImprintIconReading, text_locked: bool, data: dict[s
     mode, grade = imprint.mode, imprint.grade
     if icon.mode is not None:
         # the catalog-inference notes said the mode (or a team grade) could not be told: the icon tells it now
-        notes[:] = [n for n in notes if not (n.startswith("imprint '") and any(p in n for p in _SETTLED_BY_ICON))]
+        settled = [n for n in notes if n.startswith("imprint '") and any(p in n for p in _SETTLED_BY_ICON)]
+        notes[:] = [n for n in notes if n not in settled]
+        if icon.mode is ImprintMode.SELF and any("not exactly one grade" in n for n in settled):
+            notes.append(
+                "imprint: the icon shows a self imprint, but its value is in no grade of the catalog's self-imprint "
+                "table (MECH-IMP-01): OCR error, or the catalog is out of date"
+            )
         if mode is not None and mode is not icon.mode:
             notes.append(f"imprint mode: the icon shows {icon.mode.value}, the catalog suggests {mode.value} (icon)")
             if mode is ImprintMode.SELF:  # that grade came from the self-imprint table: meaningless for a team imprint
@@ -118,7 +127,7 @@ def apply_imprint_icon(icon: ImprintIconReading, text_locked: bool, data: dict[s
 
 def set_consistency(build: HeroBuild, images: HeroImageReading, sets: Mapping[str, ResolvedEntity]) -> list[str]:
     """Completed sets of the stored pieces vs the active-set icons of the CP row: warnings only (MECH-GEAR-05/07)."""
-    if not images.panel.present or not images.active_sets or len(build.gear) < len(GearSlot):
+    if not images.panel.present or len(build.gear) < len(GearSlot):
         return []
     if any(match.set_code is None for match in images.active_sets):
         return ["sets: an active-set icon of the CP row needs review, so the piece sets are not cross-checked"]
@@ -144,8 +153,17 @@ def _gear(images: HeroImageReading, existing: HeroBuild | None, data: dict[str, 
     confidence: dict[str, float] = data["confidence"]
     current = existing.gear if existing is not None else {}
     if not images.panel.present:
-        if current:
-            notes.append("gear panel not found on the screen: the current gear is kept")
+        kept = [
+            name
+            for name, value in (
+                ("gear", current),
+                ("artifact", existing and existing.artifact),
+                ("exclusive equipment", existing and existing.exclusive_equipment),
+            )
+            if value
+        ]
+        if kept:
+            notes.append(f"gear panel not found on the screen: the current {', '.join(kept)} kept")
         return
     gear: dict[GearSlot, Gear] = {}
     for slot in GearSlot:
@@ -159,7 +177,9 @@ def _gear(images: HeroImageReading, existing: HeroBuild | None, data: dict[str, 
             continue
         made, certainty, missing = _piece(piece)
         if made is not None:
-            gear[slot] = made
+            same = current.get(slot)
+            # the screen does not show rolls, modified/reforged flags or the source id: keep them for the same piece
+            gear[slot] = same if same is not None and _visible(same) == _visible(made) else made
             confidence[f"gear.{slot.value}"] = certainty
             continue
         what = "; ".join(missing)
@@ -171,8 +191,15 @@ def _gear(images: HeroImageReading, existing: HeroBuild | None, data: dict[str, 
     data["gear"] = gear
 
 
+def _visible(gear: Gear) -> tuple[object, ...]:
+    """What Hero Info shows of a piece (everything but rolls, modified/reforged flags and the source id)."""
+    subs = tuple((s.stat, round(s.value, 6)) for s in gear.substats)
+    main = (gear.main.stat, round(gear.main.value, 6))
+    return gear.slot, gear.set_code, gear.grade, gear.item_level, gear.enhance, main, subs, gear.score
+
+
 def _piece(piece: PieceRead) -> tuple[Gear | None, float, list[str]]:
-    missing: list[str] = []
+    missing = [w for w in piece.warnings if any(flag in w for flag in _BLOCKING)]
     rows = [("main stat", piece.main), *((f"substat {i}", sub) for i, sub in enumerate(piece.subs, start=1))]
     for name, row in rows:
         if row.stat is None or row.value is None:
@@ -205,6 +232,9 @@ def _piece(piece: PieceRead) -> tuple[Gear | None, float, list[str]]:
         )
     except ValidationError as exc:
         return None, 0.0, [f"invalid piece: {exc.errors()[0]['msg']}"]
+    errors = [i for i in validate_gear(gear, field=f"gear.{piece.slot.value}") if i.severity is Severity.ERROR]
+    if errors:  # a misread value (e.g. 650%) blocks this piece, not the whole capture
+        return None, 0.0, [f"invalid value: {errors[0].message}"]
     parts = [piece.main.confidence, *(s.confidence for s in piece.subs), match.confidence, FRAME_GRADE_CONFIDENCE]
     parts += [piece.item_level.confidence, piece.enhance.confidence]
     return gear, round(min(parts), 3), []
@@ -219,11 +249,15 @@ def _artifact(images: HeroImageReading, existing: HeroBuild | None, data: dict[s
     panel = images.panel.artifact
     if not images.panel.present:
         return
-    if panel is not None and panel.code.value is not None and panel.enhance.value is not None:
-        data["artifact"] = ArtifactRef(code=panel.code.value, level=panel.enhance.value)
-        confidence["artifact"] = round(min(panel.code.confidence, panel.enhance.confidence), 3)
-        return
     detail = "not found" if panel is None else (panel.code.note or panel.enhance.note or "not read")
+    if panel is not None and panel.code.value is not None and panel.enhance.value is not None:
+        try:
+            data["artifact"] = ArtifactRef(code=panel.code.value, level=panel.enhance.value)
+        except ValidationError as exc:
+            detail = f"{panel.code.value} +{panel.enhance.value}: {exc.errors()[0]['msg']}"
+        else:
+            confidence["artifact"] = round(min(panel.code.confidence, panel.enhance.confidence), 3)
+            return
     if had is not None:
         notes.append(f"artifact not read ({detail}): kept {had.code} +{had.level}")
     else:

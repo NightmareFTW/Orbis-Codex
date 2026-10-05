@@ -229,3 +229,10 @@ def test_rate_limit_stops_contacting_the_host(tmp_path: Path) -> None:
     with pytest.raises(FetchError, match=r"not contacted again this run \(HTTP 429 rate limited\)"):
         http.get_text("ns", URL + "?page=2", max_age=timedelta(0))
     assert len(calls) == 1  # 429 is never retried
+
+
+def test_m7_review_a_cache_time_without_timezone_is_utc(tmp_path: Path) -> None:
+    from e7ac.sources.http import _fetched_at
+
+    assert _fetched_at({"fetched_at": "2026-10-04T12:00:00"}) == datetime(2026, 10, 4, 12, 0, tzinfo=UTC)
+    assert _fetched_at({"fetched_at": "2026-10-04T12:00:00+00:00"}).tzinfo is not None

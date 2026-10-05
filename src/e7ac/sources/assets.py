@@ -30,6 +30,8 @@ SET_ICON_MAX_AGE: Final = timedelta(days=30)
 """Artwork changes rarely; a monthly revalidation (ETag / Last-Modified) is polite enough."""
 
 PNG_SIGNATURE: Final = b"\x89PNG\r\n\x1a\n"
+PNG_END: Final = b"IEND\xaeB`\x82"
+"""The IEND chunk type and its fixed CRC: every complete PNG ends with them."""
 MAX_ICON_SIDE: Final = 1024
 """A set icon larger than this is not the expected small icon (measured 113x119): rejected before caching."""
 _IHDR: Final = struct.Struct(">I4sII")
@@ -71,6 +73,8 @@ def validate_png(data: bytes) -> None:
     _, chunk, width, height = _IHDR.unpack(header)
     if chunk != b"IHDR" or not (0 < width <= MAX_ICON_SIDE and 0 < height <= MAX_ICON_SIDE):
         raise ValueError("unexpected PNG header")
+    if not data.endswith(PNG_END):
+        raise ValueError("truncated PNG image (no IEND chunk)")  # a cut download must never be cached as an icon
 
 
 def fetch_set_icons(http: CachedHttp, codes: Iterable[str], *, refresh: bool = False) -> AssetReport:

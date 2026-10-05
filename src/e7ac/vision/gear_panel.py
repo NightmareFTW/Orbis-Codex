@@ -52,7 +52,7 @@ from __future__ import annotations
 import re
 import statistics
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from difflib import SequenceMatcher
 from itertools import combinations, pairwise
 from typing import Final, Literal
@@ -119,6 +119,11 @@ MAIN_ALIGNMENT: Final = 0.35
 ROWS_MAX: Final = 5
 """1 main + 4 substats (MECH-GEAR-03)."""
 ROW_GAP_MAX: Final = 1.6
+EDGE_MARGIN: Final = 0.3
+"""A value column whose right edge is closer than this to the image's right edge may be cut (measured margin on the
+user's captures: 1.28 h; a capture cut through the column leaves < 0.05 h)."""
+FIRST_SUB_GAP_MAX: Final = 1.0
+"""Upper bound of the main-stat-to-first-substat distance (measured 0.79-0.86 h) for the bottom-edge check."""
 """In row pitches: a bigger gap between two rows of a piece means a row was missed."""
 
 # --- item icon block, relative to (icon centre x, main row centre y) ---
@@ -438,6 +443,7 @@ def parse_gear_panel(
     context = _Context(bgr, reader, grid, _first_sub_gap(list(drafts.values()), grid))
     _read_icon_texts(lines, list(drafts.values()), grid)
     pieces = {slot: _finish_piece(context, draft) for slot, draft in drafts.items()}
+    pieces = {slot: _check_image_edges(piece, grid, bgr.shape) for slot, piece in pieces.items()}
     _check_average(anchor.average, pieces, warnings)
     artifact = _read_artifact(context, lines, anchor.line, artifact_names, texts, warnings)
     exclusive = _read_exclusive(lines, anchor.line, artifact, grid, warnings)
@@ -450,6 +456,27 @@ def parse_gear_panel(
         artifact=artifact,
         exclusive=exclusive,
         warnings=tuple(warnings),
+    )
+
+
+def _check_image_edges(piece: GearPiece, grid: _Grid, shape: tuple[int, ...]) -> GearPiece:
+    """A value column that touches the image's right edge, or a piece whose rows run past its bottom, may be cut:
+    "242" cut to "24" still looks like a value (M7 review). Its values become REVIEW instead of being trusted."""
+    height, width = shape[0], shape[1]
+    edge = grid.columns.get("L" if piece.slot in _SLOTS["L"] else "R")
+    last_row = piece.main.box.cy + FIRST_SUB_GAP_MAX * grid.unit + (ROWS_MAX - 2) * grid.pitch
+    if edge is not None and width - edge < EDGE_MARGIN * grid.unit:
+        reason = "value column touches the image's right edge: values may be cut -> REVIEW"
+    elif height - last_row < EDGE_MARGIN * grid.unit:
+        reason = "the piece runs past the image's bottom edge: rows may be missing -> REVIEW"
+    else:
+        return piece
+
+    def cut(row: ValueRow) -> ValueRow:
+        return replace(row, value=None, confidence=0.0)
+
+    return replace(
+        piece, main=cut(piece.main), subs=tuple(cut(r) for r in piece.subs), warnings=(*piece.warnings, reason)
     )
 
 

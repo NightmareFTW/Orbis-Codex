@@ -85,7 +85,8 @@ Key data facts (details in docs/DATA_SOURCES.md):
   D42, migration 0004).
 - **M7 Hero Info gear — done** (SPEC D46–D51): `vision/{stat_icons,sets,gear_panel,imprint_icon,star_row,hero_info}.py`,
   `sources/assets.py` (Stove set icons cached by `catalog sync`), `roster/{composition,screen_gear}.py`; golden tests on
-  local captures (`fixtures/screenshots/heroinfo_*.webp`, `fixtures/stove/set_icons/`, never committed).
+  local captures (`fixtures/screenshots/heroinfo_*.webp`, `fixtures/stove/set_icons/`, never committed). Reviewed by a
+  multi-agent adversarial review (11 findings fixed).
 - Next: **M4** Fribbels save import (path A), then **M9a** passive watch (path B; first speed up the ~15 s scan).
 - Game client language: English, sometimes Portuguese → `game_language` setting (D39). Windows version shown by doctor.
 - Roster import paths (D45), picked by the user: A = Fribbels save file (M4, next after M7), B = passive screen

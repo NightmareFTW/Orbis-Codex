@@ -24,7 +24,7 @@ from e7ac.fileio import write_text_atomic
 from e7ac.paths import default_paths
 from e7ac.roster.backup import RosterExport, export_roster, import_roster
 from e7ac.roster.screen_gear import ScreenCatalog
-from e7ac.roster.screen_import import FINAL_FIELDS, ScreenBuild, build_from_screen
+from e7ac.roster.screen_import import FINAL_FIELDS, ScreenBuild, build_from_screen, resolve_hero_code
 from e7ac.roster.store import (
     RosterError,
     add_owned_hero,
@@ -673,10 +673,15 @@ def _load_set_matcher(codes: list[str]) -> Any:
         missing = ", ".join(sorted(set(codes) - set(icons)))
         typer.echo(f"note: set icons not cached for {missing}: those sets cannot be read", err=True)
     try:
-        return SetIconMatcher.from_png(icons)
+        matcher = SetIconMatcher.from_png(icons)
     except SetIconError as exc:
         typer.echo(f"note: the cached set icons are not usable ({exc}): run e7 catalog sync", err=True)
         return None
+    for code, reason in sorted(matcher.skipped.items()):
+        typer.echo(
+            f"note: set icon {code} is damaged ({reason}): that set cannot be read; run e7 catalog sync", err=True
+        )
+    return matcher
 
 
 MIN_SET_ICONS: Final = 2
@@ -706,8 +711,8 @@ def _scan_target(
     if owned_id is not None:
         owned = _owned_or_exit(session, owned_id)
     else:
-        codes = {code for code, entity in heroes.items() if name and entity.name.casefold() == name.casefold()}
-        copies = [o for o, _ in list_owned(session) if o.hero_code in codes]
+        code, _ = resolve_hero_code(name, heroes)  # same resolution as the import: never a second copy by mistake
+        copies = [o for o, _ in list_owned(session) if code is not None and o.hero_code == code]
         if len(copies) > 1:
             listed = ", ".join(f"#{o.id}" for o in copies)
             _fail(f"you own several copies of {name} ({listed}): scan them one at a time with --id")

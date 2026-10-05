@@ -224,3 +224,69 @@ def test_the_gear_is_validated_like_any_build() -> None:
     assert result.build is not None and GearSlot.WEAPON not in result.build.gear
     assert any("weapon: not stored (invalid piece" in n for n in result.notes)
     assert isinstance(result.build.gear[GearSlot.HELMET], Gear)
+
+
+# ------------------------------------------------------------------------------------------------ M7 review fixes
+
+
+def test_an_artifact_level_out_of_range_is_a_note_not_a_crash() -> None:
+    first = scan(images())
+    assert first.build is not None
+    bad = ArtifactPanel(Read("efa22", 0.9), "Hostess", Read(38, 0.4), Read("Lv.Max/11", 0.4), BOX)  # "+30" misread
+    again = scan(images(artifact=bad), existing=first.build)
+    assert again.build is not None and again.build.artifact == first.build.artifact
+    assert any("artifact not read (efa22 +38" in n for n in again.notes)
+
+
+def test_a_rescan_keeps_what_the_screen_cannot_show_of_the_same_piece() -> None:
+    first = scan(images())
+    assert first.build is not None
+    weapon = first.build.gear[GearSlot.WEAPON]
+    rolled = weapon.model_copy(
+        update={
+            "external_id": "fribbels-123",
+            "substats": tuple(s.model_copy(update={"rolls": 2, "reforged": True}) for s in weapon.substats),
+        }
+    )
+    existing = first.build.model_copy(update={"gear": {**first.build.gear, GearSlot.WEAPON: rolled}})
+    again = scan(images(), existing=existing)
+    assert again.build is not None and again.build.gear[GearSlot.WEAPON] == rolled  # same piece: details kept
+    changed = [piece(GearSlot.WEAPON, read(Stat.ATK, 540.0), SUBS), *FULL[1:]]
+    other = scan(images(changed), existing=existing)
+    assert other.build is not None and other.build.gear[GearSlot.WEAPON].external_id is None  # another piece
+
+
+def test_reader_warnings_and_contract_errors_block_only_their_piece() -> None:
+    gap = piece(GearSlot.WEAPON, read(Stat.ATK, 525.0), SUBS[:3])
+    gap = PieceRead(
+        gap.slot,
+        gap.main,
+        gap.subs,
+        gap.item_level,
+        gap.enhance,
+        gap.score,
+        gap.frame,
+        gap.set_match,
+        ("gap between two value rows: a row was probably missed",),
+    )
+    rate = piece(GearSlot.HELMET, read(Stat.HP, 2835.0), [read(Stat.CRIT_CHANCE, 6.5), *SUBS[1:]])  # "650%"
+    result = scan(images([gap, rate, *FULL[2:]]))
+    assert result.build is not None and result.problems == []
+    assert GearSlot.WEAPON not in result.build.gear and GearSlot.HELMET not in result.build.gear
+    assert GearSlot.ARMOR in result.build.gear
+    notes = " ".join(result.notes)
+    assert "weapon: not stored (gap between two value rows" in notes and "helmet: not stored (invalid value" in notes
+
+
+def test_pieces_that_complete_sets_without_cp_icons_are_reported() -> None:
+    sets = {"set_speed": set_entity("set_speed", 4), "set_cri": set_entity("set_cri", 2)}
+    result = scan(images(active=[]), catalog=ScreenCatalog(artifacts={}, sets=sets))
+    assert any("the CP row shows none but the pieces complete" in n for n in result.notes)
+
+
+def test_a_self_icon_keeps_the_warning_that_the_value_is_in_no_grade() -> None:
+    renoa = {k.replace(".", "__"): v.value for k, v in RENOA.fields.items()}
+    hero = entity("c1193", **{**renoa, "imprint__values": {"B": 0.07, "SSS": 0.21}})  # the screen shows 15%
+    reading = parse_hero_screen(equipment_screen(rows=INFO_ROWS))
+    result = build_from_screen(reading, {"c1193": hero}, captured_at=NOW, images=images(imprint=icon(ImprintMode.SELF)))
+    assert any("in no grade of the catalog's self-imprint table" in n for n in result.notes)

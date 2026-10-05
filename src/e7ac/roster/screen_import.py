@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any, Final
 
 from pydantic import ValidationError
 
-from e7ac.catalog.names import NameIndex
+from e7ac.catalog.names import NameIndex, normalise_name
 from e7ac.catalog.resolve import ResolvedEntity
 from e7ac.domain.codes import Stat
 from e7ac.domain.roster import BuildSource, FinalStats, HeroBuild, Imprint, ImprintGrade, ImprintMode
@@ -153,26 +153,34 @@ def build_from_screen(
     return result
 
 
-def _hero_code(reading: HeroScreenReading, heroes: Mapping[str, ResolvedEntity], result: ScreenBuild) -> str | None:
-    if not reading.name:
-        result.problems.append("the hero name was not read")
-        return None
+def resolve_hero_code(name: str | None, heroes: Mapping[str, ResolvedEntity]) -> tuple[str | None, str]:
+    """(catalog code, "") for the name read on a screen, or (None, problem). The code comes from an exact catalog
+    name, else from the margin rule (`match_label`), never a near-miss; a name shared by several heroes is refused."""
+    if not name:
+        return None, "the hero name was not read"
     index = NameIndex()
     for hero_code, entity in heroes.items():
         index.add(entity.name, hero_code)
-    if index.is_ambiguous(reading.name):
-        result.problems.append(f"several catalog heroes are called {reading.name!r}: use --id to choose the hero")
-        return None
-    found = index.lookup(reading.name)
+    if index.is_ambiguous(name):
+        return None, f"several catalog heroes are called {name!r}: use --id to choose the hero"
+    found = index.lookup(name)
     if found is not None:
-        return found
+        return found, ""
     names = {entity.name: c for c, entity in heroes.items() if not index.is_ambiguous(entity.name)}
-    near = match_label(reading.name, names)
+    near = match_label(name, names)
     if near is None:
-        result.problems.append(f"no catalog hero is called {reading.name!r} (OCR error, or run: e7 catalog sync)")
+        return None, f"no catalog hero is called {name!r} (OCR error, or run: e7 catalog sync)"
+    return names[near], ""
+
+
+def _hero_code(reading: HeroScreenReading, heroes: Mapping[str, ResolvedEntity], result: ScreenBuild) -> str | None:
+    code, problem = resolve_hero_code(reading.name, heroes)
+    if code is None:
+        result.problems.append(problem)
         return None
-    result.notes.append(f"name read as {reading.name!r}, matched to {near!r} (clear best match)")
-    return names[near]
+    if reading.name is not None and normalise_name(heroes[code].name) != normalise_name(reading.name):
+        result.notes.append(f"name read as {reading.name!r}, matched to {heroes[code].name!r} (clear best match)")
+    return code
 
 
 def _final_stats(reading: HeroScreenReading, result: ScreenBuild) -> FinalStats | None:

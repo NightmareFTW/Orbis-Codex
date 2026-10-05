@@ -74,6 +74,11 @@ Checkboxes: `[x]` done · `[ ]` pending. Milestones are small vertical slices; o
     - `vision/hero_info.py` + `roster/screen_gear.py` wire them into `e7 roster scan`;
     - end to end on the user's 6 Hero Info captures: every piece right; the final-stat check gives 9/9 on the 4
       Lv60 heroes; Politis' ambiguous helmet frame is not stored (note).
+    - adversarial review (4 reviewers, findings reproduced by running code): 11 defects fixed — values cut at the
+      image edge sent to review, artifact +N above 30 no longer crashes the scan, a rescan keeps the rolls/reforge
+      flags/source id of the same piece, a name read differently no longer creates a second copy, reader warnings
+      (missed row) and data-contract errors block only their piece, damaged set icons no longer switch off every set,
+      truncated PNGs are never cached, plus 3 missing notes; 2 claims did not reproduce;
     - Not done: the labelling tool (no review UI yet, M8); scan speed ≈ 15 s per capture (second OCR passes) to be
       optimised before the passive watch mode (M9a).
   - **How to try:** `.\OrbisCodex.cmd catalog sync` (also caches the set icons), then on Hero Info captures

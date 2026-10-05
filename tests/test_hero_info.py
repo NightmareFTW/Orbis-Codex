@@ -406,3 +406,19 @@ def test_real_artifact_ee_imprint_and_stars(name: str) -> None:
     assert (reading.imprint_icon.mode, reading.imprint_icon.grade) == imprint
     assert (reading.stars.stars, reading.stars.awakened) == (stars, awakened)
     assert sorted(m.set_code or "?" for m in reading.active_sets) == ACTIVE_SETS[name]
+
+
+@pytest.mark.fixtures("screenshots/heroinfo_haru.webp", f"{SET_ICONS}/set_speed.png")
+def test_a_capture_cut_through_the_gear_values_is_never_read_as_whole() -> None:
+    from e7ac.vision.hero_screen import parse_hero_screen
+    from e7ac.vision.image import load_image
+    from e7ac.vision.ocr import RapidOcrReader
+
+    image = load_image(FIXTURES_DIR / "screenshots/heroinfo_haru.webp")
+    cut = image[:, : int(image.shape[1] * 0.965)].copy()  # the right column ends at the border: "242" -> "24"
+    reader = RapidOcrReader()
+    lines = reader.read(cut)
+    reading = read_hero_images(cut, lines, parse_hero_screen(lines), reader, artifact_names={}, set_matcher=None)
+    for slot in (GearSlot.NECKLACE, GearSlot.RING, GearSlot.BOOTS):
+        piece = reading.pieces.get(slot)
+        assert piece is None or all(row.value is None for row in (piece.main, *piece.subs)), slot

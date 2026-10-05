@@ -191,13 +191,23 @@ class SetIconMatcher:
         self._rim_mask = rim_mask
         self._fill_mask = fill_mask.astype(np.uint8)
         self._resized: dict[tuple[str, int], tuple[GreyImage, Mask]] = {}
+        self.skipped: dict[str, str] = {}
+        """Icons given to `from_png` that could not be decoded (set code -> reason); those sets cannot be read."""
 
     @classmethod
     def from_png(cls, icons: Mapping[str, bytes]) -> SetIconMatcher:
         """Build from PNG bytes with an alpha channel, keyed by set code (`sources.assets.load_set_icons`)."""
-        cropped = {code: _decode_icon(code, data) for code, data in icons.items()}
+        cropped: dict[str, npt.NDArray[np.uint8]] = {}
+        skipped: dict[str, str] = {}
+        for code, data in icons.items():
+            try:
+                cropped[code] = _decode_icon(code, data)
+            except SetIconError as exc:  # one damaged icon must not switch off every set
+                skipped[code] = str(exc)
         if len(cropped) < 2:
-            raise SetIconError("at least two set icons are needed (the margin rule needs a runner-up)")
+            unusable = "; ".join(skipped.values())
+            detail = f"; unusable: {unusable}" if unusable else ""
+            raise SetIconError(f"at least two set icons are needed (the margin rule needs a runner-up){detail}")
         # one common size, so the rim template can be the mean of all icons
         height = int(np.median([icon.shape[0] for icon in cropped.values()]))
         width = int(np.median([icon.shape[1] for icon in cropped.values()]))
@@ -206,7 +216,9 @@ class SetIconMatcher:
         rim = np.stack([_grey(icon) for icon in resized.values()]).mean(axis=0).astype(np.float32)
         rim_mask = (shield & ~_eroded(shield, RING_ERODE)).astype(np.float32)
         references = {code: _reference(icon) for code, icon in resized.items()}
-        return cls(references, rim, rim_mask, _eroded(shield, FILL_ERODE).astype(np.float32))
+        matcher = cls(references, rim, rim_mask, _eroded(shield, FILL_ERODE).astype(np.float32))
+        matcher.skipped = skipped
+        return matcher
 
     @property
     def codes(self) -> frozenset[str]:
