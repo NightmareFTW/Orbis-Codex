@@ -702,6 +702,22 @@ def stove_matcher() -> SetIconMatcher:
     return SetIconMatcher.from_png(icons)
 
 
+STOVE_FILLS = {  # measured on the 24 Stove icons (2026-10-04); the 9 sets seen in game had the same fill
+    "red": {"acc", "att", "chase", "coop", "cri", "cri_dmg", "might", "penetrate", "rage", "scar", "speed", "torrent"}
+    | {"weak"},
+    "blue": {"counter", "def", "immune", "max_hp", "opener", "res", "revenant", "revenge", "riposte", "shield"}
+    | {"vampire"},
+}
+
+
+def test_golden_stove_icon_fills() -> None:
+    """The colour gate rests on the fill measured on each reference icon: 13 red and 11 blue, none unknown."""
+    matcher = stove_matcher()
+    measured = {code: matcher.reference_fill(code) for code in matcher.codes}
+    expected = {f"set_{short}": fill for fill, shorts in STOVE_FILLS.items() for short in shorts}
+    assert measured == {code: expected.get(code, "unknown") for code in measured}  # a new set must be added here
+
+
 @cache
 def capture(name: str, scale: float) -> tuple[Image, tuple[TextLine, ...]]:
     """The capture at `scale` and its OCR lines (OCR runs once per capture and scale for the whole module)."""

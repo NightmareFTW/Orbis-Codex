@@ -86,6 +86,8 @@ SPLIT_SCORE_ROW: Final = 0.4
 """The average score read as its own line: centre within this of the label's centre ..."""
 SPLIT_SCORE_GAP: Final = 2.0
 """... and starting at most this far right of the label."""
+SCORE_DIGITS_MAX: Final = 3
+"""Scores seen: 24-100 (pieces), 48-91 (averages); a longer digit run glued to the label is not taken as one."""
 
 # --- value columns (in anchor heights while the unit is unknown, then in h) ---
 COLUMN_TOLERANCE: Final = 0.35
@@ -98,7 +100,9 @@ RIGHT_COLUMN_MIN: Final = 9.4
 """One column only: it is the right one when its right edge is more than this right of the anchor's left edge
 (measured: left column 5.2 h, right column 13.2 h). A flagged fallback."""
 GLUED_GLYPHS_MAX: Final = 2
-"""A value line may start with up to this many non-digit characters: the stat icon read as a glyph."""
+"""A value line may start with up to this many non-digit characters: the stat icon read as a glyph ..."""
+GLUED_CONFIDENCE_MAX: Final = 0.6
+"""... but such a glyph may also be a misread digit ('l2%'): the value is kept with at most this confidence."""
 
 # --- pieces and slots ---
 PIECE_SPAN: Final = 3.4
@@ -308,6 +312,7 @@ _VALUE: Final = re.compile(r"\d{1,3}(?:,\d{3})*%?")
 _VALUE_TAIL: Final = re.compile(r"\d{1,3}(?:,\d{3})*%?$")
 _NUMBER_CHARS: Final = re.compile(r"[\d,.%+]")
 _INT: Final = re.compile(r"\d{1,3}")
+_TRAILING_DIGITS: Final = re.compile(r"(\d+)\s*$")
 _BADGE: Final = re.compile(r"\+\s?(\d{1,2})")
 _PLUS_TAIL: Final = re.compile(r"\+\d{1,2}$")
 _LEVEL_FIRST: Final = re.compile(r"\d{2,4}")
@@ -429,7 +434,7 @@ def parse_gear_panel(
         return _absent(bgr, lines, texts, [])
     warnings: list[str] = []
     grid = _measure_grid(lines, anchor.line, warnings)
-    drafts = _place_pieces(_split_pieces(lines, anchor.line, grid), anchor.line, grid, warnings)
+    drafts = _place_pieces(_split_pieces(lines, anchor.line, grid), grid, warnings)
     context = _Context(bgr, reader, grid, _first_sub_gap(list(drafts.values()), grid))
     _read_icon_texts(lines, list(drafts.values()), grid)
     pieces = {slot: _finish_piece(context, draft) for slot, draft in drafts.items()}
@@ -483,7 +488,6 @@ class _Grid:
     """Right edge of each value column."""
     first_row: float
     """Centre y of the first main-stat row."""
-    piece_pitch: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -555,9 +559,10 @@ def _row(line: TextLine) -> _Row | None:
     found = _value_text(line.text)
     if found is None:
         return None
-    text, _glued = found
+    text, glued = found
     value, percent = _number(text)
-    return _Row(text, value, percent, round(line.score, 3), line.box, left_known=True)
+    confidence = min(line.score, GLUED_CONFIDENCE_MAX) if glued else line.score
+    return _Row(text, value, percent, round(confidence, 3), line.box, left_known=True)
 
 
 def _find_anchor(lines: Sequence[TextLine], label: str) -> _Anchor | None:
@@ -576,10 +581,11 @@ def _find_anchor(lines: Sequence[TextLine], label: str) -> _Anchor | None:
 
 
 def _split_number(text: str) -> tuple[str, str | None]:
-    match = re.fullmatch(r"(?P<head>.*?)[\s:;.]*(?P<number>\d{1,3})?\s*", text)
-    if match is None:  # pragma: no cover - the pattern matches every string
+    """'Average Equipment Score: 89' -> ('Average Equipment Score: ', '89'); a longer digit run is no score."""
+    match = _TRAILING_DIGITS.search(text)
+    if match is None or len(match.group(1)) > SCORE_DIGITS_MAX:
         return text, None
-    return match.group("head"), match.group("number")
+    return text[: match.start()], match.group(1)
 
 
 def _split_average(lines: Sequence[TextLine], anchor: TextLine, confidence: float) -> Read[int]:
@@ -699,7 +705,7 @@ def _piece_pitch(starts: Sequence[float], unit: float) -> float:
     return statistics.median(samples) if samples else fallback
 
 
-def _place_pieces(drafts: list[_Draft], anchor: TextLine, grid: _Grid, warnings: list[str]) -> dict[GearSlot, _Draft]:
+def _place_pieces(drafts: list[_Draft], grid: _Grid, warnings: list[str]) -> dict[GearSlot, _Draft]:
     """Slot of each piece from its grid row; the first row is the main stat only when it sits on that row."""
     h = grid.unit
     piece_pitch = _piece_pitch([d.rows[0].box.cy for d in drafts], h)
@@ -797,12 +803,13 @@ def _icon_block_texts(lines: Sequence[TextLine], draft: _Draft, grid: _Grid) -> 
 
 
 def _finish_piece(context: _Context, draft: _Draft) -> GearPiece:
+    """Second passes for the missing icon fields and rows, then the image cues ('+N' pill, frame colour)."""
     grid, h = context.grid, context.grid.unit
     assert draft.slot is not None and draft.icon_cx is not None  # set by _place_pieces / _read_icon_texts
     cx = draft.icon_cx
     level = _second_pass_level(context, draft, cx)
     score = draft.score or _vote_int(_reread(context, cx, draft.row_y, SCORE_RENDERINGS), r"\d{1,3}", "score")
-    enhance = draft.enhance or _vote_int(_reread(context, cx, draft.row_y, ENHANCE_RENDERINGS), r"\+\s?\d{1,2}", "'+N'")
+    enhance = draft.enhance or _vote_int(_reread(context, cx, draft.row_y, ENHANCE_RENDERINGS), r"\+\d{1,2}", "'+N'")
     if enhance.value is None:
         enhance = _enhance_without_badge(_pill_share(context.image, cx, draft.row_y, h), enhance)
     main, subs = _probe_rows(context, draft)
@@ -910,7 +917,7 @@ def _read_cell(context: _Context, edge: float, cy: float, left: float) -> _Row |
     if crop.size == 0:
         return None
     reads: list[list[str]] = []
-    boxes: dict[str, tuple[Box, float]] = {}
+    boxes: dict[str, Box] = {}
     for mode in PROBE_RENDERINGS:
         rendered, factor, border = _render(crop, h, mode, RENDER_TARGET)
         texts = []
@@ -926,14 +933,13 @@ def _read_cell(context: _Context, edge: float, cy: float, left: float) -> _Row |
                 continue
             if abs(box.cy - cy) < PROBE_ROW_TOLERANCE * pitch and abs(box.x1 - edge) < PROBE_EDGE_TOLERANCE * h:
                 texts.append(found[0])
-                boxes.setdefault(found[0], (box, line.score))
+                boxes.setdefault(found[0], box)
         reads.append(texts)
     vote = _vote(reads, _VALUE.pattern)
     if vote.value is None:
         return None
     value, percent = _number(vote.value)
-    box, _score = boxes[vote.value]
-    return _Row(vote.value, value, percent, vote.confidence, box, left_known=True)
+    return _Row(vote.value, value, percent, vote.confidence, boxes[vote.value], left_known=True)
 
 
 # ===================================================================================================== second passes
@@ -955,7 +961,8 @@ def _vote(reads: Sequence[Sequence[str]], pattern: str) -> _Vote:
     """Majority over renderings: a value needs at least MIN_VOTES renderings and more votes than any other."""
     tally: dict[str, int] = {}
     for texts in reads:
-        for text in {t for t in texts if re.fullmatch(pattern, t)}:
+        compact = {re.sub(r"\s+", "", t) for t in texts}  # '+ 15' and '+15' are the same read
+        for text in {t for t in compact if re.fullmatch(pattern, t)}:
             tally[text] = tally.get(text, 0) + 1
     if not tally:
         return _Vote(None, 0, tally)
@@ -969,7 +976,7 @@ def _vote_int(reads: Sequence[Sequence[str]], pattern: str, what: str) -> Read[i
     vote = _vote(reads, pattern)
     if vote.value is None:
         return Read(None, 0.0, f"{what} not read (second pass {dict(vote.tally)})")
-    number = int(vote.value.lstrip("+").strip())
+    number = int(vote.value.lstrip("+"))
     return Read(number, vote.confidence, f"second pass {dict(vote.tally)}")
 
 
