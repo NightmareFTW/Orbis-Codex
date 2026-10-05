@@ -75,11 +75,16 @@ class OwnedHeroRow(Base):
     """One owned copy of a hero (a roster can hold several copies of the same hero code)."""
 
     __tablename__ = "owned_hero"
-    __table_args__ = (Index("ix_owned_hero_hero_code", "hero_code"),)
+    __table_args__ = (
+        Index("ix_owned_hero_hero_code", "hero_code"),
+        Index("ux_owned_hero_game_id", "game_id", unique=True),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     uid: Mapped[str] = mapped_column(String(32), nullable=False, unique=True)
     hero_code: Mapped[str] = mapped_column(String(16), nullable=False)
+    game_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    """The game's id of this copy (Fribbels importer data, SPEC D53); None when not known."""
     arena_relevant: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     note: Mapped[str] = mapped_column(Text, nullable=False, default="")
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
@@ -110,6 +115,7 @@ class HeroSnapshotRow(Base):
     imprint_grade: Mapped[str | None] = mapped_column(String(4))
     imprint_stat: Mapped[str | None] = mapped_column(String(16))
     imprint_value: Mapped[float | None] = mapped_column(Float)
+    imprint_mode: Mapped[str | None] = mapped_column(String(8))
     ee_stat: Mapped[str | None] = mapped_column(String(16))
     ee_value: Mapped[float | None] = mapped_column(Float)
     ee_option_code: Mapped[str | None] = mapped_column(String(32))

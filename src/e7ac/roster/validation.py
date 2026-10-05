@@ -18,7 +18,7 @@ from enum import StrEnum
 from typing import Final
 
 from e7ac.domain.codes import Stat
-from e7ac.domain.roster import Gear, GearGrade, GearSlot, HeroBuild
+from e7ac.domain.roster import Gear, GearGrade, GearSlot, HeroBuild, ImprintMode
 
 
 class Severity(StrEnum):
@@ -150,7 +150,10 @@ def validate_build(build: HeroBuild, catalog: CatalogContext | None = None) -> l
     if build.imprint is not None:
         if build.imprint.stat.is_rate and build.imprint.value > MAX_COMPONENT_RATE:
             issues.append(_unit_rate("imprint.value", build.imprint.value))
-        imprint_stat, imprint_values = ctx.imprint_stat, ctx.imprint_values
+        # the catalog table is the self imprint (Fribbels self_devotion); a team imprint has its own stat and values
+        own = build.imprint.mode is not ImprintMode.TEAM
+        imprint_stat = ctx.imprint_stat if own else None
+        imprint_values = ctx.imprint_values if own else None
         if imprint_stat is not None and build.imprint.stat is not imprint_stat:
             issues.append(
                 Issue(
@@ -160,14 +163,16 @@ def validate_build(build: HeroBuild, catalog: CatalogContext | None = None) -> l
                     f"catalog says this hero's imprint is {imprint_stat.value}, not {build.imprint.stat.value}",
                 )
             )
-        expected = (imprint_values or {}).get(build.imprint.grade.value)
+        grade = build.imprint.grade
+        expected = (imprint_values or {}).get(grade.value) if grade is not None else None
         if expected is not None and abs(expected - build.imprint.value) > 1e-6:
             issues.append(
                 Issue(
                     Severity.WARNING,
                     "MECH-IMP-01",
                     "imprint.value",
-                    f"catalog says grade {build.imprint.grade.value} gives {expected:g}, not {build.imprint.value:g}",
+                    f"catalog says grade {grade.value if grade else '?'} gives {expected:g}, not "
+                    f"{build.imprint.value:g}",
                 )
             )
     ee = build.exclusive_equipment

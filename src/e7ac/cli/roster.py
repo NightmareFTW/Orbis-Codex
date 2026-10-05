@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import codecs
 import json
+from collections import Counter
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Any, Final, NoReturn
+from typing import TYPE_CHECKING, Annotated, Any, Final, NoReturn
 
 import typer
 from pydantic import ValidationError
@@ -22,6 +24,8 @@ from e7ac.domain.roster import FINAL_STAT_FIELDS, MAX_INT, BuildSource, HeroBuil
 from e7ac.fileio import write_text_atomic
 from e7ac.paths import default_paths
 from e7ac.roster.backup import RosterExport, export_roster, import_roster
+from e7ac.roster.screen_gear import ScreenCatalog
+from e7ac.roster.screen_import import FINAL_FIELDS, ScreenBuild, build_from_screen, resolve_hero_code
 from e7ac.roster.store import (
     RosterError,
     add_owned_hero,
@@ -34,8 +38,15 @@ from e7ac.roster.store import (
     set_arena_relevant,
 )
 from e7ac.roster.validation import CatalogContext, Issue, Severity, validate_build
+from e7ac.settings import SettingsError, load_settings
 from e7ac.storage.db import open_database, session_scope
-from e7ac.storage.models import CatalogEntityRow, HeroSnapshotRow
+from e7ac.storage.models import CatalogEntityRow, HeroSnapshotRow, OwnedHeroRow
+from e7ac.vision.hero_screen import ScreenError, ScreenKind, parse_hero_screen
+from e7ac.vision.image import ImageError, captured_at, expand_image_paths, load_image
+from e7ac.vision.ocr import RapidOcrReader, TextReader
+
+if TYPE_CHECKING:
+    from e7ac.roster.fribbels_import import HeroImport
 
 roster_app = typer.Typer(help="Your heroes: builds with history, validation and JSON backup.")
 
@@ -432,7 +443,9 @@ def show(owned_id: Annotated[int, typer.Argument()], as_json: Annotated[bool, ty
             f"DAC {s.dual_attack:.1%}"
         )
     if build.imprint:
-        typer.echo(f"  Imprint {build.imprint.grade.value} {build.imprint.stat.value} {build.imprint.value:g}")
+        grade = build.imprint.grade.value if build.imprint.grade else "?"
+        mode = f" ({build.imprint.mode.value})" if build.imprint.mode else ""
+        typer.echo(f"  Imprint {grade} {build.imprint.stat.value} {build.imprint.value:g}{mode}")
     if build.exclusive_equipment:
         ee = build.exclusive_equipment
         typer.echo(
@@ -559,6 +572,466 @@ def import_cmd(source: Annotated[Path, typer.Argument(help="JSON file written by
         typer.echo(f"Current build updated from newer backup snapshots for {len(report.current_changed)} hero(es)")
     for line in flagged:
         typer.echo(f"  warning: {line}", err=True)
+
+
+# OCR engine factory (tests replace it with canned text lines).
+reader_factory: Callable[[], TextReader] = RapidOcrReader
+
+
+@roster_app.command("scan")
+def scan(
+    images: Annotated[
+        list[str],
+        typer.Argument(
+            help="Captures of the hero screen (PNG/WebP/JPEG): files, folders or patterns like captures\\*.png."
+        ),
+    ],
+    owned_id: Annotated[int | None, typer.Option("--id", help="Roster id, when you own several copies.")] = None,
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Read and check only; save nothing.")] = False,
+    force: Annotated[bool, typer.Option(help="Store even if validation finds errors.")] = False,
+) -> None:
+    """Read hero screens (Hero > Equipment tab, or Hero Info) and store the builds (source: ocr).
+
+    Both screens give the final stats, level, CP and imprint; on the Equipment tab every stat is checked against
+    the catalog base stats. Hero Info also gives the gear (stats from their icons, sets, grade, level, +N), the
+    artifact, the EE and the awakening, and the final stats are recomposed from them as a check. Anything not read
+    is kept from the hero's current build and reported."""
+    try:
+        paths = expand_image_paths(images)
+    except ImageError as exc:
+        _fail(str(exc))
+    if owned_id is not None and len(paths) != 1:
+        _fail("--id works with one image at a time")
+    try:
+        language = load_settings(default_paths().settings_file).game_language
+    except SettingsError as exc:
+        _fail(str(exc))
+    engine = _engine()
+    with session_scope(engine) as session:
+        heroes = _catalog_heroes(session)
+        if heroes is None:
+            _fail("the hero is identified by name, which needs the catalog: run e7 catalog sync")
+        catalog, artifact_names = _screen_catalog(session)
+    matcher = set_matcher_factory(sorted(catalog.sets))
+    if matcher is None:
+        typer.echo("note: set icons are not cached, so gear sets cannot be read: run e7 catalog sync", err=True)
+    from e7ac.vision.hero_info import read_hero_images  # OpenCV: loaded only when captures are read
+
+    reader = reader_factory()
+    failed = 0
+    for path in paths:
+        typer.echo(f"{path.name}:")
+        try:
+            image = load_image(path)
+            lines = reader.read(image)
+            reading = parse_hero_screen(lines, language)
+        except (ImageError, ScreenError) as exc:
+            typer.echo(f"  Error: {exc}", err=True)
+            failed += 1
+            continue
+        seen = None
+        if reading.kind is ScreenKind.HERO_INFO:
+            seen = read_hero_images(
+                image, lines, reading, reader, artifact_names=artifact_names, set_matcher=matcher, language=language
+            )
+        with session_scope(engine) as session:
+            owned, current = _scan_target(session, reading.name, heroes, owned_id)
+            result = build_from_screen(
+                reading, heroes, captured_at=captured_at(path), existing=current, images=seen, catalog=catalog
+            )
+            kind = "Equipment tab" if reading.kind is ScreenKind.EQUIPMENT else "Hero Info"
+            _print_scan(result, kind)
+            if result.build is None:
+                failed += 1
+                continue
+            issues = _issues(session, result.build, quiet=True)
+            _print_issues(issues)
+            if any(i.severity is Severity.ERROR for i in issues) and not force:
+                typer.echo("  Error: not saved: fix the errors above (or use --force)", err=True)
+                failed += 1
+                continue
+            if dry_run:
+                typer.echo("  (dry run: nothing saved)")
+                continue
+            if owned is None:
+                created = add_owned_hero(session, result.build)
+                typer.echo(f"  Saved as new roster hero #{created.id}")
+            elif current is not None and _same_build(result.build, current):
+                typer.echo(f"  #{owned.id}: unchanged")
+            else:
+                snapshot = add_snapshot(session, owned, result.build)
+                typer.echo(f"  #{owned.id}: new snapshot {snapshot.id}")
+    if failed:
+        raise typer.Exit(code=1)
+
+
+@roster_app.command("import-fribbels")
+def import_fribbels(
+    file: Annotated[
+        Path,
+        typer.Argument(help='Fribbels\' importer data (gear.txt) or an optimizer save ("Save all optimizer data").'),
+    ],
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Read and check only; save nothing.")] = False,
+    trust_save: Annotated[
+        bool,
+        typer.Option(
+            "--trust-save",
+            help="The save holds a fresh game import: let its gear replace gear read from the screen or entered here.",
+        ),
+    ] = False,
+    force: Annotated[bool, typer.Option(help="Store builds even if validation finds errors.")] = False,
+) -> None:
+    """Import heroes and their gear from Fribbels' files (path A, SPEC D45/D52/D53); only reads that local file.
+
+    Best: gear.txt in the Fribbels saves folder, written by Fribbels' importer right after it reads the game. Every hero
+    of the game comes with its own code and id (copies stay apart), stars, awakening and the gear it wears. An
+    optimizer save ("Save all optimizer data") also works: heroes matched by name, gear as worn in the game (never
+    Fribbels' optimizer plans), no awakening; gear read from the screen is then never replaced unless --trust-save,
+    since that file's date says when Fribbels wrote it, not when it read the game. Level and the displayed stats are
+    in neither file: they are kept from the roster (scan Hero Info to fill them)."""
+    from e7ac.roster.fribbels_import import (
+        FribbelsFileError,
+        game_link_conflict,
+        merge_with_current,
+        read_fribbels_save,
+    )
+    from e7ac.roster.pieces import is_screen_or_manual, same_piece
+
+    try:
+        raw = file.read_bytes()
+        text = raw.decode(_encoding(raw))
+    except (OSError, UnicodeDecodeError) as exc:
+        _fail(f"cannot read {file}: {exc}")
+    written = captured_at(file)
+    engine = _engine()
+    with session_scope(engine) as session:
+        heroes = _catalog_heroes(session)
+        if heroes is None:
+            _fail("heroes are matched by name, which needs the catalog: run e7 catalog sync")
+        catalog, _ = _screen_catalog(session)
+        try:
+            save = read_fribbels_save(text, heroes, catalog.artifacts, captured_at=written)
+        except FribbelsFileError as exc:
+            _fail(f"{file}: {exc}")
+        owned_by_code: dict[str, list[OwnedHeroRow]] = {}
+        owned_by_game: dict[str, OwnedHeroRow] = {}
+        after: dict[str, HeroBuild] = {}  # every hero's current build once this import is done, by roster label
+        for owned, row in list_owned(session):
+            owned_by_code.setdefault(owned.hero_code, []).append(owned)
+            if owned.game_id is not None:
+                owned_by_game[owned.game_id] = owned
+            if row is not None:
+                after[_label(owned.id, owned.hero_code, heroes)] = build_from_row(session, row)
+        touched: set[str] = set()
+        in_save = Counter(e.hero_code for e in save.heroes if e.build is not None)
+        main_copies = _main_copies(save.heroes)
+        counts = dict.fromkeys(("new", "updated", "unchanged", "skipped"), 0)
+        for entry in save.heroes:
+            label = f"{entry.name} ({entry.hero_code or '?'})"
+            problems = list(entry.problems)
+            target: OwnedHeroRow | None = None
+            link = False
+            if entry.build is not None:
+                if entry.exact:
+                    target, link, problem = _importer_target(entry, owned_by_game, owned_by_code, main_copies)
+                else:
+                    target, problem = _save_target(entry, in_save, owned_by_game, owned_by_code)
+                if problem:
+                    problems.append(problem)
+            target_label = _label(target.id, target.hero_code, heroes) if target is not None else None
+            current = after.get(target_label) if target_label is not None else None
+            if entry.build is not None and current is not None and current.captured_at > entry.build.captured_at:
+                problems.append(
+                    f"the roster's build ({current.captured_at:%Y-%m-%d %H:%M} UTC) is newer than the save file "
+                    f"({written:%Y-%m-%d %H:%M} UTC)"
+                )
+            conflict = game_link_conflict(entry, current, save) if entry.build is not None and not entry.exact else None
+            if conflict is not None and not trust_save:
+                problems.append(conflict)
+            if entry.build is None or problems:
+                counts["skipped"] += 1
+                typer.echo(f"  skipped   {label}: {'; '.join(problems)}")
+                continue
+            build, notes = merge_with_current(
+                entry.build, current, unusable=entry.unusable, elsewhere=save.elsewhere(entry)
+            )
+            notes = [*entry.notes, *notes]
+            if current is not None and not trust_save and not entry.exact:
+                changed = [  # pieces read on screen or entered here are never replaced on an optimizer save's word
+                    slot.value
+                    for slot, piece in current.gear.items()
+                    if is_screen_or_manual(piece)
+                    and (slot not in build.gear or not same_piece(piece, build.gear[slot]))
+                ]
+                if changed:
+                    counts["skipped"] += 1
+                    typer.echo(
+                        f"  skipped   {label}: the save's {', '.join(changed)} differ from the roster's piece read on "
+                        f"screen or entered here (build of {current.captured_at:%Y-%m-%d}); use --trust-save if the "
+                        "save is a fresh game import"
+                    )
+                    continue
+            if current is not None and _same_build(build, current):
+                counts["unchanged"] += 1
+                if link and target is not None and not dry_run:
+                    target.game_id = entry.game_id
+                if notes:
+                    typer.echo(f"  unchanged {label}")
+                    for note in notes:
+                        typer.echo(f"    note: {note}")
+                continue
+            issues = _issues(session, build, quiet=True)
+            if any(i.severity is Severity.ERROR for i in issues) and not force:
+                counts["skipped"] += 1
+                typer.echo(f"  skipped   {label}: not valid (use --force to store it anyway)")
+                _print_issues(issues)
+                continue
+            status = "new" if current is None else "updated"
+            counts[status] += 1
+            typer.echo(f"  {status:9} {label}: {len(build.gear)} gear piece(s)")
+            for note in notes:
+                typer.echo(f"    note: {note}")
+            _print_issues(issues)
+            key = target_label or f"new {label} [{entry.game_id or entry.fribbels_id}]"
+            after[key] = build
+            touched.add(key)
+            if dry_run:
+                continue
+            if target is not None:
+                if link:
+                    target.game_id = entry.game_id
+                add_snapshot(session, target, build)
+            else:
+                created = add_owned_hero(session, build, game_id=entry.game_id if entry.exact else None)
+                owned_by_code.setdefault(build.hero_code, []).append(created)
+                if created.game_id is not None:
+                    owned_by_game[created.game_id] = created
+        for warning in [*save.warnings, *_shared_pieces(after, touched)]:
+            typer.echo(f"  warning: {warning}", err=True)
+        summary = ", ".join(f"{n} {k}" for k, n in counts.items())
+        kind = "Fribbels importer data" if save.importer_data else "Fribbels save"
+        typer.echo(
+            f"{kind} (file written {written:%Y-%m-%d %H:%M} UTC): {len(save.heroes)} hero(es): {summary}; "
+            f"{save.unused_items} item(s) worn by no hero of the file"
+        )
+        if counts["new"] or counts["updated"]:
+            missing = "Level and the displayed stats are"
+            if not save.importer_data:
+                missing = "Level, awakening and the displayed stats are"
+            typer.echo(f"{missing} not in the file: scan Hero Info to fill them.")
+        if dry_run:
+            typer.echo("(dry run: nothing saved)")
+
+
+def _main_copies(entries: list[HeroImport]) -> dict[str, HeroImport | None]:
+    """For each hero code with several copies in importer data, the copy the roster most likely holds (most stars,
+    awakening and gear), or None when copies tie (then the roster's unlinked copy cannot be told apart)."""
+    groups: dict[str, list[HeroImport]] = {}
+    for entry in entries:
+        if entry.exact and entry.build is not None and entry.hero_code:
+            groups.setdefault(entry.hero_code, []).append(entry)
+    main: dict[str, HeroImport | None] = {}
+    for code, copies in groups.items():
+        rank = {id(e): (e.build.stars, e.build.awakening, len(e.build.gear)) for e in copies if e.build is not None}
+        best = max(rank.values())
+        tops = [e for e in copies if rank[id(e)] == best]
+        main[code] = tops[0] if len(tops) == 1 else None
+    return main
+
+
+def _importer_target(
+    entry: HeroImport,
+    owned_by_game: dict[str, OwnedHeroRow],
+    owned_by_code: dict[str, list[OwnedHeroRow]],
+    main_copies: dict[str, HeroImport | None],
+) -> tuple[OwnedHeroRow | None, bool, str]:
+    """(roster copy, link it to this game id, problem) for a hero of importer data; no copy: a new roster hero."""
+    owned = owned_by_game.get(entry.game_id) if entry.game_id else None
+    if owned is not None:
+        if owned.hero_code != entry.hero_code:
+            return None, False, f"game id {entry.game_id} is linked to roster hero #{owned.id} ({owned.hero_code})"
+        return owned, False, ""
+    code = entry.hero_code or ""
+    unlinked = [o for o in owned_by_code.get(code, []) if o.game_id is None]
+    if not unlinked:
+        return None, False, ""
+    main = main_copies.get(code)
+    listed = ", ".join(f"#{o.id}" for o in unlinked)
+    if main is None:
+        return (
+            None,
+            False,
+            (
+                "several copies in the game look alike (same stars, awakening and gear count), and the roster's "
+                f"{listed} is not linked to one yet: cannot tell which"
+            ),
+        )
+    if main is not entry:
+        return None, False, ""  # the roster's copy is another, better copy of the file: this one is new
+    if len(unlinked) > 1:
+        return None, False, f"the roster has several copies not linked to the game ({listed}): cannot tell which"
+    return unlinked[0], True, ""
+
+
+def _save_target(
+    entry: HeroImport,
+    in_save: Counter[str | None],
+    owned_by_game: dict[str, OwnedHeroRow],
+    owned_by_code: dict[str, list[OwnedHeroRow]],
+) -> tuple[OwnedHeroRow | None, str]:
+    """(roster copy, problem) for a hero of an optimizer save (one hero per name)."""
+    if in_save[entry.hero_code] > 1:
+        return None, f"{in_save[entry.hero_code]} heroes of the save are this hero"
+    linked = owned_by_game.get(entry.game_id) if entry.game_id else None
+    if linked is not None and linked.hero_code == entry.hero_code:
+        return linked, ""  # the copy whose game gear the save's match points to
+    copies = owned_by_code.get(entry.hero_code or "", [])
+    if len(copies) > 1:
+        listed = ", ".join(f"#{o.id}" for o in copies)
+        return None, f"you own several copies ({listed}); Fribbels keeps one per name"
+    return (copies[0] if copies else None), ""
+
+
+def _label(owned_id: int, hero_code: str, heroes: dict[str, ResolvedEntity]) -> str:
+    entity = heroes.get(hero_code)
+    return f"#{owned_id} {entity.name if entity is not None else hero_code}"
+
+
+def _shared_pieces(builds: dict[str, HeroBuild], touched: set[str]) -> list[str]:
+    """One physical piece (same game/Fribbels id) in the current build of two heroes, one of them just imported."""
+    holders: dict[str, list[str]] = {}
+    for label, build in builds.items():
+        for piece in build.gear.values():
+            if piece.external_id:
+                holders.setdefault(piece.external_id, []).append(label)
+    return [
+        f"the same piece ({key}) is in the builds of {' and '.join(labels)}: rescan or edit one of them"
+        for key, labels in sorted(holders.items())
+        if len(labels) > 1 and touched.intersection(labels)
+    ]
+
+
+def _load_set_matcher(codes: list[str]) -> Any:
+    """Set-badge matcher from the Stove icons cached by `e7 catalog sync` (offline); None when too few are cached."""
+    from e7ac.sources.assets import load_set_icons
+    from e7ac.vision.sets import SetIconError, SetIconMatcher
+
+    icons = load_set_icons(default_paths().cache_dir, codes)
+    if len(icons) < MIN_SET_ICONS:
+        return None
+    if len(icons) < len(codes):
+        missing = ", ".join(sorted(set(codes) - set(icons)))
+        typer.echo(f"note: set icons not cached for {missing}: those sets cannot be read", err=True)
+    try:
+        matcher = SetIconMatcher.from_png(icons)
+    except SetIconError as exc:
+        typer.echo(f"note: the cached set icons are not usable ({exc}): run e7 catalog sync", err=True)
+        return None
+    for code, reason in sorted(matcher.skipped.items()):
+        typer.echo(
+            f"note: set icon {code} is damaged ({reason}): that set cannot be read; run e7 catalog sync", err=True
+        )
+    return matcher
+
+
+MIN_SET_ICONS: Final = 2
+set_matcher_factory: Callable[[list[str]], Any] = _load_set_matcher
+
+
+def _screen_catalog(session: Session) -> tuple[ScreenCatalog, dict[str, str]]:
+    """Artifact and set entities of the current catalog, and artifact display name -> code (ambiguous names left out:
+    a name shared by several codes is never matched)."""
+    snapshot = current_catalog(session)
+    if snapshot is None:
+        return ScreenCatalog(artifacts={}, sets={}), {}
+    artifacts = {e.entity_id: e for e in load_entities(session, snapshot.id, EntityType.ARTIFACT)}
+    sets = {e.entity_id: e for e in load_entities(session, snapshot.id, EntityType.SET)}
+    by_name: dict[str, set[str]] = {}
+    for code, entity in artifacts.items():
+        if entity.name:
+            by_name.setdefault(entity.name, set()).add(code)
+    names = {name: next(iter(codes)) for name, codes in by_name.items() if len(codes) == 1}
+    return ScreenCatalog(artifacts=artifacts, sets=sets), names
+
+
+def _scan_target(
+    session: Session, name: str | None, heroes: dict[str, ResolvedEntity], owned_id: int | None
+) -> tuple[Any, HeroBuild | None]:
+    """(owned hero or None for a new one, its current build). Several copies of one hero need --id."""
+    if owned_id is not None:
+        owned = _owned_or_exit(session, owned_id)
+    else:
+        code, _ = resolve_hero_code(name, heroes)  # same resolution as the import: never a second copy by mistake
+        copies = [o for o, _ in list_owned(session) if code is not None and o.hero_code == code]
+        if len(copies) > 1:
+            listed = ", ".join(f"#{o.id}" for o in copies)
+            _fail(f"you own several copies of {name} ({listed}): scan them one at a time with --id")
+        owned = copies[0] if copies else None
+    if owned is None:
+        return None, None
+    row = current_snapshot(session, owned.id)
+    return owned, build_from_row(session, row) if row is not None else None
+
+
+def _print_scan(result: ScreenBuild, kind: str) -> None:
+    title = f"{result.hero_name or '?'} ({result.hero_code or 'unknown'})"
+    build = result.build
+    if build is None:
+        typer.echo(f"  {title} - {kind}")
+    else:
+        cp = f"{build.cp:,}" if build.cp is not None else "-"
+        typer.echo(f"  {title} - {kind} - Lv. {build.level}, CP {cp}")
+        checks = {c.stat: c for c in result.base_checks}
+        stats = build.final_stats
+        parts = []
+        for stat, name in FINAL_FIELDS.items():
+            value = getattr(stats, name) if stats is not None else None
+            shown = "-" if value is None else (f"{value:g}" if stat in _FLAT_SCAN else f"{value * 100:.1f}%")
+            check = checks.get(stat)
+            mark = "" if check is None else (" ok" if check.ok else " CHECK")
+            parts.append(f"{stat.value} {shown}{mark}")
+        typer.echo("  " + "  ".join(parts))
+        if build.imprint is not None:
+            grade = build.imprint.grade.value if build.imprint.grade else "?"
+            mode = build.imprint.mode.value if build.imprint.mode else "self/team unknown"
+            typer.echo(f"  imprint {build.imprint.stat.value} {build.imprint.value:g} (grade {grade}, {mode})")
+        if result.base_checks:
+            good = sum(c.ok for c in result.base_checks)
+            typer.echo(f"  base-stat check vs catalog: {good}/{len(result.base_checks)} agree")
+        if kind == "Hero Info":
+            _print_gear(build)
+        report = result.composition
+        if report is not None and report.applicable:
+            agree = sum(c.verdict in ("ok", "capped") for c in report.checks)
+            typer.echo(
+                f"  final-stat check (gear + sets + artifact + imprint + EE): {agree}/{len(report.checks)} agree"
+            )
+    for note in result.notes:
+        typer.echo(f"  note: {note}", err=True)
+    for problem in result.problems:
+        typer.echo(f"  Error: {problem}", err=True)
+
+
+_FLAT_SCAN: Final = frozenset({Stat.ATK, Stat.DEF, Stat.HP, Stat.SPEED})
+
+
+def _print_gear(build: HeroBuild) -> None:
+    typer.echo(f"  {build.stars}* awakened {build.awakening}")
+    for slot, gear in build.gear.items():
+        subs = ", ".join(_stat_text(s.stat, s.value) for s in gear.substats)
+        score = gear.score if gear.score is not None else "-"
+        main = _stat_text(gear.main.stat, gear.main.value)
+        head = f"{slot.value:8} {gear.item_level} +{gear.enhance} {gear.grade.value} {gear.set_code} score {score}"
+        typer.echo(f"  {head}: {main} | {subs}")
+    if build.artifact is not None:
+        typer.echo(f"  artifact {build.artifact.code} +{build.artifact.level}")
+    ee = build.exclusive_equipment
+    if ee is not None and ee.stat is not None and ee.value is not None:
+        typer.echo(f"  exclusive equipment {_stat_text(ee.stat, ee.value)}")
+
+
+def _stat_text(stat: Stat, value: float) -> str:
+    return f"{stat.value} {value * 100:g}%" if stat.is_rate else f"{stat.value} {value:g}"
 
 
 def _owned_or_exit(session: Session, owned_id: int) -> Any:

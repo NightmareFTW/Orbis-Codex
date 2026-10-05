@@ -76,10 +76,35 @@ Key data facts (details in docs/DATA_SOURCES.md):
 - **Order changed 2026-10-04 (SPEC D36):** screen extraction first, Fribbels import optional/later.
 - **M5a Capture tooling — done**: `vision/{window,_win32,capture}.py`, `e7 capture` (`--list-windows`, `--hwnd`, `--delay`,
   `--hotkey`), doctor check; guard test `tests/test_vision.py::test_no_source_file_can_touch_the_game`.
-- Next: **M5b OCR benchmark → M6 Hero Info OCR**, both need the user's captures (SPEC Q2, now taken with `e7 capture`).
+- **M5b + M6 Hero screen OCR — done**:
+  - `vision/{ocr,labels,hero_screen,image}.py`: RapidOCR with English labels, anchored on the stat labels;
+  - `roster/screen_import.py`: base check final − ▲ = catalog base (MECH-STAT-06), merge with the current build;
+  - `e7 roster scan`;
+  - golden tests on the user's captures (local fixtures `fixtures/screenshots/equip_*.webp`, never committed).
+- **M6.1**: `roster scan` expands patterns/folders/`%VAR%` (D43); imprint mode self/team + "Locked" (MECH-IMP-02,
+  D42, migration 0004).
+- **M7 Hero Info gear — done** (SPEC D46–D51): `vision/{stat_icons,sets,gear_panel,imprint_icon,star_row,hero_info}.py`,
+  `sources/assets.py` (Stove set icons cached by `catalog sync`), `roster/{composition,screen_gear}.py`; golden tests on
+  local captures (`fixtures/screenshots/heroinfo_*.webp`, `fixtures/stove/set_icons/`, never committed). Reviewed by a
+  multi-agent adversarial review (11 findings fixed).
+- **M4 Fribbels save import — done** (SPEC D52): `roster/{fribbels_import,pieces}.py`, `e7 roster import-fribbels FILE
+  [--dry-run] [--trust-save] [--force]`; reads only the save file made with Fribbels' own tool; gear as worn in the game
+  (`ingameEquippedId`, never Fribbels' optimizer plans); exact names only; Fribbels' estimates at lower confidence;
+  level/awakening/displayed stats kept from the roster; a save file older than the roster build never replaces it,
+  screen-read or hand-entered pieces only replaced with `--trust-save`. Reviewed by two rounds of multi-agent
+  adversarial review (26 + 13 findings fixed).
+  Checked on the user's real export (local fixture `fixtures/saves/fribbels.json`).
+- **M4.1 Fribbels importer data — done** (SPEC D53): the same command reads `gear.txt` (Fribbels' importer output,
+  preferred): every hero by its own code and game id (`owned_hero.game_id`, migration 0005; copies kept apart), stars,
+  awakening, worn gear incl. sets Fribbels does not know. Fields `d`/`s` not used yet (NV-31/32). Real files are local
+  fixtures (`fixtures/saves/{fribbels.json,gear.txt}`), never committed.
+- Next: **M9a** passive watch (path B; first speed up the ~15 s scan).
 - Game client language: English, sometimes Portuguese → `game_language` setting (D39). Windows version shown by doctor.
+- Roster import paths (D45), picked by the user: A = Fribbels save file (M4, done), B = passive screen
+  watch (M9a). Network import inside our app (M5c, D38): **not possible here** — blocked twice by Anthropic's safety
+  checks, even after the user changed the permission mode; do not attempt it again.
 - Network import "like Fribbels" (D38): approved by the user, **paused**. This session's safety system blocked building a
   traffic-capture + third-party-upload tool. Resume only after the user explicitly allows it; until then the golden
   rule above (no network capture) applies unchanged.
-- Still missing: the user's screen captures (SPEC Q2) — needed for M5b/M6; a Fribbels save only for the optional M4.
+- Received: the user's screen captures and Fribbels files (local fixtures only).
   The repo is **public**: never commit captures or save files.

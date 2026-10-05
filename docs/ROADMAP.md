@@ -33,21 +33,82 @@ Checkboxes: `[x]` done · `[ ]` pending. Milestones are small vertical slices; o
 > other program. Screen extraction therefore comes first (M5a → M5b → M6 → M7 → M9); the Fribbels save import (M4)
 > becomes optional and comes later, for users who already have a Fribbels file.
 
-- [ ] **M4 Fribbels save import** *(optional, later)* — schema derived from a real save file; strict models + raw passthrough; gear dedupe by id/fingerprint; mapping Fribbels names → hero codes with margin rule; `e7 import fribbels <file>`.
-  - Acceptance: user's file imports with a report (imported/skipped/ambiguous); unknown fields preserved; test skips cleanly without the file; CP samples feed NV-06.
+- [x] **M4 Fribbels save import** *(SPEC D44/D45/D52: path A of the two import paths, bulk first load of ~400 heroes)* —
+  `roster/fribbels_import.py` reads the save file the user made with Fribbels' own importer ("Save all optimizer
+  data"); `e7 roster import-fribbels <file> [--dry-run] [--trust-save] [--force]`.
+  - Acceptance: a report per hero (new/updated/unchanged/skipped with the reason, every note and warning shown); exact
+    name matching only; gear as worn in the game (never Fribbels' optimizer plans), with rolls and game ids; Fribbels'
+    estimates (+N below +15, stars, hand-edited pieces) at a lower confidence; level/awakening/displayed stats kept
+    from the roster; a save file modified before the roster build never replaces it, and gear read on screen only
+    with `--trust-save`; synthetic tests always run, the golden test skips cleanly without `fixtures/saves/fribbels.json`.
+  - ✅ Done 2026-10-05 on synthetic saves built from Fribbels' code, then two rounds of multi-agent adversarial review:
+    26 + 13 confirmed findings fixed (D52); the tests catch 25 deliberate mutations of the key rules (one more is
+    equivalent). **Pending:** a check against the
+    user's real save (the format is `community` until then).
+  - **How to try:** in Fribbels, import your account from the game and use "Save all optimizer data"; then
+    `.\OrbisCodex.cmd roster import-fribbels "$HOME\Documents\FribbelsOptimizerSaves\<file>.json" --dry-run`, and again
+    without `--dry-run` to store it (`... roster list` shows the heroes).
+- [x] **M4.1 Fribbels importer data** *(SPEC D53)* — `e7 roster import-fribbels` also reads `gear.txt` (auto-detected),
+  the file Fribbels' importer writes when it reads the game: every hero by its own code and game id (copies kept apart,
+  `owned_hero.game_id`, migration 0005), stars, awakening, the gear it wears (sets Fribbels does not know included).
+  - Acceptance: the user's real files import (378 heroes from gear.txt; a second run reports them unchanged; the export
+    on top agrees on 231 heroes); golden tests on both files skip cleanly without them.
+  - ✅ Done 2026-10-05.
+  - **How to try:** after Fribbels' import from the game,
+    `.\OrbisCodex.cmd roster import-fribbels "$HOME\Documents\FribbelsOptimizerSaves\gear.txt" --dry-run`, then again
+    without `--dry-run`; `... roster list` shows every hero with its stars and awakening.
 - [x] **M5a Capture tooling** — read-only game-window locator (window title/class + system process list, never a handle to the game), `mss` capture of the window's client area, blank-frame check, lossless PNG, `e7 capture` (one shot, `--delay`, `--list-windows`, `--hwnd`) and a `--hotkey` scan mode (RegisterHotKey, no keyboard hook); `e7 doctor` reports the game window; a guard test forbids process handles, memory access, input injection, keyboard hooks and packet capture anywhere in the code.
   - Acceptance: tests with fake windows/backends on every OS, real window listing and screen grab on the Windows CI runner; the user captures the screens listed in SPEC Q2 with it.
   - ✅ Done 2026-10-04 (in-game check pending: the window identifiers of the Stove client are community-sourced).
   - **How to try:** with the game open on the Hero Info screen: `.\OrbisCodex.cmd capture --list-windows`, then
     `.\OrbisCodex.cmd capture hero_info` (or `.\OrbisCodex.cmd capture --hotkey ctrl+shift+s` and press the keys in game).
-- [ ] **M5b OCR spike & benchmark** (`spikes/ocr_bench/`) — RapidOCR (`rapidocr` + `onnxruntime`, recognition-only on anchored regions) vs Windows OCR vs a digit template reader, on the user's captures (+ synthetic rescales); Tesseract excluded (separate installer, D17).
-  - Acceptance: table of per-field accuracy, "confidently wrong" rate, latency and install cost in `ARCHITECTURE.md`; engine decision logged in SPEC.
-- [ ] **M6 Hero Info OCR v1** — anchors + normalised regions, numeric fields, hero name → catalog match, per-field confidence; `e7 import screenshot <png>`.
-  - Acceptance: golden BBK fixture (after the user confirms the transcription table) passes for all non-icon fields; works on 0.75×/1.25× rescaled copies.
-- [ ] **M7 Icon classifiers + labelling tool** — substat icons, "%" detection, set icons (bootstrapped from Stove icons + screenshots), grade from frame colour, constraint-based disambiguation.
+- [x] **M5b OCR engine** — RapidOCR on the user's real captures; engine decision D41.
+  - ✅ Done 2026-10-04:
+    - 3 captures at 3 scales, every field correct;
+    - Windows OCR and template digits were not needed;
+    - `e7 doctor` checks that the engine loads.
+- [x] **M6 Hero screen OCR v1 (stats panel)** — anchored on the stat labels:
+  - reads hero name → catalog code, level, CP, imprint, active sets, and the 9 final stats (+ "▲" bonus on the Equipment
+    tab);
+  - every field carries a confidence;
+  - cross-check final − ▲ = catalog base (MECH-STAT-06);
+  - `e7 roster scan <images>` stores builds (D40).
+  - Acceptance: golden captures pass for all non-icon fields; works on rescaled copies.
+  - ✅ Done 2026-10-04:
+    - golden tests on Renoa, Haru and Straze at 0.64×, 1× and 1.28× (local fixtures; skipped in CI);
+    - 27/27 base-stat checks agree.
+
+    Gear details on Hero Info (substat values with icon types) come with M7.
+  - **How to try:** `.\OrbisCodex.cmd capture --hotkey ctrl+shift+s`, press it on each hero's Equipment tab or Hero Info,
+    then `.\OrbisCodex.cmd roster scan "%LOCALAPPDATA%\OrbisCodex\captures\*.png"` and `... roster list`.
+  - Follow-up 2026-10-04 (M6.1):
+    - `roster scan` expands patterns, folders and `%VAR%` itself (Windows shells do not; D43);
+    - imprint text wrapped on three lines, "Locked" = no imprint;
+    - imprint mode self/team stored (MECH-IMP-02, D42; migration 0004);
+    - Hero Info golden test (Closer Charles);
+    - adversarial review: 7 confirmed findings fixed (Typer's Windows argument expansion, flat/% twin imprints,
+      keeping a known imprint mode, migration downgrade keeping gear links, empty and `~` arguments).
+- [x] **M7 Hero Info gear + icon classifiers** — substat icons (templates taken from the stat-label icons of the same Hero Info capture), "%" detection, set icons (bootstrapped from Stove icons + screenshots), imprint icon (self/team, lit positions, grade letter; MECH-IMP-02), awakened stars (MECH-HERO-03), grade from frame colour, constraint-based disambiguation; then Hero Info gear: item level, +enhance, score, main stat and 4 substats per piece, artifact name/level and EE.
+  - ✅ Done 2026-10-05 (prototypes measured first, then 5 production modules; SPEC D46–D51):
+    - `vision/stat_icons.py` (149/149 icons at 3 scales), `vision/sets.py` + `sources/assets.py` (Stove set icons,
+      cached by `catalog sync`), `vision/gear_panel.py` (slots, values, item level, +N, score, frame colour,
+      artifact, EE), `vision/imprint_icon.py`, `vision/star_row.py`, `roster/composition.py` (final-stat check);
+    - `vision/hero_info.py` + `roster/screen_gear.py` wire them into `e7 roster scan`;
+    - end to end on the user's 6 Hero Info captures: every piece right; the final-stat check gives 9/9 on the 4
+      Lv60 heroes; Politis' ambiguous helmet frame is not stored (note).
+    - adversarial review (4 reviewers, findings reproduced by running code): 11 defects fixed — values cut at the
+      image edge sent to review, artifact +N above 30 no longer crashes the scan, a rescan keeps the rolls/reforge
+      flags/source id of the same piece, a name read differently no longer creates a second copy, reader warnings
+      (missed row) and data-contract errors block only their piece, damaged set icons no longer switch off every set,
+      truncated PNGs are never cached, plus 3 missing notes; 2 claims did not reproduce;
+    - Not done: the labelling tool (no review UI yet, M8); scan speed ≈ 15 s per capture (second OCR passes) to be
+      optimised before the passive watch mode (M9a).
+  - **How to try:** `.\OrbisCodex.cmd catalog sync` (also caches the set icons), then on Hero Info captures
+    `.\OrbisCodex.cmd roster scan "$env:LOCALAPPDATA\OrbisCodex\captures" --dry-run` and without `--dry-run` to save.
   - Acceptance: golden BBK fixture passes 100% including substats, EE stat, artifact level; ambiguous crops produce review items instead of guesses.
 - [ ] **M8 Roster UI** — PySide6 main window: roster list (search, element/class filters, sort by any stat), hero page mirroring the game layout, edit form with validation, history view, review queue (crop + value), JSON backup.
   - Acceptance: pytest-qt smoke tests; manual checklist for the user on Windows.
+- [ ] **M9a Passive watch mode** *(brought forward after M4 — SPEC D45 path B)*: `e7 roster watch` captures the Hero Info screen by itself when the shown hero changes and reads it (no key presses, no input to the game).
 - [ ] **M9 Overlay scan + batch import** — client profiles (Stove PC, Steam, Google Play Games, emulator: window title/process + capture hints), window locator, minimal overlay shell (topmost, draggable, non-activating) with a **"Scan hero"** button and an optional passive watch mode, Hero Info detection, dedupe by hero + CP, incremental folder import, arena-relevant flag.
   - Acceptance: replaying a folder of screenshots imports each hero once; the user verifies in game that "Scan hero" captures the current hero and nothing is ever sent to the game.
 

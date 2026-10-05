@@ -29,6 +29,7 @@ From a terminal opened in that folder (cmd or PowerShell), run commands as `.\Or
 | `e7 roster export backup.json` / `e7 roster import backup.json` | Back up / restore (or merge) the whole roster |
 | `e7 capture hero_info` | Save the game picture as PNG (read-only screen copy; `--hotkey ctrl+shift+s` to capture while you play) |
 | `e7 capture --list-windows` | Show the open windows and which one looks like the game |
+| `e7 roster scan captures\*.png` | Read hero screens (Equipment tab or Hero Info) and store the builds, checked against the catalog |
 
 ## Develop
 ```bash

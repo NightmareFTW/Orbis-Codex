@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import json
 import re
+from collections import defaultdict
 from collections.abc import Callable
 from typing import Annotated, Final
 
 import typer
 from pydantic import JsonValue
 from sqlalchemy import Engine
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from e7ac.catalog.coverage import coverage, status_counts
@@ -29,6 +31,7 @@ from e7ac.domain.codes import DataStatus, SourceId
 from e7ac.domain.world import World
 from e7ac.paths import AppPaths, default_paths
 from e7ac.settings import SettingsError, load_settings
+from e7ac.sources.assets import AssetReport, fetch_set_icons
 from e7ac.sources.http import CachedHttp
 from e7ac.storage.db import open_database, session_scope
 from e7ac.storage.models import CatalogSnapshotRow
@@ -91,8 +94,10 @@ def sync(
         except SyncError as exc:
             typer.echo(f"Error: {exc}", err=True)
             raise typer.Exit(code=2) from exc
+        icon_line, icon_warnings = _sync_set_icons(engine, http, report.snapshot_id, refresh)
+        requests_made = http.requests_made
 
-    typer.echo(f"Catalog sync ({options.world.value}) - {report.requests_made} network request(s)")
+    typer.echo(f"Catalog sync ({options.world.value}) - {requests_made} network request(s)")
     for run in report.runs:
         flags = (" [cache]" if run.from_cache else "") + (" [STALE - see warnings]" if run.stale else "")
         fetched = run.retrieved_at.strftime("%Y-%m-%d %H:%M UTC")
@@ -106,7 +111,8 @@ def sync(
         )
     typer.echo(f"Conflicts between sources: {len(report.conflicts)}   (e7 catalog conflicts)")
     typer.echo(f"Entities with missing/assumed required fields: {len(report.gaps)}   (e7 catalog coverage)")
-    warnings = [w for run in report.runs for w in run.warnings]
+    typer.echo(icon_line)
+    warnings = [w for run in report.runs for w in run.warnings] + icon_warnings
     for warning in warnings:
         typer.echo(f"  warning: {warning}")
     for error in report.errors:
@@ -231,6 +237,39 @@ def snapshots() -> None:
                 f"{mark} #{row.id:<4} {created}  {row.world:<12} "
                 f"{row.entity_count} entities, {row.conflict_count} conflicts  [{versions}]"
             )
+
+
+def _sync_set_icons(engine: Engine, http: CachedHttp, snapshot_id: int | None, refresh: bool) -> tuple[str, list[str]]:
+    """Fetch the set icons of the snapshot's sets (Hero Info set badges, M7): (summary line, warnings).
+
+    Never fails the sync: the catalog is complete without them, only screen reading of set badges needs them."""
+    try:
+        with session_scope(engine) as session:
+            entities = load_entities(session, snapshot_id, EntityType.SET) if snapshot_id is not None else []
+        codes = [entity.entity_id for entity in entities]
+        if not codes:
+            return "Set icons: no sets in this snapshot", []
+        report = fetch_set_icons(http, codes, refresh=refresh)
+    except (OSError, SQLAlchemyError) as exc:
+        return "Set icons: not updated", [f"set icons: {type(exc).__name__}: {exc}"]
+    return _set_icon_summary(report, len(codes)), _set_icon_warnings(report)
+
+
+def _set_icon_summary(report: AssetReport, total: int) -> str:
+    line = f"Set icons: {len(report.available)} cached ({len(report.fetched)} new)"
+    if report.failed:
+        line += f", {len(report.failed)} of {total} missing - set badges of those sets cannot be read"
+    return line
+
+
+def _set_icon_warnings(report: AssetReport) -> list[str]:
+    """One warning per reason (an outage gives one line, not one per set)."""
+    by_reason: dict[str, list[str]] = defaultdict(list)
+    for code, reason in report.failed.items():
+        by_reason[f"set icons missing ({reason})"].append(code)
+    for code, reason in report.stale.items():
+        by_reason[f"set icons: stale cached copy kept ({reason})"].append(code)
+    return [f"{label}: {', '.join(sorted(codes))}" for label, codes in by_reason.items()]
 
 
 def _require_snapshot(session: Session) -> CatalogSnapshotRow:

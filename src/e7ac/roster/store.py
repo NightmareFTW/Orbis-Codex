@@ -21,6 +21,7 @@ from e7ac.domain.roster import (
     HeroBuild,
     Imprint,
     ImprintGrade,
+    ImprintMode,
     SkillEnhancements,
     StatValue,
     Substat,
@@ -45,10 +46,12 @@ def add_owned_hero(
     uid: str | None = None,
     created_at: datetime | None = None,
     snapshot_uid: str | None = None,
+    game_id: str | None = None,
 ) -> OwnedHeroRow:
     owned = OwnedHeroRow(
         uid=uid or new_uid(),
         hero_code=build.hero_code,
+        game_id=game_id,
         arena_relevant=arena_relevant,
         note=note,
         created_at=created_at or datetime.now(UTC),
@@ -82,9 +85,10 @@ def add_snapshot(
         skill_s1=build.skills.s1,
         skill_s2=build.skills.s2,
         skill_s3=build.skills.s3,
-        imprint_grade=build.imprint.grade.value if build.imprint else None,
+        imprint_grade=build.imprint.grade.value if build.imprint and build.imprint.grade else None,
         imprint_stat=build.imprint.stat.value if build.imprint else None,
         imprint_value=build.imprint.value if build.imprint else None,
+        imprint_mode=build.imprint.mode.value if build.imprint and build.imprint.mode else None,
         ee_stat=_opt_value(build.exclusive_equipment.stat) if build.exclusive_equipment else None,
         ee_value=build.exclusive_equipment.value if build.exclusive_equipment else None,
         ee_option_code=build.exclusive_equipment.option_code if build.exclusive_equipment else None,
@@ -164,8 +168,10 @@ def build_from_row(session: Session, row: HeroSnapshotRow) -> HeroBuild:
     for link in links:
         gear[GearSlot(link.slot)] = _gear_from_row(session, link.gear_id)
     imprint = None
-    if row.imprint_grade is not None and row.imprint_stat is not None and row.imprint_value is not None:
-        imprint = Imprint(grade=ImprintGrade(row.imprint_grade), stat=Stat(row.imprint_stat), value=row.imprint_value)
+    if row.imprint_stat is not None and row.imprint_value is not None:
+        grade = ImprintGrade(row.imprint_grade) if row.imprint_grade is not None else None
+        mode = ImprintMode(row.imprint_mode) if row.imprint_mode is not None else None
+        imprint = Imprint(grade=grade, stat=Stat(row.imprint_stat), value=row.imprint_value, mode=mode)
     ee = None
     if any(v is not None for v in (row.ee_stat, row.ee_value, row.ee_option_code, row.ee_option_text)):
         ee = ExclusiveEquipment(

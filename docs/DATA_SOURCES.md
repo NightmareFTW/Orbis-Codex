@@ -178,7 +178,7 @@ ATK 21→273, HP 32→416.
 | Asset | URL pattern | Use |
 |---|---|---|
 | Hero portrait (112×112) | `{staticUrlGuide}/images/hero/{hero_code}_s.png` | Portrait recognition (Phase 5), UI |
-| Set icon | `{staticUrlGuide}/wearingStatus/images/sets/set_{code}.png` | Bootstrap set-icon templates (Phase 1) |
+| Set icon | `{staticUrlGuide}/wearingStatus/images/sets/{set_code}.png` (the file name is the full catalog code, e.g. `set_cri_dmg.png`; HTTP 200 for all 24 codes on 2026-10-04; 113×119 RGBA) | Hero Info set badges (M7): fetched by `e7 catalog sync` (polite, PNG validated, refreshed every 30 days), cached under `<home>/cache/assets/set_icons/`, read offline by `roster scan` |
 | Artifact icon | `{staticUrlGuide}/wearingStatus/images/artifact/{code}_ico.png`, `_full.png` | Artifact recognition, UI |
 | Skill icon | `{staticUrlGuide}/images/skill/sk_{hero_code}_{n}.png` (passives `pa_…`) | UI |
 
@@ -210,6 +210,8 @@ ATK 21→273, HP 32→416.
 - **`data/cache/herodata.json`** (390 heroes, keyed by display name):
   `code` (`c2011`), `_id` (slug), `name`, `rarity`, `attribute`, `role`, `zodiac`,
   `self_devotion` (imprint concentration: `type` e.g. `att_rate` + per-grade values C…SSS),
+  **no team imprint**: the upstream `devotion {type, grades, slots}` block (seen in the app's sample hero in
+  `app/js/lib/saves.js`) is missing from every one of the 390 cached entries (checked 2026-10-04; NV-21),
   `ex_equip` (`[{stat:{type,value}}]` — value semantics unclear: BBK shows `cri 0.06` while the user's EE shows 12%),
   `skills.S1..S3` (`hitTypes`, `rate`, `pow`, `targets`, optional `selfHpScaling`/`selfDefScaling`/`selfSpdScaling`/`penetration`, `options[]`),
   `calculatedStatus.lv50FiveStarFullyAwakened` / `lv60SixStarFullyAwakened` (`cp, atk, hp, spd, def, chc, chd, dac, eff, efr`).
@@ -228,14 +230,49 @@ ATK 21→273, HP 32→416.
 - ⚠️ Fribbels' *auto-importer* sniffs game network traffic and has it decoded on Fribbels' server (§7). **We do not
   do that** (SPEC D36). We only read a save file the user already has (optional M4).
 
-### Save file (to be derived from the user's real file)
-- From the code: `{"heroes": [...], "items": [...]}` written by "Save all optimizer data"
-  (default folder `Documents/FribbelsOptimizerSaves/`, also `autosave.json`).
-- The 2020 sample in the repo (`testgear.json`) shows items with `gear`, `rank`, `set`, `enhance`,
-  `level`, `main {type, value}`, `substats [{type, value}]`, `name`, `id`, `equippedById`, `equippedByName`,
-  `locked`, `augmentedStats`, and heroes with final stats + `equipment` by slot.
-- **Not assumed**: the importer schema will be derived from the user's real file (M4) and validated
-  with strict models; unknown fields are preserved raw.
+### Save file (read by `e7 roster import-fribbels`, M4 / SPEC D52)
+- Written by Fribbels' "Save all optimizer data" as a dated `<date>-export.json` (default folder
+  `Documents/FribbelsOptimizerSaves/`). ⚠️ `autosave.json` there is rewritten on every load, save and most edits, so its
+  file time says nothing about when the data was read from the game: prefer an export made right after Fribbels'
+  game import. Shape: `{"heroes": [...], "items": [...]}`, the backend objects serialised by Gson (`app/js/lib/saves.js`).
+- Items (`backend/.../model/Item.java`): `gear` ("Weapon"…"Boots"), `rank` ("Normal"…"Epic"), `set` ("SpeedSet"… →
+  catalog code via `SET_PIECES`), `enhance`, `level`, `main` and `substats` (`model/Stat.java`: `type`
+  "AttackPercent"…, `value` — rates in percent, rounded to 0.1 —, `rolls`, `modified`), `op` (the game's raw data),
+  `id` (Fribbels'), `ingameId`, `ingameEquippedId`, `equippedById`; also `wss`, `locked`, reforge fields… (not read).
+- What each field really is (`app/js/lib/scanner.js`, `ItemsRequestHandler.java`, checked 2026-10-05):
+  - `ingameEquippedId` = `"" + item.p`, the game hero wearing the piece at the last game import (what "not worn" looks
+    like is `assumed`: "0", "-1", "undefined", empty); `equippedById` is Fribbels' planner state, which the optimizer's
+    "Equip" changes without the game. The save keeps no game hero id on heroes (`importer.js` gives Fribbels' new
+    heroes their own ids), so the importer infers the match (SPEC D52); after a fresh game import Fribbels re-equips
+    each hero it has with its game pieces (`mergeHeroes`), which makes the match exact. Whole builds swapped in the
+    planner after that import cannot be told from the game.
+  - `enhance` of a game-imported piece is derived: `max((min(#ops − 1, countByRank) − offsetByRank) × 3, 0)`, exact
+    at +15, a multiple of 3 below (up to 2 under the real +N).
+  - `rolls` of game-imported pieces come from `op` (1 + rolls; reforge "u" and modification "c" ops excluded); for
+    pieces added or edited by hand (`op` dropped) Fribbels guesses them (`reforge.js`).
+  - 0 as `main.value` or `level` means "unknown" (`convertMainStat`, `convertLevel`, `itemAugmenter.fixProblemItem`).
+- Heroes (`model/Hero.java`): `id` (Fribbels'), `name`, `stars` (the game's grade for a newly imported hero, never
+  refreshed later; editable in the bonus dialog, 6 or 5), `equipment` by slot, and the bonuses typed by the user in
+  Fribbels: `artifactName`, `artifactLevel`, `imprintNumber` (the hero's own imprint), `eeNumber` — strings, "None"
+  when unset (`app/js/lib/dialog.js`). Fribbels' computed stats/CP are in the save but are not game readings.
+- Not in the save: level, awakening (read by the importer but not kept on the hero), skill enhancements, displayed stats.
+- Fribbels' importer keeps one hero per name and only items from a chosen "+N" up (`scanner.js` filterItems).
+- Checked on the user's real export (2026-10-05, `fixtures/saves/fribbels.json`, git-ignored, golden test): 241 heroes
+  (the 6★ and 5★ ones, one per name), 1539 items; "not worn" is `"undefined"`; every item has `op` and `rolls`; 131
+  modified substats; one item with level 0; no typed artifact/imprint/EE. Items of sets Fribbels does not know are left
+  out (349 here, 8 of them worn).
+
+### Importer data (`gear.txt`, preferred input, SPEC D53)
+- Written by Fribbels' importer (`scanner.js`) in the saves folder right after it reads the game: `{"items": [...],
+  "heroes": [...]}` with the game's own fields plus Fribbels' conversions. Checked on the user's file (2026-10-05):
+  - heroes = every unit of the account (381; 63 entries are extra copies of a hero): `code` (hero code), `id` (game
+    id), `name`, `g` (stars), `z` (awakening, left out when 0 — `assumed`; checked on 7 heroes against Hero Info),
+    plus `d`, `s`, `exp`, `opt`, `f`, `st`, `stree`… (not used; NV-31, NV-32);
+  - items (1888, the whole inventory): Fribbels' fields (`gear`, `rank`, `set` — absent for sets it does not know —,
+    `enhance`, `level`, `main`, `substats` with `rolls`/`modified`, `op`, `ingameId`, `ingameEquippedId`) plus the game's
+    `f` (set code, e.g. `set_weak`, `set_might`, `set_chase`, `set_opener`), `p` (the wearer's game id, only on worn
+    items; equal to `ingameEquippedId`), `code`, `type`…; no artifacts, no exclusive equipment. The 2020 sample in the repo (`testgear.json`) is
+  an older layout (heroes with final stats + `equipment` by slot).
 
 ---
 
@@ -314,8 +351,10 @@ Statuses: **verified** = seen in the source, *inferred* = our reading.
   is: its hotkey uses a global keyboard hook, it has an optional click-automation mode, it was calibrated on a French
   client at 1919×1009, and there is no LICENSE file.
 
-**Game client windows** (community-sourced, to confirm with `e7 capture --list-windows`):
+**Game client windows**:
 - Stove PC: `EpicSeven.exe`, window class `GLFW30`, title "Epic Seven" / "에픽세븐" (sometimes empty).
+  **Verified** on the user's PC on 2026-10-04 (`e7 doctor` / `e7 capture --list-windows`: "Epic Seven", 2560×1494
+  client area).
 - The Steam page lists the kernel-level anti-cheat UNCHEATER for the coming Steam build. The anti-cheat of the current
   Stove client is unverified.
 - No public source says screen capture triggers it. The EULA forbids reverse engineering, protocol interception and
@@ -328,6 +367,12 @@ Statuses: **verified** = seen in the source, *inferred* = our reading.
   - the artifact (name, +enhance);
   - all 6 gear pieces: item level, +enhance, set icon, score, main stat and 4 substats. Substat *types* are icons
     there, not text.
+  - Confirmed on the user's captures (2026-10-04, read by M7): "Average Equipment Score: N" above two right-aligned
+    columns (weapon/helmet/armor, necklace/ring/boots); per piece the item level (top-left of the icon), a red "+N"
+    pill (none at +0), the score under the icon and the set badge at its bottom-right; every value has a stat icon
+    with the stat-label artwork (MECH-GEAR-11); the artifact shows a "+N" pill (red, orange for +4, none at +0),
+    "Lv.X/Y" and its name, often cut by the artwork; the EE (only heroes that have one) shows left of the artifact: a
+    small stat icon, the value and its name; the CP row has one round icon per completed set (MECH-GEAR-15).
 - **Equipment Details** popup (Manage Equipment or Inventory) shows substats with text labels, plus grade, slot, set
   name and score.
 - The Equipment tab shows totals with a "▲" bonus; what the bonus includes is unknown (NV-10).

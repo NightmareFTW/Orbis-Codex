@@ -74,8 +74,10 @@ src/e7ac/
   domain/        # pydantic v2 models: World [M1]; HeroCode, Stat, Gear, OwnedHeroSnapshot, AssumedBuild, Confidence…
   sources/       # stove/, fribbels/, e7calc/, epic7db/ — fetch (httpx, cache, rate limit) + strict parsers
   catalog/       # fact store, merge/resolve rules, snapshots, coverage/conflict reports
-  roster/        # importers (ocr, fribbels, manual), validation rules, history, JSON backup
-  vision/        # capture, window, screens, anchors, ocr engines, icon classifiers, labelling tool
+  roster/        # importers (screen_import + screen_gear, fribbels_import, manual), pieces (same physical piece
+                 # across sources), composition check, validation, history, JSON backup
+  vision/        # capture, window, screens (hero_screen, gear_panel, hero_info), ocr, icon classifiers
+                 # (stat_icons, sets, imprint_icon, star_row); a labelling tool later (M8)
   opponents/     # histogram model, profiles (P50/P75/P90), sampler, CP calibration
   predict/       # features, heuristic model, explanation text
   sim/           # engine, status effects, hooks, kits (YAML + python), ai policies, runner
@@ -265,6 +267,7 @@ erDiagram
   OWNED_HERO {
     int id PK
     text hero_code FK
+    text game_id UK "nullable: the game's id of this copy (D53)"
     bool arena_relevant
     text note
   }

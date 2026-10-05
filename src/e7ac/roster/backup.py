@@ -39,6 +39,8 @@ class OwnedHeroExport(BaseModel):
     note: str
     created_at: AwareDatetime
     snapshots: list[SnapshotExport]
+    game_id: str | None = None
+    """The game's id of this copy (SPEC D53); absent in backups written before it."""
 
     @field_validator("hero_code")
     @classmethod
@@ -102,6 +104,7 @@ def export_roster(session: Session, exported_at: datetime) -> RosterExport:
                 note=owned.note,
                 created_at=owned.created_at,
                 snapshots=snapshots,
+                game_id=owned.game_id,
             )
         )
     return RosterExport(exported_at=exported_at, heroes=heroes)
@@ -130,6 +133,7 @@ def import_roster(session: Session, data: RosterExport) -> ImportReport:
                 arena_relevant=hero.arena_relevant,
                 note=hero.note,
                 created_at=hero.created_at,
+                game_id=_free_game_id(session, hero.game_id),
             )
             session.add(owned)
             session.flush()
@@ -169,3 +173,11 @@ def import_roster(session: Session, data: RosterExport) -> ImportReport:
         current_changed=tuple(changed),
         added_snapshot_ids=tuple(added_ids),
     )
+
+
+def _free_game_id(session: Session, game_id: str | None) -> str | None:
+    """The backup's game id, unless another roster copy already has it (the unique link stays with that copy)."""
+    if game_id is None:
+        return None
+    taken = session.scalars(select(OwnedHeroRow.id).where(OwnedHeroRow.game_id == game_id)).first()
+    return None if taken is not None else game_id
