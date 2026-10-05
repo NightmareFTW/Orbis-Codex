@@ -14,7 +14,8 @@ Evidence: prototype `spikes/m7_imprint_stars.py` on the user's own captures (202
   rest.
 - Measured: star top 0.24-0.33 name-line heights below the name box top, pitch 0.33-0.48 name-line heights; plain
   stars: centre / own yellow brightness 1.00-1.01, no pink; awakened stars: 0.30-0.52 and pink 0.42-0.62 of the lower
-  half. Politis (5 stars) has only the FIRST star awakened: the only partial awakening seen.
+  half (ranges over UI scales 0.40-1.28). Politis (5 stars) has only the FIRST star awakened: the only partial
+  awakening seen.
 
 Method:
 1. band: the OCR name line (which often includes the stars, e.g. "Haru ☆") extended 6 line heights to the right;

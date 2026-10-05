@@ -455,9 +455,12 @@ def test_scan_takes_folders_and_patterns(scan_files: Path, synthetic_catalog: li
     assert nothing.exit_code == 2 and "no image matches" in nothing.stderr
 
 
-def test_scan_needs_a_catalog_and_reports_bad_images(scan_files: Path, isolated_home: AppPaths, tmp_path: Path) -> None:
+def test_scan_needs_a_catalog(scan_files: Path, isolated_home: AppPaths) -> None:
     no_catalog = runner.invoke(app, ["roster", "scan", str(scan_files)])
-    assert no_catalog.exit_code == 2 and "needs the catalog" in no_catalog.stderr
+    assert no_catalog.exit_code == 2 and "needs the catalog" in no_catalog.stderr  # checked before any slow OCR
+
+
+def test_scan_reports_bad_images(scan_files: Path, synthetic_catalog: list[str], tmp_path: Path) -> None:
     broken = tmp_path / "broken.png"
     broken.write_bytes(b"not an image")
     bad = runner.invoke(app, ["roster", "scan", str(broken)])

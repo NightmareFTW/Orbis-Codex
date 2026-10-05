@@ -4,9 +4,11 @@
 - On the Equipment tab, "final - ▲ bonus" must equal the catalog base stat (Lv60 6★ awakened, MECH-STAT-03): this
   checks the OCR and the catalog at once (MECH-STAT-06).
 - Fields the screen does not show are kept from the hero's current build, or assumed and reported (confidence 0).
-- The imprint shown is the active one, self or team (MECH-IMP-02). Until the icon is read (M7) the mode is inferred
-  from the catalog's self-imprint table (SPEC D42): another stat means team; the own stat with a value of exactly one
-  grade means self.
+- The imprint shown is the active one, self or team (MECH-IMP-02): inferred from the catalog's self-imprint table
+  (SPEC D42: another stat means team; the own stat with a value of exactly one grade means self), and read from the
+  icon on a Hero Info capture (M7), which wins.
+- A Hero Info capture also gives the gear, sets, artifact, EE and awakening (`screen_gear`, SPEC D51), and the
+  displayed stats are then recomposed from them as an independent check (`composition`, MECH-STAT-02/08).
 """
 
 from __future__ import annotations
@@ -14,14 +16,21 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final
+
+from pydantic import ValidationError
 
 from e7ac.catalog.names import NameIndex
 from e7ac.catalog.resolve import ResolvedEntity
 from e7ac.domain.codes import Stat
 from e7ac.domain.roster import BuildSource, FinalStats, HeroBuild, Imprint, ImprintGrade, ImprintMode
+from e7ac.roster.composition import CompositionReport, check_final_stats
+from e7ac.roster.screen_gear import ScreenCatalog, apply_images, apply_imprint_icon, apply_stars, set_consistency
 from e7ac.vision.hero_screen import HeroScreenReading, ScreenKind
 from e7ac.vision.labels import match_label
+
+if TYPE_CHECKING:  # imports OpenCV: loaded only when a capture is read
+    from e7ac.vision.hero_info import HeroImageReading
 
 FINAL_FIELDS: Final[Mapping[Stat, str]] = {
     Stat.ATK: "atk",
@@ -75,6 +84,8 @@ class ScreenBuild:
     """Blocking: no build was made."""
     notes: list[str] = field(default_factory=list)
     """Not blocking: assumptions and checks to look at."""
+    composition: CompositionReport | None = None
+    """The final-stat check of a Hero Info capture whose gear was read (None when it did not run)."""
 
 
 def build_from_screen(
@@ -83,8 +94,12 @@ def build_from_screen(
     *,
     captured_at: datetime,
     existing: HeroBuild | None = None,
+    images: HeroImageReading | None = None,
+    catalog: ScreenCatalog | None = None,
 ) -> ScreenBuild:
-    """`heroes`: catalog hero entities by code. `existing`: the hero's current build (fields the screen lacks)."""
+    """`heroes`: catalog hero entities by code. `existing`: the hero's current build (fields the screen lacks).
+    `images`: what the image readers found on a Hero Info capture (gear, icons, stars); `catalog`: the artifact and
+    set entities for the final-stat check."""
     result = ScreenBuild(hero_name=reading.name)
     result.notes.extend(f"screen: {w}" for w in reading.warnings)
     code = _hero_code(reading, heroes, result)
@@ -103,7 +118,7 @@ def build_from_screen(
         confidence[f"final_stats.{FINAL_FIELDS[stat]}"] = stat_reading.confidence
     if reading.kind is ScreenKind.EQUIPMENT:
         _base_checks(reading, hero, result, confidence)
-    else:
+    elif images is None or not images.panel.present:
         result.notes.append("Hero Info screen: no '▲' bonus shown, so the base-stat check is not possible")
     data: dict[str, Any] = existing.model_dump() if existing is not None else {"hero_code": code}
     data.update(
@@ -114,8 +129,27 @@ def build_from_screen(
         confidence={**_kept_confidence(existing), **confidence},
     )
     _level_and_stars(reading, existing, data, result)
+    if images is not None:
+        apply_stars(images, existing, data, result.notes)
     _imprint(reading, hero, existing, data, result)
-    result.build = HeroBuild.model_validate(data)
+    if images is not None:
+        apply_imprint_icon(images.imprint_icon, reading.imprint_locked, data, result.notes)
+        apply_images(images, existing, data, result.notes)
+    try:
+        build = HeroBuild.model_validate(data)
+    except ValidationError as exc:
+        result.problems.append(f"the screen values do not make a valid build: {exc.errors()[0]['msg']}")
+        return result
+    result.build = build
+    if images is not None and catalog is not None and images.panel.present:
+        result.notes.extend(set_consistency(build, images, catalog.sets))
+        artifact = catalog.artifacts.get(build.artifact.code) if build.artifact is not None else None
+        report = check_final_stats(build, hero, artifact=artifact, sets=catalog.sets)
+        result.composition = report
+        if report.applicable:
+            result.notes.extend(f"stat check: {w}" for w in report.warnings)
+        else:
+            result.notes.append(f"stat check not run: {report.reason}")
     return result
 
 

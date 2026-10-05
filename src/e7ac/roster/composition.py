@@ -19,7 +19,7 @@ Model:
 - Imprint (MECH-IMP-02/03): a self imprint is added to the hero; a team imprint is not.
 - EE (MECH-EE-01): stat and value come from the build only. The catalog `ee.value` is `assumed` (NV-08) and never
   used; the catalog `ee.stat` only tells which stat an unread EE could feed.
-- Display (proposed MECH-STAT-08): a flat stat shows floor(exact total). Rates show one decimal of percent. Crit
+- Display (MECH-STAT-08): a flat stat shows floor(exact total). Rates show one decimal of percent. Crit
   Chance is capped at 100% (MECH-STAT-05), and a capped CC cannot verify its terms.
 
 Evidence (spikes/m7_stat_composition.py, the user's Hero Info captures of 2026-10-04 at scales 0.64/1.0/1.28):
@@ -66,7 +66,7 @@ BASE_AWAKENING: Final = 6
 # MECH-ART-01 (`verified`): artifacts enhance to +30, and the +30 value is 13 x the +0 value.
 ARTIFACT_MAX_ENHANCE: Final = 30
 ARTIFACT_MAX_FACTOR: Final = 13
-# MECH-STAT-05 (`verified`, 2 captures): Crit Chance is displayed capped at 100%.
+# MECH-STAT-05 (`verified`; seen again on Straze, composed 110% shown 100.0%): Crit Chance is displayed capped at 100%.
 CRIT_CHANCE_CAP: Final = Decimal(1)
 RATE_TOLERANCE: Final = Decimal("0.0005")
 """Half the 0.1% display step of rates: every exact rate on the captures had a residual of 0."""
@@ -95,6 +95,9 @@ _PERCENT_OF: Final[Mapping[Stat, Stat]] = {
 }
 _ARTIFACT_STATS: Final = (("atk", Stat.ATK), ("def", Stat.DEF), ("hp", Stat.HP))
 _WEAK_STATUSES: Final = frozenset({DataStatus.ASSUMED, DataStatus.UNKNOWN})
+BASE_SUSPECT: Final = "base"
+_SCREEN_READ: Final = ("gear.", "imprint", "exclusive_equipment")
+"""Components whose stat is read from the screen (icon or text), so a misread can move them to another stat."""
 _LABELS: Final[Mapping[Stat, str]] = {
     Stat.ATK: "Attack",
     Stat.DEF: "Defense",
@@ -112,10 +115,14 @@ _LABELS: Final[Mapping[Stat, str]] = {
 class StatCheck:
     """One displayed stat against its composition.
 
-    `suspects` names the components that feed the stat, the ones the verdict is about. On a mismatch, one of them
-    (or the displayed value) is wrong. When "capped" or "unknown", they could not be verified. Labels:
-    "gear.boots.sub3", "set set_speed", "artifact efm30+4", "imprint", "exclusive_equipment", "base", and the same
-    with a note in brackets for components that add nothing ("imprint (team, not added)").
+    `suspects` (empty when "ok") names the components the verdict is about:
+    - "mismatch": the displayed value or one of the suspects is wrong. First the stat's own components; then the
+      screen-read fields (gear values, imprint, EE) of the other stats that failed or could not be verified, because
+      a value read with the wrong icon feeds the wrong stat; then "base";
+    - "capped": the stat's components, which the cap hides;
+    - "unknown": the components of unknown amount, presence or target first, then the stat's own components.
+    Labels: "gear.boots.sub3", "set set_speed", "artifact efm30+4", "imprint", "exclusive_equipment", "base". Components
+    that add nothing carry a note in brackets ("imprint (team, not added)").
     """
 
     stat: Stat
@@ -177,7 +184,7 @@ def check_final_stats(
     artifact: ResolvedEntity | None,
     sets: Mapping[str, ResolvedEntity],
 ) -> CompositionReport:
-    """Recompose the nine displayed stats of `build` and compare (MECH-STAT-02, proposed MECH-STAT-08).
+    """Recompose the nine displayed stats of `build` and compare (MECH-STAT-02, MECH-STAT-08).
 
     `hero`: catalog hero entity (`base.<stat>`, `imprint.stat`, `ee.stat`). `artifact`: catalog entity of
     `build.artifact`, or None when the catalog lacks it. `sets`: catalog set entities by code (`pieces`,
@@ -196,9 +203,19 @@ def check_final_stats(
     _imprint_terms(build, hero, composition)
     _ee_terms(build, hero, composition)
     report = CompositionReport(applicable=True, reason=None, warnings=composition.warnings)
+    exact = {stat: _compose(stat, base[stat], composition.terms) for stat in DISPLAYED_STATS}
+    shown = {stat: _displayed(build, stat) for stat in DISPLAYED_STATS}
+    verdicts = {stat: _verdict(stat, exact[stat], shown[stat], composition) for stat in DISPLAYED_STATS}
     for stat in DISPLAYED_STATS:
-        check, warning = _check_stat(stat, base[stat], _displayed(build, stat), composition)
+        check = StatCheck(
+            stat=stat,
+            expected=float(exact[stat]),
+            displayed=float(shown[stat]),
+            verdict=verdicts[stat],
+            suspects=_suspects(stat, verdicts, composition),
+        )
         report.checks.append(check)
+        warning = _warning(check, exact[stat], shown[stat], _depends(stat, composition))
         if warning is not None:
             report.warnings.append(warning)
     return report
@@ -376,19 +393,22 @@ def _ee_terms(build: HeroBuild, hero: ResolvedEntity, composition: _Composition)
 # ------------------------------------------------------------------------------------------------ comparison
 
 
-def _check_stat(
-    stat: Stat, base: Decimal, displayed: Decimal, composition: _Composition
-) -> tuple[StatCheck, str | None]:
-    exact = _compose(stat, base, composition.terms)
-    feeders = [*composition.sources(stat), *composition.inert[stat], "base"]
-    depends = [*composition.unknown[stat], *composition.possible[stat]]
-    verdict = _verdict(stat, exact, displayed, composition)
+def _suspects(stat: Stat, verdicts: Mapping[Stat, Verdict], composition: _Composition) -> tuple[str, ...]:
+    verdict = verdicts[stat]
     if verdict == "ok":
-        suspects: tuple[str, ...] = ()
-    else:
-        suspects = _unique([*depends, *feeders] if verdict == "unknown" else feeders)
-    check = StatCheck(stat=stat, expected=float(exact), displayed=float(displayed), verdict=verdict, suspects=suspects)
-    return check, _warning(check, exact, displayed, depends)
+        return ()
+    own = [*composition.sources(stat), *composition.inert[stat]]
+    if verdict == "unknown":
+        return _unique([*_depends(stat, composition), *own, BASE_SUSPECT])
+    if verdict == "capped":
+        return _unique(own)
+    others = [other for other in DISPLAYED_STATS if other is not stat and verdicts[other] != "ok"]
+    cross = [label for other in others for label in composition.sources(other) if label.startswith(_SCREEN_READ)]
+    return _unique([*own, *cross, BASE_SUSPECT])
+
+
+def _depends(stat: Stat, composition: _Composition) -> list[str]:
+    return [*composition.unknown[stat], *composition.possible[stat]]
 
 
 def _verdict(stat: Stat, exact: Decimal, displayed: Decimal, composition: _Composition) -> Verdict:
@@ -410,8 +430,9 @@ def _warning(check: StatCheck, exact: Decimal, displayed: Decimal, depends: list
             f"the displayed value or one of these is wrong: {', '.join(check.suspects)}"
         )
     if check.verdict == "unknown":
-        return f"{label} not checked: shown {shown}, the known components give {composed}; it depends on " + ", ".join(
-            depends
+        return (
+            f"{label} not checked: shown {shown}, the known components give {composed}; "
+            f"it depends on {', '.join(depends)}"
         )
     if check.verdict == "capped":
         return f"{label} shown at the 100% cap with {composed} composed (MECH-STAT-05): its components are not verified"
@@ -434,7 +455,7 @@ def _compose(stat: Stat, base: Decimal, terms: Iterable[_Term]) -> Decimal:
 def _fit(stat: Stat, exact: Decimal, displayed: Decimal) -> Literal["ok", "capped", "mismatch"]:
     if stat in _FLAT:
         shown = exact.quantize(EXACT_QUANTUM, rounding=ROUND_HALF_EVEN).to_integral_value(rounding=ROUND_FLOOR)
-        return "ok" if shown == displayed else "mismatch"  # proposed MECH-STAT-08: floor of the exact total
+        return "ok" if shown == displayed else "mismatch"  # MECH-STAT-08: floor of the exact total
     if stat is Stat.CRIT_CHANCE and exact >= CRIT_CHANCE_CAP:
         return "capped" if abs(displayed - CRIT_CHANCE_CAP) <= RATE_TOLERANCE else "mismatch"
     return "ok" if abs(displayed - exact) <= RATE_TOLERANCE else "mismatch"

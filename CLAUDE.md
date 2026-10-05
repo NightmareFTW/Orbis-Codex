@@ -83,8 +83,10 @@ Key data facts (details in docs/DATA_SOURCES.md):
   - golden tests on the user's captures (local fixtures `fixtures/screenshots/equip_*.webp`, never committed).
 - **M6.1**: `roster scan` expands patterns/folders/`%VAR%` (D43); imprint mode self/team + "Locked" (MECH-IMP-02,
   D42, migration 0004).
-- Next: **M7** — Hero Info gear (substat icons via templates from the same capture), imprint icon (mode, grade,
-  positions), awakened stars (MECH-HERO-03), artifact and EE. Waiting for the 4 Hero Info captures as files.
+- **M7 Hero Info gear — done** (SPEC D46–D51): `vision/{stat_icons,sets,gear_panel,imprint_icon,star_row,hero_info}.py`,
+  `sources/assets.py` (Stove set icons cached by `catalog sync`), `roster/{composition,screen_gear}.py`; golden tests on
+  local captures (`fixtures/screenshots/heroinfo_*.webp`, `fixtures/stove/set_icons/`, never committed).
+- Next: **M4** Fribbels save import (path A), then **M9a** passive watch (path B; first speed up the ~15 s scan).
 - Game client language: English, sometimes Portuguese → `game_language` setting (D39). Windows version shown by doctor.
 - Roster import paths (D45), picked by the user: A = Fribbels save file (M4, next after M7), B = passive screen
   watch (M9a). Network import inside our app (M5c, D38): **not possible here** — blocked twice by Anthropic's safety

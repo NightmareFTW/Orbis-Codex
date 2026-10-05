@@ -23,6 +23,7 @@ from e7ac.domain.roster import FINAL_STAT_FIELDS, MAX_INT, BuildSource, HeroBuil
 from e7ac.fileio import write_text_atomic
 from e7ac.paths import default_paths
 from e7ac.roster.backup import RosterExport, export_roster, import_roster
+from e7ac.roster.screen_gear import ScreenCatalog
 from e7ac.roster.screen_import import FINAL_FIELDS, ScreenBuild, build_from_screen
 from e7ac.roster.store import (
     RosterError,
@@ -587,8 +588,10 @@ def scan(
 ) -> None:
     """Read hero screens (Hero > Equipment tab, or Hero Info) and store the builds (source: ocr).
 
-    Final stats, level, CP and imprint come from the screen. Gear, artifact and EE are kept from the hero's
-    current build. On the Equipment tab every stat is checked against the catalog base stats."""
+    Both screens give the final stats, level, CP and imprint; on the Equipment tab every stat is checked against
+    the catalog base stats. Hero Info also gives the gear (stats from their icons, sets, grade, level, +N), the
+    artifact, the EE and the awakening, and the final stats are recomposed from them as a check. Anything not read
+    is kept from the hero's current build and reported."""
     try:
         paths = expand_image_paths(images)
     except ImageError as exc:
@@ -600,22 +603,38 @@ def scan(
     except SettingsError as exc:
         _fail(str(exc))
     engine = _engine()
+    with session_scope(engine) as session:
+        heroes = _catalog_heroes(session)
+        if heroes is None:
+            _fail("the hero is identified by name, which needs the catalog: run e7 catalog sync")
+        catalog, artifact_names = _screen_catalog(session)
+    matcher = set_matcher_factory(sorted(catalog.sets))
+    if matcher is None:
+        typer.echo("note: set icons are not cached, so gear sets cannot be read: run e7 catalog sync", err=True)
+    from e7ac.vision.hero_info import read_hero_images  # OpenCV: loaded only when captures are read
+
     reader = reader_factory()
     failed = 0
     for path in paths:
         typer.echo(f"{path.name}:")
         try:
-            reading = parse_hero_screen(reader.read(load_image(path)), language)
+            image = load_image(path)
+            lines = reader.read(image)
+            reading = parse_hero_screen(lines, language)
         except (ImageError, ScreenError) as exc:
             typer.echo(f"  Error: {exc}", err=True)
             failed += 1
             continue
+        seen = None
+        if reading.kind is ScreenKind.HERO_INFO:
+            seen = read_hero_images(
+                image, lines, reading, reader, artifact_names=artifact_names, set_matcher=matcher, language=language
+            )
         with session_scope(engine) as session:
-            heroes = _catalog_heroes(session)
-            if heroes is None:
-                _fail("the hero is identified by name, which needs the catalog: run e7 catalog sync")
             owned, current = _scan_target(session, reading.name, heroes, owned_id)
-            result = build_from_screen(reading, heroes, captured_at=captured_at(path), existing=current)
+            result = build_from_screen(
+                reading, heroes, captured_at=captured_at(path), existing=current, images=seen, catalog=catalog
+            )
             kind = "Equipment tab" if reading.kind is ScreenKind.EQUIPMENT else "Hero Info"
             _print_scan(result, kind)
             if result.build is None:
@@ -640,6 +659,44 @@ def scan(
                 typer.echo(f"  #{owned.id}: new snapshot {snapshot.id}")
     if failed:
         raise typer.Exit(code=1)
+
+
+def _load_set_matcher(codes: list[str]) -> Any:
+    """Set-badge matcher from the Stove icons cached by `e7 catalog sync` (offline); None when too few are cached."""
+    from e7ac.sources.assets import load_set_icons
+    from e7ac.vision.sets import SetIconError, SetIconMatcher
+
+    icons = load_set_icons(default_paths().cache_dir, codes)
+    if len(icons) < MIN_SET_ICONS:
+        return None
+    if len(icons) < len(codes):
+        missing = ", ".join(sorted(set(codes) - set(icons)))
+        typer.echo(f"note: set icons not cached for {missing}: those sets cannot be read", err=True)
+    try:
+        return SetIconMatcher.from_png(icons)
+    except SetIconError as exc:
+        typer.echo(f"note: the cached set icons are not usable ({exc}): run e7 catalog sync", err=True)
+        return None
+
+
+MIN_SET_ICONS: Final = 2
+set_matcher_factory: Callable[[list[str]], Any] = _load_set_matcher
+
+
+def _screen_catalog(session: Session) -> tuple[ScreenCatalog, dict[str, str]]:
+    """Artifact and set entities of the current catalog, and artifact display name -> code (ambiguous names left out:
+    a name shared by several codes is never matched)."""
+    snapshot = current_catalog(session)
+    if snapshot is None:
+        return ScreenCatalog(artifacts={}, sets={}), {}
+    artifacts = {e.entity_id: e for e in load_entities(session, snapshot.id, EntityType.ARTIFACT)}
+    sets = {e.entity_id: e for e in load_entities(session, snapshot.id, EntityType.SET)}
+    by_name: dict[str, set[str]] = {}
+    for code, entity in artifacts.items():
+        if entity.name:
+            by_name.setdefault(entity.name, set()).add(code)
+    names = {name: next(iter(codes)) for name, codes in by_name.items() if len(codes) == 1}
+    return ScreenCatalog(artifacts=artifacts, sets=sets), names
 
 
 def _scan_target(
@@ -686,6 +743,14 @@ def _print_scan(result: ScreenBuild, kind: str) -> None:
         if result.base_checks:
             good = sum(c.ok for c in result.base_checks)
             typer.echo(f"  base-stat check vs catalog: {good}/{len(result.base_checks)} agree")
+        if kind == "Hero Info":
+            _print_gear(build)
+        report = result.composition
+        if report is not None and report.applicable:
+            agree = sum(c.verdict in ("ok", "capped") for c in report.checks)
+            typer.echo(
+                f"  final-stat check (gear + sets + artifact + imprint + EE): {agree}/{len(report.checks)} agree"
+            )
     for note in result.notes:
         typer.echo(f"  note: {note}", err=True)
     for problem in result.problems:
@@ -693,6 +758,25 @@ def _print_scan(result: ScreenBuild, kind: str) -> None:
 
 
 _FLAT_SCAN: Final = frozenset({Stat.ATK, Stat.DEF, Stat.HP, Stat.SPEED})
+
+
+def _print_gear(build: HeroBuild) -> None:
+    typer.echo(f"  {build.stars}* awakened {build.awakening}")
+    for slot, gear in build.gear.items():
+        subs = ", ".join(_stat_text(s.stat, s.value) for s in gear.substats)
+        score = gear.score if gear.score is not None else "-"
+        main = _stat_text(gear.main.stat, gear.main.value)
+        head = f"{slot.value:8} {gear.item_level} +{gear.enhance} {gear.grade.value} {gear.set_code} score {score}"
+        typer.echo(f"  {head}: {main} | {subs}")
+    if build.artifact is not None:
+        typer.echo(f"  artifact {build.artifact.code} +{build.artifact.level}")
+    ee = build.exclusive_equipment
+    if ee is not None and ee.stat is not None and ee.value is not None:
+        typer.echo(f"  exclusive equipment {_stat_text(ee.stat, ee.value)}")
+
+
+def _stat_text(stat: Stat, value: float) -> str:
+    return f"{stat.value} {value * 100:g}%" if stat.is_rate else f"{stat.value} {value:g}"
 
 
 def _owned_or_exit(session: Session, owned_id: int) -> Any:

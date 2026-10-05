@@ -66,7 +66,18 @@ Checkboxes: `[x]` done · `[ ]` pending. Milestones are small vertical slices; o
     - Hero Info golden test (Closer Charles);
     - adversarial review: 7 confirmed findings fixed (Typer's Windows argument expansion, flat/% twin imprints,
       keeping a known imprint mode, migration downgrade keeping gear links, empty and `~` arguments).
-- [ ] **M7 Icon classifiers + labelling tool** — substat icons (templates taken from the stat-label icons of the same Hero Info capture), "%" detection, set icons (bootstrapped from Stove icons + screenshots), imprint icon (self/team, lit positions, grade letter; MECH-IMP-02), awakened stars (MECH-HERO-03), grade from frame colour, constraint-based disambiguation; then Hero Info gear: item level, +enhance, score, main stat and 4 substats per piece, artifact name/level and EE.
+- [x] **M7 Hero Info gear + icon classifiers** — substat icons (templates taken from the stat-label icons of the same Hero Info capture), "%" detection, set icons (bootstrapped from Stove icons + screenshots), imprint icon (self/team, lit positions, grade letter; MECH-IMP-02), awakened stars (MECH-HERO-03), grade from frame colour, constraint-based disambiguation; then Hero Info gear: item level, +enhance, score, main stat and 4 substats per piece, artifact name/level and EE.
+  - ✅ Done 2026-10-05 (prototypes measured first, then 5 production modules; SPEC D46–D51):
+    - `vision/stat_icons.py` (149/149 icons at 3 scales), `vision/sets.py` + `sources/assets.py` (Stove set icons,
+      cached by `catalog sync`), `vision/gear_panel.py` (slots, values, item level, +N, score, frame colour,
+      artifact, EE), `vision/imprint_icon.py`, `vision/star_row.py`, `roster/composition.py` (final-stat check);
+    - `vision/hero_info.py` + `roster/screen_gear.py` wire them into `e7 roster scan`;
+    - end to end on the user's 6 Hero Info captures: every piece right; the final-stat check gives 9/9 on the 4
+      Lv60 heroes; Politis' ambiguous helmet frame is not stored (note).
+    - Not done: the labelling tool (no review UI yet, M8); scan speed ≈ 15 s per capture (second OCR passes) to be
+      optimised before the passive watch mode (M9a).
+  - **How to try:** `.\OrbisCodex.cmd catalog sync` (also caches the set icons), then on Hero Info captures
+    `.\OrbisCodex.cmd roster scan "$env:LOCALAPPDATA\OrbisCodex\captures" --dry-run` and without `--dry-run` to save.
   - Acceptance: golden BBK fixture passes 100% including substats, EE stat, artifact level; ambiguous crops produce review items instead of guesses.
 - [ ] **M8 Roster UI** — PySide6 main window: roster list (search, element/class filters, sort by any stat), hero page mirroring the game layout, edit form with validation, history view, review queue (crop + value), JSON backup.
   - Acceptance: pytest-qt smoke tests; manual checklist for the user on Windows.

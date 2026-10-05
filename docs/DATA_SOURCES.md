@@ -178,7 +178,7 @@ ATK 21→273, HP 32→416.
 | Asset | URL pattern | Use |
 |---|---|---|
 | Hero portrait (112×112) | `{staticUrlGuide}/images/hero/{hero_code}_s.png` | Portrait recognition (Phase 5), UI |
-| Set icon | `{staticUrlGuide}/wearingStatus/images/sets/set_{code}.png` | Bootstrap set-icon templates (Phase 1) |
+| Set icon | `{staticUrlGuide}/wearingStatus/images/sets/{set_code}.png` (the file name is the full catalog code, e.g. `set_cri_dmg.png`; HTTP 200 for all 24 codes on 2026-10-04; 113×119 RGBA) | Hero Info set badges (M7): fetched by `e7 catalog sync` (polite, PNG validated, refreshed every 30 days), cached under `<home>/cache/assets/set_icons/`, read offline by `roster scan` |
 | Artifact icon | `{staticUrlGuide}/wearingStatus/images/artifact/{code}_ico.png`, `_full.png` | Artifact recognition, UI |
 | Skill icon | `{staticUrlGuide}/images/skill/sk_{hero_code}_{n}.png` (passives `pa_…`) | UI |
 
@@ -332,6 +332,12 @@ Statuses: **verified** = seen in the source, *inferred* = our reading.
   - the artifact (name, +enhance);
   - all 6 gear pieces: item level, +enhance, set icon, score, main stat and 4 substats. Substat *types* are icons
     there, not text.
+  - Confirmed on the user's captures (2026-10-04, read by M7): "Average Equipment Score: N" above two right-aligned
+    columns (weapon/helmet/armor, necklace/ring/boots); per piece the item level (top-left of the icon), a red "+N"
+    pill (none at +0), the score under the icon and the set badge at its bottom-right; every value has a stat icon
+    with the stat-label artwork (MECH-GEAR-11); the artifact shows a "+N" pill (red, orange for +4, none at +0),
+    "Lv.X/Y" and its name, often cut by the artwork; the EE (only heroes that have one) shows left of the artifact: a
+    small stat icon, the value and its name; the CP row has one round icon per completed set (MECH-GEAR-15).
 - **Equipment Details** popup (Manage Equipment or Inventory) shows substats with text labels, plus grade, slot, set
   name and score.
 - The Equipment tab shows totals with a "▲" bonus; what the bonus includes is unknown (NV-10).

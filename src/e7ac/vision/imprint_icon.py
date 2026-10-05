@@ -290,6 +290,8 @@ def read_imprint_icon(image: BgrImage, anchors: ScreenAnchors) -> ImprintIconRea
 def read_icon_window(window: BgrImage, text_height: float) -> ImprintIconReading:
     """Read an imprint icon inside `window` (BGR); `text_height` = height of one imprint text line in pixels."""
     trace = _Trace()
+    if not text_height > 0 or min(window.shape[:2]) < MIN_WINDOW_LINES * text_height:
+        return trace.reading(colour=UNKNOWN, warning="the icon window is smaller than one text line")
     hsv = _Hsv.of(window)
     bright = (hsv.s >= BRIGHT_S) & (hsv.v >= BRIGHT_V)
     if bright.mean() < MIN_BRIGHT_FRACTION:
