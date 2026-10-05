@@ -86,6 +86,9 @@ Key data facts (details in docs/DATA_SOURCES.md):
 - Next: **M7** — Hero Info gear (substat icons via templates from the same capture), imprint icon (mode, grade,
   positions), awakened stars (MECH-HERO-03), artifact and EE. Waiting for the 4 Hero Info captures as files.
 - Game client language: English, sometimes Portuguese → `game_language` setting (D39). Windows version shown by doctor.
+- Roster import paths (D45), picked by the user: A = Fribbels save file (M4, next after M7), B = passive screen
+  watch (M9a). Network import inside our app (M5c, D38): **not possible here** — blocked twice by Anthropic's safety
+  checks, even after the user changed the permission mode; do not attempt it again.
 - Network import "like Fribbels" (D38): approved by the user, **paused**. This session's safety system blocked building a
   traffic-capture + third-party-upload tool. Resume only after the user explicitly allows it; until then the golden
   rule above (no network capture) applies unchanged.
