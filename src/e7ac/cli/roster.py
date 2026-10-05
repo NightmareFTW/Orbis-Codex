@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import codecs
 import json
+from collections import Counter
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -39,7 +40,7 @@ from e7ac.roster.store import (
 from e7ac.roster.validation import CatalogContext, Issue, Severity, validate_build
 from e7ac.settings import SettingsError, load_settings
 from e7ac.storage.db import open_database, session_scope
-from e7ac.storage.models import CatalogEntityRow, HeroSnapshotRow
+from e7ac.storage.models import CatalogEntityRow, HeroSnapshotRow, OwnedHeroRow
 from e7ac.vision.hero_screen import ScreenError, ScreenKind, parse_hero_screen
 from e7ac.vision.image import ImageError, captured_at, expand_image_paths, load_image
 from e7ac.vision.ocr import RapidOcrReader, TextReader
@@ -659,6 +660,94 @@ def scan(
                 typer.echo(f"  #{owned.id}: new snapshot {snapshot.id}")
     if failed:
         raise typer.Exit(code=1)
+
+
+@roster_app.command("import-fribbels")
+def import_fribbels(
+    file: Annotated[Path, typer.Argument(help='A Fribbels Optimizer save ("Save all optimizer data", JSON).')],
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Read and check only; save nothing.")] = False,
+    force: Annotated[bool, typer.Option(help="Store builds even if validation finds errors.")] = False,
+) -> None:
+    """Import heroes and their equipped gear from a Fribbels Optimizer save file (path A, SPEC D45/D52).
+
+    Run Fribbels' own importer first and save its data; this command only reads that local file. Gear (with substat
+    rolls) comes from the save; level, awakening and the displayed stats are not in it, so they are kept from the
+    roster (scan Hero Info to fill them). One owned copy per hero is updated; several copies are skipped."""
+    from e7ac.roster.fribbels_import import FribbelsFileError, merge_with_current, read_fribbels_save
+
+    try:
+        raw = file.read_bytes()
+        text = raw.decode(_encoding(raw))
+    except (OSError, UnicodeDecodeError) as exc:
+        _fail(f"cannot read {file}: {exc}")
+    engine = _engine()
+    with session_scope(engine) as session:
+        heroes = _catalog_heroes(session)
+        if heroes is None:
+            _fail("heroes are matched by name, which needs the catalog: run e7 catalog sync")
+        catalog, _ = _screen_catalog(session)
+        try:
+            save = read_fribbels_save(text, heroes, catalog.artifacts, captured_at=captured_at(file))
+        except FribbelsFileError as exc:
+            _fail(f"{file}: {exc}")
+        owned_by_code: dict[str, list[OwnedHeroRow]] = {}
+        for owned, _row in list_owned(session):
+            owned_by_code.setdefault(owned.hero_code, []).append(owned)
+        in_save = Counter(e.hero_code for e in save.heroes if e.build is not None)
+        counts = dict.fromkeys(("new", "updated", "unchanged", "skipped"), 0)
+        for entry in save.heroes:
+            label = f"{entry.name} ({entry.hero_code or '?'})"
+            problems = list(entry.problems)
+            if entry.build is not None and in_save[entry.hero_code] > 1:
+                problems.append(f"{in_save[entry.hero_code]} heroes of the save are this hero")
+            copies = owned_by_code.get(entry.hero_code or "", [])
+            if entry.build is not None and len(copies) > 1:
+                listed = ", ".join(f"#{o.id}" for o in copies)
+                problems.append(f"you own several copies ({listed}); Fribbels keeps one per name")
+            if entry.build is None or problems:
+                counts["skipped"] += 1
+                typer.echo(f"  skipped {label}: {'; '.join(problems)}")
+                continue
+            current_row = current_snapshot(session, copies[0].id) if copies else None
+            current = build_from_row(session, current_row) if current_row is not None else None
+            if current is not None and current.captured_at > entry.build.captured_at:
+                counts["skipped"] += 1
+                typer.echo(
+                    f"  skipped {label}: the roster's build ({current.captured_at:%Y-%m-%d %H:%M} UTC) is newer than "
+                    f"the save ({entry.build.captured_at:%Y-%m-%d %H:%M} UTC)"
+                )
+                continue
+            build, notes = merge_with_current(entry.build, current)
+            if current is not None and _same_build(build, current):
+                counts["unchanged"] += 1
+                continue
+            issues = _issues(session, build, quiet=True)
+            errors = [i for i in issues if i.severity is Severity.ERROR]
+            if errors and not force:
+                counts["skipped"] += 1
+                typer.echo(f"  skipped {label}: not valid (use --force to store it anyway)")
+                _print_issues(errors)
+                continue
+            status = "new" if current_row is None else "updated"
+            counts[status] += 1
+            warned = f", {len(issues)} validation issue(s)" if issues else ""
+            typer.echo(f"  {status:9} {label}: {len(build.gear)} gear piece(s){warned}")
+            for note in [*entry.notes, *notes]:
+                typer.echo(f"    note: {note}")
+            if dry_run:
+                continue
+            if copies:
+                add_snapshot(session, copies[0], build)
+            else:
+                owned_by_code[build.hero_code] = [add_owned_hero(session, build)]
+        for warning in save.warnings:
+            typer.echo(f"  warning: {warning}", err=True)
+        summary = ", ".join(f"{n} {k}" for k, n in counts.items())
+        typer.echo(f"Fribbels save: {len(save.heroes)} hero(es): {summary}; {save.unequipped_items} unequipped item(s)")
+        if counts["new"] or counts["updated"]:
+            typer.echo("Level, awakening and the displayed stats are not in the save: scan Hero Info to fill them.")
+        if dry_run:
+            typer.echo("(dry run: nothing saved)")
 
 
 def _load_set_matcher(codes: list[str]) -> Any:

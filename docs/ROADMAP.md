@@ -33,8 +33,17 @@ Checkboxes: `[x]` done · `[ ]` pending. Milestones are small vertical slices; o
 > other program. Screen extraction therefore comes first (M5a → M5b → M6 → M7 → M9); the Fribbels save import (M4)
 > becomes optional and comes later, for users who already have a Fribbels file.
 
-- [ ] **M4 Fribbels save import** *(next after M7 — SPEC D44/D45: path A of the two import paths, bulk first load of ~400 heroes; models from Fribbels' code, checked against the user's save file)* — schema derived from a real save file; strict models + raw passthrough; gear dedupe by id/fingerprint; mapping Fribbels names → hero codes with margin rule; `e7 import fribbels <file>`.
-  - Acceptance: user's file imports with a report (imported/skipped/ambiguous); unknown fields preserved; test skips cleanly without the file; CP samples feed NV-06.
+- [x] **M4 Fribbels save import** *(SPEC D44/D45/D52: path A of the two import paths, bulk first load of ~400 heroes)* —
+  `roster/fribbels_import.py` reads the save file the user made with Fribbels' own importer ("Save all optimizer
+  data"); `e7 roster import-fribbels <file> [--dry-run] [--force]`.
+  - Acceptance: a report per hero (new/updated/unchanged/skipped with the reason); exact name matching only; gear with
+    rolls and game item ids; level/awakening/displayed stats kept from the roster; an older save never replaces a newer
+    build; synthetic tests always run, the golden test skips cleanly without `fixtures/saves/fribbels.json`.
+  - ✅ Done 2026-10-05 on synthetic saves built from Fribbels' code. **Pending:** a check against the user's real save
+    (the format is `community` until then).
+  - **How to try:** in Fribbels, import your account and use "Save all optimizer data"; then
+    `.\OrbisCodex.cmd roster import-fribbels "$HOME\Documents\FribbelsOptimizerSaves\<file>.json" --dry-run`, and again
+    without `--dry-run` to store it (`... roster list` shows the heroes).
 - [x] **M5a Capture tooling** — read-only game-window locator (window title/class + system process list, never a handle to the game), `mss` capture of the window's client area, blank-frame check, lossless PNG, `e7 capture` (one shot, `--delay`, `--list-windows`, `--hwnd`) and a `--hotkey` scan mode (RegisterHotKey, no keyboard hook); `e7 doctor` reports the game window; a guard test forbids process handles, memory access, input injection, keyboard hooks and packet capture anywhere in the code.
   - Acceptance: tests with fake windows/backends on every OS, real window listing and screen grab on the Windows CI runner; the user captures the screens listed in SPEC Q2 with it.
   - ✅ Done 2026-10-04 (in-game check pending: the window identifiers of the Stove client are community-sourced).

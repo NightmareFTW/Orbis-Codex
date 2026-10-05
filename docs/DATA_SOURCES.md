@@ -230,14 +230,21 @@ ATK 21→273, HP 32→416.
 - ⚠️ Fribbels' *auto-importer* sniffs game network traffic and has it decoded on Fribbels' server (§7). **We do not
   do that** (SPEC D36). We only read a save file the user already has (optional M4).
 
-### Save file (to be derived from the user's real file)
-- From the code: `{"heroes": [...], "items": [...]}` written by "Save all optimizer data"
-  (default folder `Documents/FribbelsOptimizerSaves/`, also `autosave.json`).
-- The 2020 sample in the repo (`testgear.json`) shows items with `gear`, `rank`, `set`, `enhance`,
-  `level`, `main {type, value}`, `substats [{type, value}]`, `name`, `id`, `equippedById`, `equippedByName`,
-  `locked`, `augmentedStats`, and heroes with final stats + `equipment` by slot.
-- **Not assumed**: the importer schema will be derived from the user's real file (M4) and validated
-  with strict models; unknown fields are preserved raw.
+### Save file (read by `e7 roster import-fribbels`, M4 / SPEC D52)
+- Written by Fribbels' "Save all optimizer data" (default folder `Documents/FribbelsOptimizerSaves/`, also
+  `autosave.json`): `{"heroes": [...], "items": [...]}`, the backend objects serialised by Gson (`app/js/lib/saves.js`).
+- Items (`backend/.../model/Item.java`): `gear` ("Weapon"…"Boots"), `rank` ("Normal"…"Epic"), `set` ("SpeedSet"… →
+  catalog code via `SET_PIECES`), `enhance`, `level`, `main` and `substats` (`model/Stat.java`: `type`
+  "AttackPercent"…, integer `value` — rates in percent —, `rolls`, `modified`), `id`, `ingameId`, `equippedById`; also
+  `wss`, `locked`, reforge fields… (not read).
+- Heroes (`model/Hero.java`): `id`, `name`, `stars`, and the bonuses typed by the user in Fribbels: `artifactName`,
+  `artifactLevel`, `imprintNumber` (the hero's own imprint), `eeNumber` — strings, "None" when unset
+  (`app/js/lib/dialog.js`). Fribbels' computed stats/CP are in the save but are not game readings (not taken).
+- Not in the save: level, awakening, skill enhancements, displayed stats.
+- Fribbels' importer keeps one hero per name and only items from a chosen "+N" up (`scanner.js`).
+- Status `community` (derived from the code; checked against synthetic files only). **Pending:** the user's real save
+  (`fixtures/saves/fribbels.json`, git-ignored) for the golden test. The 2020 sample in the repo (`testgear.json`) is
+  an older layout (heroes with final stats + `equipment` by slot).
 
 ---
 

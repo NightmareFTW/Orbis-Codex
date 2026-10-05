@@ -87,9 +87,13 @@ Key data facts (details in docs/DATA_SOURCES.md):
   `sources/assets.py` (Stove set icons cached by `catalog sync`), `roster/{composition,screen_gear}.py`; golden tests on
   local captures (`fixtures/screenshots/heroinfo_*.webp`, `fixtures/stove/set_icons/`, never committed). Reviewed by a
   multi-agent adversarial review (11 findings fixed).
-- Next: **M4** Fribbels save import (path A), then **M9a** passive watch (path B; first speed up the ~15 s scan).
+- **M4 Fribbels save import — done** (SPEC D52): `roster/fribbels_import.py`, `e7 roster import-fribbels FILE
+  [--dry-run] [--force]`; reads only the save file made with Fribbels' own tool; exact names only; level/awakening/
+  displayed stats kept from the roster; an older save never replaces a newer build. Pending: the user's real save
+  (`fixtures/saves/fribbels.json`, git-ignored) to confirm the format.
+- Next: **M9a** passive watch (path B; first speed up the ~15 s scan).
 - Game client language: English, sometimes Portuguese → `game_language` setting (D39). Windows version shown by doctor.
-- Roster import paths (D45), picked by the user: A = Fribbels save file (M4, next after M7), B = passive screen
+- Roster import paths (D45), picked by the user: A = Fribbels save file (M4, done), B = passive screen
   watch (M9a). Network import inside our app (M5c, D38): **not possible here** — blocked twice by Anthropic's safety
   checks, even after the user changed the permission mode; do not attempt it again.
 - Network import "like Fribbels" (D38): approved by the user, **paused**. This session's safety system blocked building a
