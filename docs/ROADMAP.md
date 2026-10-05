@@ -41,8 +41,9 @@ Checkboxes: `[x]` done · `[ ]` pending. Milestones are small vertical slices; o
     estimates (+N below +15, stars, hand-edited pieces) at a lower confidence; level/awakening/displayed stats kept
     from the roster; a save file modified before the roster build never replaces it, and gear read on screen only
     with `--trust-save`; synthetic tests always run, the golden test skips cleanly without `fixtures/saves/fribbels.json`.
-  - ✅ Done 2026-10-05 on synthetic saves built from Fribbels' code, then a multi-agent adversarial review: 26 confirmed
-    findings fixed (D52), the tests catch 11 deliberate mutations of the key rules. **Pending:** a check against the
+  - ✅ Done 2026-10-05 on synthetic saves built from Fribbels' code, then two rounds of multi-agent adversarial review:
+    26 + 13 confirmed findings fixed (D52); the tests catch 25 deliberate mutations of the key rules (one more is
+    equivalent). **Pending:** a check against the
     user's real save (the format is `community` until then).
   - **How to try:** in Fribbels, import your account from the game and use "Save all optimizer data"; then
     `.\OrbisCodex.cmd roster import-fribbels "$HOME\Documents\FribbelsOptimizerSaves\<file>.json" --dry-run`, and again

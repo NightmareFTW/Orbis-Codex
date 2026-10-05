@@ -682,8 +682,13 @@ def import_fribbels(
     displayed stats are not in the save, so they are kept from the roster (scan Hero Info to fill them). Gear read from
     the screen is never replaced unless --trust-save: the file's date says when Fribbels wrote it, not when it read
     the game. One owned copy per hero is updated; several copies are skipped."""
-    from e7ac.roster.fribbels_import import FribbelsFileError, merge_with_current, read_fribbels_save
-    from e7ac.roster.pieces import same_piece
+    from e7ac.roster.fribbels_import import (
+        FribbelsFileError,
+        game_link_conflict,
+        merge_with_current,
+        read_fribbels_save,
+    )
+    from e7ac.roster.pieces import is_screen_or_manual, same_piece
 
     try:
         raw = file.read_bytes()
@@ -725,6 +730,9 @@ def import_fribbels(
                     f"the roster's build ({current.captured_at:%Y-%m-%d %H:%M} UTC) is newer than the save file "
                     f"({written:%Y-%m-%d %H:%M} UTC)"
                 )
+            conflict = game_link_conflict(entry, current, save) if entry.build is not None else None
+            if conflict is not None and not trust_save:
+                problems.append(conflict)
             if entry.build is None or problems:
                 counts["skipped"] += 1
                 typer.echo(f"  skipped   {label}: {'; '.join(problems)}")
@@ -733,18 +741,19 @@ def import_fribbels(
                 entry.build, current, unusable=entry.unusable, elsewhere=save.elsewhere(entry)
             )
             notes = [*entry.notes, *notes]
-            if current is not None and current.source is not BuildSource.FRIBBELS and not trust_save:
-                changed = [
+            if current is not None and not trust_save:
+                changed = [  # pieces read on screen or entered here are never replaced on the file's word alone
                     slot.value
                     for slot, piece in current.gear.items()
-                    if slot not in build.gear or not same_piece(piece, build.gear[slot])
+                    if is_screen_or_manual(piece)
+                    and (slot not in build.gear or not same_piece(piece, build.gear[slot]))
                 ]
                 if changed:
                     counts["skipped"] += 1
                     typer.echo(
-                        f"  skipped   {label}: the save's {', '.join(changed)} differ from the roster's "
-                        f"({current.source.value}, {current.captured_at:%Y-%m-%d}); use --trust-save if the save "
-                        "is a fresh game import"
+                        f"  skipped   {label}: the save's {', '.join(changed)} differ from the roster's piece read on "
+                        f"screen or entered here (build of {current.captured_at:%Y-%m-%d}); use --trust-save if the "
+                        "save is a fresh game import"
                     )
                     continue
             if current is not None and _same_build(build, current):

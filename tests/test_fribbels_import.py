@@ -90,6 +90,7 @@ HEROES = {
     "c9003": hero("c9003", "Twin"),
     "c9005": hero("c9005", "Plain Hero"),
     "c9006": hero("c9006", "Echo", imprint__stat="att_rate", imprint__values={"B": 0.1, "A": 0.1}, ee__stat="speed"),
+    "c9007": hero("c9007", "Rate Hero", imprint__stat="att_rate", imprint__values={"A": 0.15, "S": 0.172, "SS": 0.194}),
 }
 ARTIFACTS = {
     "efz01": artifact("efz01", "Test Dagger"),
@@ -271,6 +272,15 @@ def test_an_imprint_grade_needs_an_exact_unique_match(number: str | int, grade: 
     assert build.confidence["imprint.grade"] == (USER_ENTERED if grade else ASSUMED)
 
 
+@pytest.mark.parametrize(
+    ("number", "grade"), [("17.2", ImprintGrade.S), ("19.4", ImprintGrade.SS), ("16", None), ("18.5", None)]
+)
+def test_a_rate_imprint_grade_is_never_taken_from_a_near_value(number: str, grade: ImprintGrade | None) -> None:
+    build = only([{"id": "h7", "name": "Rate Hero", "stars": 6, "imprintNumber": number}]).build
+    assert build is not None and build.imprint is not None and build.imprint.grade == grade
+    assert build.confidence["imprint.grade"] == (USER_ENTERED if grade else ASSUMED)
+
+
 def test_a_value_shared_by_two_grades_gives_no_grade_and_flat_ee_values_are_kept() -> None:
     build = only([{"id": "h3", "name": "Echo", "stars": 6, "imprintNumber": "10", "eeNumber": "4"}]).build
     assert build is not None and build.imprint is not None
@@ -380,6 +390,12 @@ def test_fribbels_unknown_values_make_only_that_piece_unusable(change: dict[str,
     assert any(n.startswith(f"weapon: the save's piece is not usable ({reason}") for n in entry.notes)
 
 
+PLAN_NOTE = (
+    "matched to its game hero by most of its pieces, but Fribbels' equipment differs from the game (an optimizer "
+    "plan?): its game gear has confidence 0.7"
+)
+
+
 def test_an_optimizer_plan_is_never_taken_as_game_gear() -> None:
     other = {"id": "h2", "name": "Test Hero", "stars": 6}
     items = [
@@ -397,12 +413,72 @@ def test_an_optimizer_plan_is_never_taken_as_game_gear() -> None:
     assert GearSlot.BOOTS not in bbk.build.gear
     assert bbk.notes == [
         "ring: worn in the game, moved in Fribbels: the game's piece taken",
+        PLAN_NOTE,
         "boots, ring: equipped in Fribbels only (worn by another hero or in the inventory in the game, "
         "e.g. an optimizer result): not taken",
     ]
+    assert all(bbk.build.confidence[f"gear.{slot.value}"] == USER_ENTERED for slot in bbk.build.gear)
     assert test.build.gear[GearSlot.RING].main.stat is Stat.ATK_PERCENT  # back on its game wearer
     assert set(test.build.gear) == {GearSlot.WEAPON, GearSlot.HELMET, GearSlot.RING}
     assert save.locations["ingame:h1-Boots-0"] == (None, "in the inventory")
+    assert (bbk.game_id, test.game_id) == ("g1", "g2")
+
+
+def test_a_clean_match_keeps_full_confidence_and_strays_are_located() -> None:
+    stray = item("Ring", stat("Speed", 4), wearer="g9", ingame="555")  # moved in the game to a hero Fribbels lacks
+    save = read([BBK], [*BBK_ITEMS[:4], BBK_ITEMS[5], stray])
+    (entry,) = save.heroes
+    assert entry.build is not None and GearSlot.RING not in entry.build.gear
+    assert entry.notes == [  # a stray of another game hero makes the match uncertain: confidence 0.7
+        PLAN_NOTE,
+        "ring: equipped in Fribbels only (worn by another hero or in the inventory in the game, e.g. an optimizer "
+        "result): not taken",
+    ]
+    assert save.locations["ingame:555"] == (None, "worn in the game by another hero")
+    assert save.locations["fribbels:fid-Ring-h1-g9"] == (None, "worn in the game by another hero")
+    assert save.elsewhere(entry)["ingame:555"] == "worn in the game by another hero"
+    clean = read([BBK], BBK_ITEMS).heroes[0]
+    assert clean.build is not None and not any(k.startswith("gear.") for k in clean.build.confidence)
+
+
+@pytest.mark.parametrize(
+    ("items", "why"),
+    [
+        (  # one piece of a game hero Fribbels does not have, equipped by the optimizer
+            [
+                item("Weapon", stat("Attack", 500), wearer="gY", ingame=f"y{n}")
+                if n == 0
+                else item(g, stat("Health", 1), hero_id=None, wearer="gY", ingame=f"y{n}")
+                for n, g in enumerate(("Weapon", "Helmet", "Armor", "Necklace", "Ring", "Boots"))
+            ],
+            "its Fribbels equipment holds only 1 of the 6 pieces worn by the game hero most of them come from",
+        ),
+        (
+            [item("Weapon", stat("Attack", 525)), item("Helmet", stat("Health", 2835), wearer="g2")],
+            "its Fribbels equipment mixes pieces worn by 2 game heroes",
+        ),
+    ],
+    ids=["one-piece-plan", "even-split"],
+)
+def test_a_hero_the_save_cannot_match_to_a_game_hero_gets_no_game_gear(items: list[dict[str, Any]], why: str) -> None:
+    entry = only([BBK], items)
+    assert entry.build is not None and entry.build.gear == {} and entry.game_id is None
+    assert entry.notes[0] == (
+        f"the save cannot tell which game hero this is ({why}): game gear not taken; import your account again in "
+        "Fribbels before saving"
+    )
+    assert "equipped in Fribbels only" in entry.notes[1]
+
+
+def test_a_game_hero_is_never_matched_to_two_fribbels_heroes() -> None:
+    items = [item("Weapon", stat("Attack", 525)), item("Helmet", stat("Health", 2835), hero_id="h2")]
+    save = read([BBK, {"id": "h2", "name": "Test Hero", "stars": 6}], items)
+    for entry in save.heroes:  # each holds 1 of g1's 2 pieces: neither has most of them
+        assert entry.build is not None and entry.build.gear == {} and entry.game_id is None
+    assert save.warnings == [
+        "2 item(s) worn in the game by 1 hero(es) the save does not match to a Fribbels hero "
+        "(not imported by Fribbels, or all their gear moved in it): not taken"
+    ]
 
 
 def test_a_hero_whose_fribbels_gear_is_all_a_plan_gets_none() -> None:
@@ -411,25 +487,6 @@ def test_a_hero_whose_fribbels_gear_is_all_a_plan_gets_none() -> None:
     assert entry.notes == [
         "helmet, weapon: equipped in Fribbels only (worn by another hero or in the inventory in the game, "
         "e.g. an optimizer result): not taken"
-    ]
-
-
-def test_a_hero_whose_fribbels_gear_splits_evenly_between_game_heroes_gets_none() -> None:
-    items = [item("Weapon", stat("Attack", 525)), item("Helmet", stat("Health", 2835), wearer="g2")]
-    entry = only([BBK], items)
-    assert entry.build is not None and entry.build.gear == {}  # no strict majority: the game hero is unknown
-    assert entry.notes[0].startswith("helmet, weapon: equipped in Fribbels only")
-
-
-def test_two_heroes_matching_one_game_hero_get_no_game_gear() -> None:
-    items = [item("Weapon", stat("Attack", 525)), item("Helmet", stat("Health", 2835), hero_id="h2")]
-    save = read([BBK, {"id": "h2", "name": "Test Hero", "stars": 6}], items)
-    for entry in save.heroes:
-        assert entry.build is not None and entry.build.gear == {}
-        assert entry.notes == ["game gear not taken: another hero of the save matches the same game hero"]
-    assert save.warnings == [
-        "2 item(s) worn in the game by 1 hero(es) the save does not match to a Fribbels hero "
-        "(not imported by Fribbels, or all their gear moved in it): not taken"
     ]
 
 
@@ -467,14 +524,14 @@ def test_a_derived_plus_n_below_15_is_an_estimate() -> None:
 
 def test_two_pieces_in_one_slot_are_settled_by_fribbels_equipment_or_refused() -> None:
     second = item("Weapon", stat("Attack", 500), hero_id="h2", ingame="77")  # also worn by g1, equipped on h2
-    entry = only([BBK], [BBK_ITEMS[0], second])
+    entry = only([BBK], [*BBK_ITEMS, second])
     assert entry.build is not None and entry.build.gear[GearSlot.WEAPON].external_id == "ingame:9001"
-    assert entry.notes[-1] == "weapon: 2 pieces in the save: item #1 (9001) taken"
+    assert "weapon: 2 pieces in the save: item #1 (9001) taken" in entry.notes
     neither = [{**BBK_ITEMS[0], "equippedById": None}, {**second, "equippedById": None}]
     shown = {**BBK, "equipment": {"Weapon": {"id": second["id"]}}}
-    (by_equipment,) = read([shown], [*neither, item("Helmet", stat("Health", 1))]).heroes
+    (by_equipment,) = read([shown], [*neither, *BBK_ITEMS[1:]]).heroes
     assert by_equipment.build is not None and by_equipment.build.gear[GearSlot.WEAPON].external_id == "ingame:77"
-    (refused,) = read([BBK], [*neither, item("Helmet", stat("Health", 1))]).heroes
+    (refused,) = read([BBK], [*neither, *BBK_ITEMS[1:]]).heroes
     assert refused.build is not None and GearSlot.WEAPON not in refused.build.gear
     assert "weapon: 2 pieces in the save (item #1 (9001), item #2 (77)): none taken" in refused.notes
 
@@ -580,6 +637,47 @@ def test_any_change_of_the_stat_inputs_drops_the_displayed_stats(
     assert merged.final_stats is None and merged.cp is None
     assert not any(key.startswith("final_stats.") or key == "cp" for key in merged.confidence)
     assert notes[-1] == STATS_DROPPED
+
+
+@pytest.mark.parametrize(
+    ("roster", "save"),
+    [
+        ({"stars": 5, "level": 50, "awakening": 5, "confidence": {"stars": ASSUMED}}, {}),
+        ({"artifact": ArtifactRef(code="efz09", level=30), "confidence": {"artifact": 0.5}}, {}),
+        (
+            {
+                "imprint": Imprint(grade=None, stat=Stat.ATK_PERCENT, value=0.06, mode=ImprintMode.SELF),
+                "confidence": {"imprint": 0.5},
+            },
+            {},
+        ),
+        ({"level": 50, "awakening": 5, "confidence": {"stars": USER_ENTERED}}, {"stars": 5}),
+    ],
+    ids=["stars", "artifact", "imprint", "stars-cap-level"],
+)
+def test_a_value_the_save_wins_drops_the_displayed_stats(roster: dict[str, Any], save: dict[str, Any]) -> None:
+    current = screen_build(imported(), **roster)
+    merged, notes = merge_with_current(imported(**save), current)
+    assert merged.final_stats is None and merged.cp is None and notes[-1] == STATS_DROPPED
+
+
+def test_the_roster_note_and_skill_confidence_are_kept() -> None:
+    current = screen_build(imported(), note="speed tuned for Arena", confidence={"skills": 0.4})
+    merged, _ = merge_with_current(imported(), current)
+    assert merged.note == "speed tuned for Arena" and merged.confidence["skills"] == 0.4
+
+
+def test_a_roster_piece_the_save_shows_on_an_unmatched_game_hero_is_removed() -> None:
+    stray = item("Ring", stat("AttackPercent", 65), set_name="DestructionSet", wearer="g9", ingame="9005")
+    save = read([BBK], [*BBK_ITEMS[:4], BBK_ITEMS[5], stray])
+    (entry,) = save.heroes
+    assert entry.build is not None
+    current = screen_build(imported())
+    merged, notes = merge_with_current(entry.build, current, elsewhere=save.elsewhere(entry))
+    assert GearSlot.RING not in merged.gear
+    assert "ring: the roster's piece is worn in the game by another hero in the save: removed from this hero" in notes
+    unmatched = read([BBK], [item("Weapon", stat("Attack", 1), wearer="gZ"), stray]).heroes[0]
+    assert unmatched.game_id is None and "ingame:9005" not in save.elsewhere(unmatched)  # it may be this very hero
 
 
 def test_stars_from_the_save_never_override_a_more_certain_reading() -> None:
@@ -793,18 +891,68 @@ def test_cli_fills_a_manual_build_and_keeps_its_level(tmp_path: Path, synthetic_
     assert (build["level"], build["awakening"], len(build["gear"])) == (60, 6, 6)
 
 
-def test_cli_never_replaces_screen_gear_unless_trusted(tmp_path: Path, synthetic_catalog: list[str]) -> None:
+def write_build(path: Path, build: HeroBuild, **piece_changes: Any) -> Path:
+    """A build JSON for `roster add --from-json`, with every piece changed (e.g. no source id, a screen score)."""
+    gear = {
+        slot.value: json.loads(piece.model_copy(update=piece_changes).model_dump_json())
+        for slot, piece in build.gear.items()
+    }
+    path.write_text(json.dumps({"gear": gear}), encoding="utf-8")
+    return path
+
+
+def test_cli_never_replaces_gear_entered_here_unless_trusted(tmp_path: Path, synthetic_catalog: list[str]) -> None:
     other = imported(items=[item("Weapon", stat("Attack", 500), ingame="1"), *BBK_ITEMS[1:]])
-    entered = tmp_path / "entered.json"
-    data = json.loads(other.model_dump_json(include={"gear"}))
-    entered.write_text(json.dumps(data), encoding="utf-8")
+    entered = write_build(tmp_path / "entered.json", other, external_id=None)  # typed by the user: no source id
     assert runner.invoke(app, ["roster", "add", "c2011", "--from-json", str(entered)]).exit_code == 0
     save = write_save(tmp_path / "fribbels.json", [BBK], BBK_ITEMS, NOW + timedelta(days=400))
     refused = runner.invoke(app, ["roster", "import-fribbels", str(save)])
-    assert "skipped   Blood Blade Karin (c2011): the save's weapon differ from the roster's (manual, " in refused.stdout
+    assert (
+        "skipped   Blood Blade Karin (c2011): the save's weapon differ from the roster's piece read on screen or "
+        "entered here (build of " in refused.stdout
+    )
     assert "use --trust-save" in refused.stdout and show()["gear"]["weapon"]["main"]["value"] == 500
     trusted = runner.invoke(app, ["roster", "import-fribbels", str(save), "--trust-save"])
     assert "updated   Blood Blade Karin (c2011)" in trusted.stdout and show()["gear"]["weapon"]["main"]["value"] == 525
+
+
+def test_cli_keeps_protecting_screen_gear_after_an_import_confirmed_it(
+    tmp_path: Path, synthetic_catalog: list[str]
+) -> None:
+    seen = write_build(tmp_path / "seen.json", imported(), external_id=None, score=70)  # as Hero Info reads it
+    assert runner.invoke(app, ["roster", "add", "c2011", "--from-json", str(seen)]).exit_code == 0
+    fresh = write_save(tmp_path / "fresh.json", [BBK], BBK_ITEMS, NOW + timedelta(days=400))
+    confirmed = runner.invoke(app, ["roster", "import-fribbels", str(fresh)])
+    assert "updated   Blood Blade Karin (c2011)" in confirmed.stdout  # the same pieces: combined, nothing replaced
+    weapon = show()["gear"]["weapon"]
+    assert (weapon["score"], weapon["external_id"], weapon["substats"][0]["rolls"]) == (70, "ingame:9001", 2)
+    stale_items = [item("Weapon", stat("Attack", 400), ingame="4"), *BBK_ITEMS[1:]]
+    stale = write_save(tmp_path / "autosave.json", [BBK], stale_items, NOW + timedelta(days=401))
+    refused = runner.invoke(app, ["roster", "import-fribbels", str(stale)])
+    assert "skipped   Blood Blade Karin (c2011): the save's weapon differ" in refused.stdout
+    assert show()["gear"]["weapon"]["main"]["value"] == 525
+
+
+def test_cli_refuses_a_save_whose_game_match_contradicts_the_roster(
+    tmp_path: Path, synthetic_catalog: list[str]
+) -> None:
+    other = {"id": "h2", "name": "Karin", "stars": 6}
+    karin_items = [
+        item(g, stat("Health", 1000 + n), hero_id="h2", wearer="g2", ingame=f"k{n}")
+        for n, g in enumerate(("Weapon", "Helmet", "Armor", "Necklace", "Ring", "Boots"))
+    ]
+    first = write_save(tmp_path / "a.json", [BBK, other], [*BBK_ITEMS, *karin_items])
+    assert "2 new" in runner.invoke(app, ["roster", "import-fribbels", str(first)]).stdout
+    swapped = [  # whole builds swapped in Fribbels' planner: the game wearers did not change
+        *({**raw, "equippedById": "h2"} for raw in BBK_ITEMS),
+        *({**raw, "equippedById": "h1"} for raw in karin_items),
+    ]
+    second = write_save(tmp_path / "b.json", [BBK, other], swapped, NOW + timedelta(days=1))
+    refused = runner.invoke(app, ["roster", "import-fribbels", str(second)])
+    assert refused.stdout.count("are worn in the save by another game hero than the one its Fribbels equipment") == 2
+    assert "0 updated" in refused.stdout and show()["gear"]["weapon"]["external_id"] == "ingame:9001"
+    trusted = runner.invoke(app, ["roster", "import-fribbels", str(second), "--trust-save"])
+    assert "2 updated" in trusted.stdout
 
 
 def test_cli_warns_when_one_piece_ends_up_on_two_heroes(tmp_path: Path, synthetic_catalog: list[str]) -> None:
@@ -899,7 +1047,10 @@ def test_the_users_save_is_read() -> None:
     bad = [w for w in save.warnings if w.startswith(("item #", "hero #")) or "unknown hero id" in w]
     assert not bad, bad[:5]
     items = [FribbelsItem.model_validate(raw) for raw in json.loads(text)["items"]]  # all read, as checked above
-    assert sum(1 for i in items if i.ingameEquippedId is not None) > len(items) / 2, "no game wearers recorded"
+    assert any(i.wearer is not None for i in items), "no game wearer recorded (what does 'not worn' look like?)"
+    with_game_pieces = {i.equippedById for i in items if i.equippedById and i.ingameEquippedId is not None}
+    matched = [h for h in save.heroes if h.game_id is not None]
+    assert len(matched) * 2 > len(with_game_pieces), (len(matched), len(with_game_pieces))  # the wearer rule holds
     mains: Counter[tuple[Stat, bool]] = Counter()
     for i in items:
         try:

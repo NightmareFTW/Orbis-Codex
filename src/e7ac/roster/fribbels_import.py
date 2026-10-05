@@ -15,10 +15,13 @@ File format, from Fribbels' code (status `community` until checked against a rea
   user types in that dialog: `artifactName`/`artifactLevel`, `imprintNumber` (the hero's own imprint value, from
   `self_devotion`), `eeNumber` — strings, "None" when unset (`app/js/lib/dialog.js`).
 
-How the game's gear is rebuilt (never Fribbels' plan): a hero's game id is the wearer id that a strict majority of its
-game-imported Fribbels pieces carry; its gear is then every piece the game import put on that id. Pieces equipped in
-Fribbels but worn elsewhere (or in the inventory) in the game are a plan: not taken, with a note. Pieces with no game
-data (added by hand, or an old screenshot import) are taken from Fribbels' equipment at confidence 0.7.
+How the game's gear is rebuilt (never Fribbels' plan): a Fribbels hero is matched to the game hero that wears most
+of its game-imported Fribbels pieces and most of whose pieces it holds (no game hero can be matched twice); its gear
+is then every piece the game import put on that game hero, at confidence 0.7 when Fribbels' equipment differs from it.
+Pieces equipped in Fribbels but worn elsewhere (or in the inventory) in the game are a plan: not taken, with a note.
+Pieces with no game data (added by hand, or an old screenshot import) are taken from Fribbels' equipment at
+confidence 0.7. `game_link_conflict` tells when a match contradicts the roster (e.g. whole builds swapped in the
+planner, which the save alone cannot tell from the game).
 
 Values Fribbels estimates, taken with a lower confidence and a note: the +N of a game-imported piece below +15 (derived
 from the number of enhancements: a multiple of 3, up to 2 below the real one); the stars. Substat rolls of a piece
@@ -60,7 +63,7 @@ from e7ac.domain.roster import (
     StatValue,
     Substat,
 )
-from e7ac.roster.pieces import GAME_ID_PREFIX, MAX_ENHANCE, combine, same_piece, visible
+from e7ac.roster.pieces import FRIBBELS_ID_PREFIX, GAME_ID_PREFIX, MAX_ENHANCE, combine, same_piece, visible
 from e7ac.sources.fribbels import SET_PIECES
 
 STAT_TYPES: Final[Mapping[str, Stat]] = {
@@ -155,6 +158,8 @@ class HeroImport:
     notes: list[str] = field(default_factory=list)
     unusable: dict[GearSlot, str] = field(default_factory=dict)
     """Slots whose piece in the save could not be used, with the reason."""
+    game_id: str | None = None
+    """The game hero this Fribbels hero was matched to (None: no game gear taken)."""
 
 
 @dataclass(slots=True)
@@ -165,11 +170,42 @@ class FribbelsSave:
     warnings: list[str] = field(default_factory=list)
     """Entries of the file that could not be read (each named), never dropped silently."""
     locations: dict[str, tuple[str | None, str]] = field(default_factory=dict)
-    """External id -> (Fribbels hero id or None, where the save puts the piece), for pieces whose place is known."""
+    """External id (game and Fribbels ids) -> (Fribbels hero id or None, where the save puts the piece): on an imported
+    hero, in the game's inventory, or worn by a game hero no Fribbels hero matched (owner None, label "worn ...")."""
+    wearers: dict[str, str] = field(default_factory=dict)
+    """External id -> the game hero wearing the piece, for pieces the save knows the wearer of."""
 
     def elsewhere(self, entry: HeroImport) -> dict[str, str]:
-        """External ids the save puts somewhere other than on this hero."""
-        return {key: label for key, (owner, label) in self.locations.items() if owner != entry.fribbels_id}
+        """External ids the save puts somewhere other than on this hero. A piece worn by an unmatched game hero counts
+        only when this hero has its own game match (else that unmatched hero may be this one)."""
+        return {
+            key: label
+            for key, (owner, label) in self.locations.items()
+            if owner != entry.fribbels_id and (entry.game_id is not None or not label.startswith("worn"))
+        }
+
+
+def game_link_conflict(entry: HeroImport, current: HeroBuild | None, save: FribbelsSave) -> str | None:
+    """Why the save's match of this hero to a game hero contradicts the roster, or None. The roster's game pieces of
+    the hero are worn, in the save, mostly by one other game hero: a Fribbels plan that moved whole builds (which
+    the save alone cannot tell from the game), or gear swapped in the game."""
+    if current is None or entry.game_id is None:
+        return None
+    wearers = Counter(
+        save.wearers[piece.external_id]
+        for piece in current.gear.values()
+        if piece.external_id and piece.external_id in save.wearers
+    )
+    if not wearers:
+        return None
+    top, count = wearers.most_common(1)[0]
+    if top == entry.game_id or count * 2 <= sum(wearers.values()):
+        return None
+    return (
+        f"{count} of the roster's pieces of this hero are worn in the save by another game hero than the one its "
+        "Fribbels equipment matches (a Fribbels plan, or gear swapped in the game): use --trust-save if the save is "
+        "right"
+    )
 
 
 class FribbelsFileError(ValueError):
@@ -209,7 +245,7 @@ def read_fribbels_save(
     worn = _game_gear(fribbels_heroes, saved)
     names, artifact_names = catalog_names(heroes), catalog_names(artifacts)
     for hero in fribbels_heroes:
-        entry = HeroImport(name=hero.name, fribbels_id=hero.id)
+        entry = HeroImport(name=hero.name, fribbels_id=hero.id, game_id=worn[hero.id].game_id)
         save.heroes.append(entry)
         try:
             _hero(entry, hero, names, heroes, artifact_names, worn[hero.id], captured_at)
@@ -220,6 +256,7 @@ def read_fribbels_save(
     used = {id(s) for w in worn.values() for s in w.pieces.values()}
     save.unused_items = sum(1 for s in saved if s.gear is not None and id(s) not in used)
     save.locations = _locations(fribbels_heroes, saved, worn)
+    save.wearers = {key: s.item.wearer for s in saved if s.item.wearer for key in _keys(s)}
     save.warnings.extend(f"{s.label()}: not read ({s.problem})" for s in saved if s.gear is None and not s.reported)
     matched = {w.game_id for w in worn.values() if w.game_id}
     unmatched = [s for s in saved if s.item.wearer and s.item.wearer not in matched]
@@ -260,7 +297,9 @@ def gear_of(item: FribbelsItem) -> Gear:
         for s in item.substats
         for stat in (_stat(s),)
     )
-    external = f"{GAME_ID_PREFIX}{item.ingameId}" if item.ingameId else (f"fribbels:{item.id}" if item.id else None)
+    external = f"{GAME_ID_PREFIX}{item.ingameId}" if item.ingameId else None
+    if external is None and item.id:
+        external = f"{FRIBBELS_ID_PREFIX}{item.id}"
     return Gear(
         slot=slot,
         set_code=set_code,
@@ -300,6 +339,8 @@ class _Worn:
     notes: list[str] = field(default_factory=list)
     unusable: dict[GearSlot, str] = field(default_factory=dict)
     game_id: str | None = None
+    clean: bool = True
+    """False when Fribbels' equipment of the hero and the game's gear of its match differ (the match is by majority)."""
     untracked: set[GearSlot] = field(default_factory=set)
     """Slots filled from Fribbels' own equipment because the save does not say who wears the piece in the game."""
 
@@ -333,26 +374,43 @@ def _game_gear(heroes: Sequence[FribbelsHero], saved: Sequence[_Saved]) -> dict[
     for hero in heroes:
         tracked = [s for s in planned.get(hero.id, []) if s.item.ingameEquippedId is not None]
         wearers = Counter(s.item.wearer for s in tracked if s.item.wearer)
-        if wearers:
-            top, count = wearers.most_common(1)[0]
-            if count * 2 > len(tracked):
-                worn[hero.id].game_id = top
-    claimed = Counter(w.game_id for w in worn.values() if w.game_id)
+        if not wearers:
+            continue
+        top, count = wearers.most_common(1)[0]
+        known, total = sum(wearers.values()), len(by_wearer[top])
+        w = worn[hero.id]
+        # most of its pieces are worn by that game hero, and most of that game hero's pieces are equipped here: no
+        # other Fribbels hero can pass both, so a game hero is never matched twice
+        if count * 2 > known and count * 2 > total:
+            w.game_id, w.clean = top, count == known == total
+            continue
+        why = (
+            f"its Fribbels equipment mixes pieces worn by {len(wearers)} game heroes"
+            if count * 2 <= known
+            else f"its Fribbels equipment holds only {count} of the {total} pieces worn by the game hero most of them "
+            "come from"
+        )
+        w.notes.append(
+            f"the save cannot tell which game hero this is ({why}): game gear not taken; import your account again "
+            "in Fribbels before saving"
+        )
     for hero in heroes:
         w = worn[hero.id]
         mine = planned.get(hero.id, [])
         tracked = [s for s in mine if s.item.ingameEquippedId is not None]
         plan: list[_Saved] = []
-        if w.game_id is not None and claimed[w.game_id] > 1:
-            w.game_id = None
-            w.notes.append("game gear not taken: another hero of the save matches the same game hero")
-        elif w.game_id is not None:
+        if w.game_id is not None:
             candidates = by_wearer[w.game_id]
             moved = [s for s in candidates if s.item.equippedById != hero.id]
             if moved:
                 w.notes.append(f"{_slots(moved)}: worn in the game, moved in Fribbels: the game's piece taken")
             plan = [s for s in tracked if s.item.wearer != w.game_id]
             _fill(w, hero, candidates)
+            if not w.clean:
+                w.notes.append(
+                    f"matched to its game hero by most of its pieces, but Fribbels' equipment differs from the game "
+                    f"(an optimizer plan?): its game gear has confidence {USER_ENTERED}"
+                )
         else:
             plan = tracked
         if plan:
@@ -413,18 +471,29 @@ def _tie_break(hero: FribbelsHero, slot: GearSlot, pieces: Sequence[_Saved]) -> 
 def _locations(
     heroes: Sequence[FribbelsHero], saved: Sequence[_Saved], worn: Mapping[str, _Worn]
 ) -> dict[str, tuple[str | None, str]]:
-    """Where the save puts each piece it knows the place of: on an imported hero, or in the game's inventory."""
+    """Where the save puts each piece it knows the place of: on an imported hero, in the game's inventory, or worn in
+    the game by a hero no Fribbels hero matched."""
     owners = {id(s): hero for hero in heroes for s in worn[hero.id].pieces.values()}
     locations: dict[str, tuple[str | None, str]] = {}
     for s in saved:
-        if s.gear is None or not s.gear.external_id:
-            continue
         hero = owners.get(id(s))
         if hero is not None:
-            locations[s.gear.external_id] = (hero.id, f"on {hero.name}")
-        elif s.item.ingameId and s.item.ingameEquippedId is not None and s.item.wearer is None:
-            locations[s.gear.external_id] = (None, "in the inventory")
+            place: tuple[str | None, str] = (hero.id, f"on {hero.name}")
+        elif s.item.wearer is not None:
+            place = (None, "worn in the game by another hero")
+        elif s.item.ingameId and s.item.ingameEquippedId is not None:
+            place = (None, "in the inventory")
+        else:
+            continue
+        for key in _keys(s):
+            locations[key] = place
     return locations
+
+
+def _keys(s: _Saved) -> list[str]:
+    """Every external id a roster piece may carry for this item (its game id, and Fribbels' id from older imports)."""
+    keys = [f"{GAME_ID_PREFIX}{s.item.ingameId}"] if s.item.ingameId else []
+    return keys + ([f"{FRIBBELS_ID_PREFIX}{s.item.id}"] if s.item.id else [])
 
 
 # ------------------------------------------------------------------------------------------------ heroes
@@ -466,7 +535,7 @@ def _hero(
         elif s.gear.enhance < MAX_ENHANCE:
             estimated.append(slot.value)
             confidence[f"gear.{slot.value}"] = ESTIMATED
-        if not s.item.from_game or slot in worn.untracked:
+        if not s.item.from_game or slot in worn.untracked or not worn.clean:
             confidence[f"gear.{slot.value}"] = USER_ENTERED
     entry.notes.extend(worn.notes)
     entry.unusable = dict(worn.unusable)
@@ -627,7 +696,8 @@ def merge_with_current(
         return build, []
     notes: list[str] = []
     confidence = dict(build.confidence)
-    update: dict[str, Any] = {"skills": current.skills}
+    update: dict[str, Any] = {"skills": current.skills, "note": current.note}
+    _take(confidence, current.confidence, "skills")
     _merge_stars(build, current, update, confidence, notes)
     update["gear"] = _merge_gear(build, current, confidence, notes, unusable or {}, elsewhere or {})
     for name in ("artifact", "imprint", "exclusive_equipment"):

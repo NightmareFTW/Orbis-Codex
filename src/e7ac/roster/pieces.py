@@ -16,6 +16,7 @@ from e7ac.domain.roster import Gear, Substat
 ESTIMATE_BAND: Final = 2
 """How far below the real +N Fribbels' derived +N can be."""
 GAME_ID_PREFIX: Final = "ingame:"
+FRIBBELS_ID_PREFIX: Final = "fribbels:"
 MAX_ENHANCE: Final = 15
 
 
@@ -33,29 +34,40 @@ def enhance_is_estimate(gear: Gear) -> bool:
 
 
 def same_piece(old: Gear, new: Gear) -> bool:
-    """True when both readings agree on everything they both know (different game ids are different pieces)."""
+    """True when both readings agree on everything they both know. Two different ids of one kind (two game ids, or two
+    Fribbels ids) are two pieces; a Fribbels id and a game id may be one piece (Fribbels adds the game id later)."""
     if visible(old) != visible(new):
         return False
-    if old.external_id and new.external_id and old.external_id != new.external_id:
+    if old.external_id and new.external_id and _kind(old) == _kind(new) and old.external_id != new.external_id:
         return False
     return _enhance_agrees(old, new) or _enhance_agrees(new, old)
 
 
+def is_screen_or_manual(gear: Gear) -> bool:
+    """A piece the roster knows from Hero Info (only it shows a score) or from the user's own entry (no source id)."""
+    return gear.score is not None or not (gear.external_id or "").startswith((GAME_ID_PREFIX, FRIBBELS_ID_PREFIX))
+
+
 def combine(old: Gear, new: Gear) -> Gear:
     """One piece from two readings of it (`same_piece`): the newer reading's values, with what only the older one
-    knows (game id, rolls and flags, score), and the real +N rather than Fribbels' estimate."""
-    subs = tuple(
-        n if n.rolls is not None or o.rolls is None else _with_history(n, o)
-        for o, n in zip(old.substats, new.substats, strict=True)
-    )
+    knows (game id, rolls, modified/reforged flags, score), and the real +N rather than Fribbels' estimate. A screen
+    reading (no source id) never knows rolls or flags; a Fribbels reading knows the modified flag."""
+    screen = new.external_id is None
+    subs = tuple(_substat(o, n, screen) for o, n in zip(old.substats, new.substats, strict=True))
+    ids = [i for i in (new.external_id, old.external_id) if i]
+    game_ids = [i for i in ids if i.startswith(GAME_ID_PREFIX)]
     return new.model_copy(
         update={
             "enhance": max(old.enhance, new.enhance),
             "substats": subs,
             "score": new.score if new.score is not None else old.score,
-            "external_id": new.external_id or old.external_id,
+            "external_id": next(iter(game_ids or ids), None),
         }
     )
+
+
+def _kind(gear: Gear) -> str:
+    return (gear.external_id or "").partition(":")[0]
 
 
 def _enhance_agrees(estimated: Gear, other: Gear) -> bool:
@@ -64,6 +76,11 @@ def _enhance_agrees(estimated: Gear, other: Gear) -> bool:
     return enhance_is_estimate(estimated) and estimated.enhance < other.enhance <= estimated.enhance + ESTIMATE_BAND
 
 
-def _with_history(new: Substat, old: Substat) -> Substat:
-    """A substat read without rolls or flags (a screen) takes them from the reading that has them."""
-    return new.model_copy(update={"rolls": old.rolls, "modified": old.modified, "reforged": old.reforged})
+def _substat(old: Substat, new: Substat, screen: bool) -> Substat:
+    return new.model_copy(
+        update={
+            "rolls": new.rolls if new.rolls is not None else old.rolls,
+            "modified": old.modified if screen else new.modified,
+            "reforged": new.reforged or old.reforged,
+        }
+    )

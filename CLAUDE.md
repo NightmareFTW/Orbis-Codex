@@ -91,7 +91,8 @@ Key data facts (details in docs/DATA_SOURCES.md):
   [--dry-run] [--trust-save] [--force]`; reads only the save file made with Fribbels' own tool; gear as worn in the game
   (`ingameEquippedId`, never Fribbels' optimizer plans); exact names only; Fribbels' estimates at lower confidence;
   level/awakening/displayed stats kept from the roster; a save file older than the roster build never replaces it,
-  screen-read gear only with `--trust-save`. Reviewed by a multi-agent adversarial review (26 findings fixed).
+  screen-read or hand-entered pieces only replaced with `--trust-save`. Reviewed by two rounds of multi-agent
+  adversarial review (26 + 13 findings fixed).
   Pending: the user's real save (`fixtures/saves/fribbels.json`, git-ignored) to confirm the format.
 - Next: **M9a** passive watch (path B; first speed up the ~15 s scan).
 - Game client language: English, sometimes Portuguese → `game_language` setting (D39). Windows version shown by doctor.

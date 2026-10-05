@@ -242,7 +242,10 @@ ATK 21→273, HP 32→416.
 - What each field really is (`app/js/lib/scanner.js`, `ItemsRequestHandler.java`, checked 2026-10-05):
   - `ingameEquippedId` = `"" + item.p`, the game hero wearing the piece at the last game import (what "not worn" looks
     like is `assumed`: "0", "-1", "undefined", empty); `equippedById` is Fribbels' planner state, which the optimizer's
-    "Equip" changes without the game. The save keeps no game hero id on heroes.
+    "Equip" changes without the game. The save keeps no game hero id on heroes (`importer.js` gives Fribbels' new
+    heroes their own ids), so the importer infers the match (SPEC D52); after a fresh game import Fribbels re-equips
+    each hero it has with its game pieces (`mergeHeroes`), which makes the match exact. Whole builds swapped in the
+    planner after that import cannot be told from the game.
   - `enhance` of a game-imported piece is derived: `max((min(#ops − 1, countByRank) − offsetByRank) × 3, 0)`, exact
     at +15, a multiple of 3 below (up to 2 under the real +N).
   - `rolls` of game-imported pieces come from `op` (1 + rolls; reforge "u" and modification "c" ops excluded); for

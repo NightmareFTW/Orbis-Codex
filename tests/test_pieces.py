@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from e7ac.domain.codes import Stat
 from e7ac.domain.roster import Gear, GearGrade, GearSlot, StatValue, Substat
-from e7ac.roster.pieces import combine, enhance_is_estimate, same_piece
+from e7ac.roster.pieces import combine, enhance_is_estimate, is_screen_or_manual, same_piece
 
 SCREEN = Gear(
     slot=GearSlot.RING,
@@ -51,3 +51,28 @@ def test_combine_keeps_what_each_reading_knows() -> None:
     for piece in (from_screen, from_save):
         assert (piece.enhance, piece.score, piece.external_id) == (14, 61, "ingame:42")
         assert [(s.rolls, s.modified) for s in piece.substats] == [(3, True), (1, False)]
+
+
+def test_a_fribbels_id_and_a_game_id_can_be_one_piece_but_two_game_ids_cannot() -> None:
+    by_hand = SAVED.model_copy(update={"external_id": "fribbels:abc", "enhance": 14})
+    assert same_piece(by_hand, SAVED.model_copy(update={"enhance": 14}))  # Fribbels added the game id later
+    assert combine(by_hand, SAVED.model_copy(update={"enhance": 14})).external_id == "ingame:42"
+    assert combine(SAVED.model_copy(update={"enhance": 14}), by_hand).external_id == "ingame:42"
+    assert not same_piece(by_hand, by_hand.model_copy(update={"external_id": "fribbels:abd"}))
+
+
+def test_a_screen_reading_never_wipes_flags_it_cannot_see() -> None:
+    edited = SAVED.model_copy(  # edited in Fribbels: rolls are not taken, the modified flag is
+        update={"substats": tuple(s.model_copy(update={"rolls": None}) for s in SAVED.substats), "enhance": 14}
+    )
+    scanned = combine(edited, SCREEN)
+    assert [(s.rolls, s.modified) for s in scanned.substats] == [(None, True), (None, False)]
+    reimported = combine(scanned, edited)
+    assert reimported.substats == scanned.substats  # a later import changes nothing: stable
+
+
+def test_pieces_read_on_screen_or_entered_here_are_told_apart() -> None:
+    assert is_screen_or_manual(SCREEN)  # a score: read on Hero Info
+    assert is_screen_or_manual(SCREEN.model_copy(update={"score": None}))  # no source id: entered by the user
+    assert not is_screen_or_manual(SAVED)
+    assert is_screen_or_manual(combine(SAVED, SCREEN))  # confirmed on screen: still protected
