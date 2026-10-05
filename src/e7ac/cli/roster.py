@@ -8,7 +8,7 @@ from collections import Counter
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Any, Final, NoReturn
+from typing import TYPE_CHECKING, Annotated, Any, Final, NoReturn
 
 import typer
 from pydantic import ValidationError
@@ -44,6 +44,9 @@ from e7ac.storage.models import CatalogEntityRow, HeroSnapshotRow, OwnedHeroRow
 from e7ac.vision.hero_screen import ScreenError, ScreenKind, parse_hero_screen
 from e7ac.vision.image import ImageError, captured_at, expand_image_paths, load_image
 from e7ac.vision.ocr import RapidOcrReader, TextReader
+
+if TYPE_CHECKING:
+    from e7ac.roster.fribbels_import import HeroImport
 
 roster_app = typer.Typer(help="Your heroes: builds with history, validation and JSON backup.")
 
@@ -664,7 +667,10 @@ def scan(
 
 @roster_app.command("import-fribbels")
 def import_fribbels(
-    file: Annotated[Path, typer.Argument(help='A Fribbels Optimizer save ("Save all optimizer data", JSON).')],
+    file: Annotated[
+        Path,
+        typer.Argument(help='Fribbels\' importer data (gear.txt) or an optimizer save ("Save all optimizer data").'),
+    ],
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Read and check only; save nothing.")] = False,
     trust_save: Annotated[
         bool,
@@ -675,13 +681,14 @@ def import_fribbels(
     ] = False,
     force: Annotated[bool, typer.Option(help="Store builds even if validation finds errors.")] = False,
 ) -> None:
-    """Import heroes and their gear from a Fribbels Optimizer save file (path A, SPEC D45/D52).
+    """Import heroes and their gear from Fribbels' files (path A, SPEC D45/D52/D53); only reads that local file.
 
-    Import your account in Fribbels first and save its data; this command only reads that local file. Gear is taken as
-    worn in the game (never Fribbels' optimizer plans), with substat rolls and game ids; level, awakening and the
-    displayed stats are not in the save, so they are kept from the roster (scan Hero Info to fill them). Gear read from
-    the screen is never replaced unless --trust-save: the file's date says when Fribbels wrote it, not when it read
-    the game. One owned copy per hero is updated; several copies are skipped."""
+    Best: gear.txt in the Fribbels saves folder, written by Fribbels' importer right after it reads the game. Every hero
+    of the game comes with its own code and id (copies stay apart), stars, awakening and the gear it wears. An
+    optimizer save ("Save all optimizer data") also works: heroes matched by name, gear as worn in the game (never
+    Fribbels' optimizer plans), no awakening; gear read from the screen is then never replaced unless --trust-save,
+    since that file's date says when Fribbels wrote it, not when it read the game. Level and the displayed stats are
+    in neither file: they are kept from the roster (scan Hero Info to fill them)."""
     from e7ac.roster.fribbels_import import (
         FribbelsFileError,
         game_link_conflict,
@@ -707,30 +714,38 @@ def import_fribbels(
         except FribbelsFileError as exc:
             _fail(f"{file}: {exc}")
         owned_by_code: dict[str, list[OwnedHeroRow]] = {}
+        owned_by_game: dict[str, OwnedHeroRow] = {}
         after: dict[str, HeroBuild] = {}  # every hero's current build once this import is done, by roster label
         for owned, row in list_owned(session):
             owned_by_code.setdefault(owned.hero_code, []).append(owned)
+            if owned.game_id is not None:
+                owned_by_game[owned.game_id] = owned
             if row is not None:
                 after[_label(owned.id, owned.hero_code, heroes)] = build_from_row(session, row)
         touched: set[str] = set()
         in_save = Counter(e.hero_code for e in save.heroes if e.build is not None)
+        main_copies = _main_copies(save.heroes)
         counts = dict.fromkeys(("new", "updated", "unchanged", "skipped"), 0)
         for entry in save.heroes:
             label = f"{entry.name} ({entry.hero_code or '?'})"
             problems = list(entry.problems)
-            if entry.build is not None and in_save[entry.hero_code] > 1:
-                problems.append(f"{in_save[entry.hero_code]} heroes of the save are this hero")
-            copies = owned_by_code.get(entry.hero_code or "", [])
-            if entry.build is not None and len(copies) > 1:
-                listed = ", ".join(f"#{o.id}" for o in copies)
-                problems.append(f"you own several copies ({listed}); Fribbels keeps one per name")
-            current = after.get(_label(copies[0].id, copies[0].hero_code, heroes)) if len(copies) == 1 else None
+            target: OwnedHeroRow | None = None
+            link = False
+            if entry.build is not None:
+                if entry.exact:
+                    target, link, problem = _importer_target(entry, owned_by_game, owned_by_code, main_copies)
+                else:
+                    target, problem = _save_target(entry, in_save, owned_by_game, owned_by_code)
+                if problem:
+                    problems.append(problem)
+            target_label = _label(target.id, target.hero_code, heroes) if target is not None else None
+            current = after.get(target_label) if target_label is not None else None
             if entry.build is not None and current is not None and current.captured_at > entry.build.captured_at:
                 problems.append(
                     f"the roster's build ({current.captured_at:%Y-%m-%d %H:%M} UTC) is newer than the save file "
                     f"({written:%Y-%m-%d %H:%M} UTC)"
                 )
-            conflict = game_link_conflict(entry, current, save) if entry.build is not None else None
+            conflict = game_link_conflict(entry, current, save) if entry.build is not None and not entry.exact else None
             if conflict is not None and not trust_save:
                 problems.append(conflict)
             if entry.build is None or problems:
@@ -741,8 +756,8 @@ def import_fribbels(
                 entry.build, current, unusable=entry.unusable, elsewhere=save.elsewhere(entry)
             )
             notes = [*entry.notes, *notes]
-            if current is not None and not trust_save:
-                changed = [  # pieces read on screen or entered here are never replaced on the file's word alone
+            if current is not None and not trust_save and not entry.exact:
+                changed = [  # pieces read on screen or entered here are never replaced on an optimizer save's word
                     slot.value
                     for slot, piece in current.gear.items()
                     if is_screen_or_manual(piece)
@@ -758,6 +773,8 @@ def import_fribbels(
                     continue
             if current is not None and _same_build(build, current):
                 counts["unchanged"] += 1
+                if link and target is not None and not dry_run:
+                    target.game_id = entry.game_id
                 if notes:
                     typer.echo(f"  unchanged {label}")
                     for note in notes:
@@ -775,26 +792,104 @@ def import_fribbels(
             for note in notes:
                 typer.echo(f"    note: {note}")
             _print_issues(issues)
-            key = _label(copies[0].id, copies[0].hero_code, heroes) if copies else f"new {label}"
+            key = target_label or f"new {label} [{entry.game_id or entry.fribbels_id}]"
             after[key] = build
             touched.add(key)
             if dry_run:
                 continue
-            if copies:
-                add_snapshot(session, copies[0], build)
+            if target is not None:
+                if link:
+                    target.game_id = entry.game_id
+                add_snapshot(session, target, build)
             else:
-                owned_by_code[build.hero_code] = [add_owned_hero(session, build)]
+                created = add_owned_hero(session, build, game_id=entry.game_id if entry.exact else None)
+                owned_by_code.setdefault(build.hero_code, []).append(created)
+                if created.game_id is not None:
+                    owned_by_game[created.game_id] = created
         for warning in [*save.warnings, *_shared_pieces(after, touched)]:
             typer.echo(f"  warning: {warning}", err=True)
         summary = ", ".join(f"{n} {k}" for k, n in counts.items())
+        kind = "Fribbels importer data" if save.importer_data else "Fribbels save"
         typer.echo(
-            f"Fribbels save (file written {written:%Y-%m-%d %H:%M} UTC): {len(save.heroes)} hero(es): {summary}; "
-            f"{save.unused_items} item(s) worn by no hero of the save"
+            f"{kind} (file written {written:%Y-%m-%d %H:%M} UTC): {len(save.heroes)} hero(es): {summary}; "
+            f"{save.unused_items} item(s) worn by no hero of the file"
         )
         if counts["new"] or counts["updated"]:
-            typer.echo("Level, awakening and the displayed stats are not in the save: scan Hero Info to fill them.")
+            missing = "Level and the displayed stats are"
+            if not save.importer_data:
+                missing = "Level, awakening and the displayed stats are"
+            typer.echo(f"{missing} not in the file: scan Hero Info to fill them.")
         if dry_run:
             typer.echo("(dry run: nothing saved)")
+
+
+def _main_copies(entries: list[HeroImport]) -> dict[str, HeroImport | None]:
+    """For each hero code with several copies in importer data, the copy the roster most likely holds (most stars,
+    awakening and gear), or None when copies tie (then the roster's unlinked copy cannot be told apart)."""
+    groups: dict[str, list[HeroImport]] = {}
+    for entry in entries:
+        if entry.exact and entry.build is not None and entry.hero_code:
+            groups.setdefault(entry.hero_code, []).append(entry)
+    main: dict[str, HeroImport | None] = {}
+    for code, copies in groups.items():
+        rank = {id(e): (e.build.stars, e.build.awakening, len(e.build.gear)) for e in copies if e.build is not None}
+        best = max(rank.values())
+        tops = [e for e in copies if rank[id(e)] == best]
+        main[code] = tops[0] if len(tops) == 1 else None
+    return main
+
+
+def _importer_target(
+    entry: HeroImport,
+    owned_by_game: dict[str, OwnedHeroRow],
+    owned_by_code: dict[str, list[OwnedHeroRow]],
+    main_copies: dict[str, HeroImport | None],
+) -> tuple[OwnedHeroRow | None, bool, str]:
+    """(roster copy, link it to this game id, problem) for a hero of importer data; no copy: a new roster hero."""
+    owned = owned_by_game.get(entry.game_id) if entry.game_id else None
+    if owned is not None:
+        if owned.hero_code != entry.hero_code:
+            return None, False, f"game id {entry.game_id} is linked to roster hero #{owned.id} ({owned.hero_code})"
+        return owned, False, ""
+    code = entry.hero_code or ""
+    unlinked = [o for o in owned_by_code.get(code, []) if o.game_id is None]
+    if not unlinked:
+        return None, False, ""
+    main = main_copies.get(code)
+    listed = ", ".join(f"#{o.id}" for o in unlinked)
+    if main is None:
+        return (
+            None,
+            False,
+            (
+                "several copies in the game look alike (same stars, awakening and gear count), and the roster's "
+                f"{listed} is not linked to one yet: cannot tell which"
+            ),
+        )
+    if main is not entry:
+        return None, False, ""  # the roster's copy is another, better copy of the file: this one is new
+    if len(unlinked) > 1:
+        return None, False, f"the roster has several copies not linked to the game ({listed}): cannot tell which"
+    return unlinked[0], True, ""
+
+
+def _save_target(
+    entry: HeroImport,
+    in_save: Counter[str | None],
+    owned_by_game: dict[str, OwnedHeroRow],
+    owned_by_code: dict[str, list[OwnedHeroRow]],
+) -> tuple[OwnedHeroRow | None, str]:
+    """(roster copy, problem) for a hero of an optimizer save (one hero per name)."""
+    if in_save[entry.hero_code] > 1:
+        return None, f"{in_save[entry.hero_code]} heroes of the save are this hero"
+    linked = owned_by_game.get(entry.game_id) if entry.game_id else None
+    if linked is not None and linked.hero_code == entry.hero_code:
+        return linked, ""  # the copy whose game gear the save's match points to
+    copies = owned_by_code.get(entry.hero_code or "", [])
+    if len(copies) > 1:
+        listed = ", ".join(f"#{o.id}" for o in copies)
+        return None, f"you own several copies ({listed}); Fribbels keeps one per name"
+    return (copies[0] if copies else None), ""
 
 
 def _label(owned_id: int, hero_code: str, heroes: dict[str, ResolvedEntity]) -> str:

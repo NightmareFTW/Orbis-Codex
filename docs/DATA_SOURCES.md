@@ -257,8 +257,21 @@ ATK 21→273, HP 32→416.
   when unset (`app/js/lib/dialog.js`). Fribbels' computed stats/CP are in the save but are not game readings.
 - Not in the save: level, awakening (read by the importer but not kept on the hero), skill enhancements, displayed stats.
 - Fribbels' importer keeps one hero per name and only items from a chosen "+N" up (`scanner.js` filterItems).
-- Status `community` (derived from the code; checked against synthetic files only). **Pending:** the user's real save
-  (`fixtures/saves/fribbels.json`, git-ignored) for the golden test. The 2020 sample in the repo (`testgear.json`) is
+- Checked on the user's real export (2026-10-05, `fixtures/saves/fribbels.json`, git-ignored, golden test): 241 heroes
+  (the 6★ and 5★ ones, one per name), 1539 items; "not worn" is `"undefined"`; every item has `op` and `rolls`; 131
+  modified substats; one item with level 0; no typed artifact/imprint/EE. Items of sets Fribbels does not know are left
+  out (349 here, 8 of them worn).
+
+### Importer data (`gear.txt`, preferred input, SPEC D53)
+- Written by Fribbels' importer (`scanner.js`) in the saves folder right after it reads the game: `{"items": [...],
+  "heroes": [...]}` with the game's own fields plus Fribbels' conversions. Checked on the user's file (2026-10-05):
+  - heroes = every unit of the account (381; 63 entries are extra copies of a hero): `code` (hero code), `id` (game
+    id), `name`, `g` (stars), `z` (awakening, left out when 0 — `assumed`; checked on 7 heroes against Hero Info),
+    plus `d`, `s`, `exp`, `opt`, `f`, `st`, `stree`… (not used; NV-31, NV-32);
+  - items (1888, the whole inventory): Fribbels' fields (`gear`, `rank`, `set` — absent for sets it does not know —,
+    `enhance`, `level`, `main`, `substats` with `rolls`/`modified`, `op`, `ingameId`, `ingameEquippedId`) plus the game's
+    `f` (set code, e.g. `set_weak`, `set_might`, `set_chase`, `set_opener`), `p` (the wearer's game id, only on worn
+    items; equal to `ingameEquippedId`), `code`, `type`…; no artifacts, no exclusive equipment. The 2020 sample in the repo (`testgear.json`) is
   an older layout (heroes with final stats + `equipment` by slot).
 
 ---

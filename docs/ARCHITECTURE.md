@@ -267,6 +267,7 @@ erDiagram
   OWNED_HERO {
     int id PK
     text hero_code FK
+    text game_id UK "nullable: the game's id of this copy (D53)"
     bool arena_relevant
     text note
   }

@@ -46,10 +46,12 @@ def add_owned_hero(
     uid: str | None = None,
     created_at: datetime | None = None,
     snapshot_uid: str | None = None,
+    game_id: str | None = None,
 ) -> OwnedHeroRow:
     owned = OwnedHeroRow(
         uid=uid or new_uid(),
         hero_code=build.hero_code,
+        game_id=game_id,
         arena_relevant=arena_relevant,
         note=note,
         created_at=created_at or datetime.now(UTC),

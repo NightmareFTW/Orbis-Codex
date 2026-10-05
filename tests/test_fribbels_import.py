@@ -710,7 +710,8 @@ def test_a_slot_missing_from_the_save_keeps_the_roster_piece_unless_the_save_put
     merged, notes = merge_with_current(partial, current)
     assert merged.gear[GearSlot.BOOTS] == current.gear[GearSlot.BOOTS] and merged.confidence["gear.boots"] == 0.8
     assert notes == [
-        "boots: not in the save (Fribbels imports only items from a chosen +N up): kept the roster's piece"
+        "boots: not in the file (Fribbels leaves out items below its import +N and sets it does not know): kept the "
+        "roster's piece"
     ]
     assert merged.final_stats == FINAL  # the build is still the same
     unusable, why = merge_with_current(partial, current, unusable={GearSlot.BOOTS: "item level unknown"})
@@ -845,7 +846,7 @@ def test_cli_imports_then_reports_unchanged(tmp_path: Path, synthetic_catalog: l
     assert "skipped   Nobody (?): no catalog hero is called 'Nobody'" in first.stdout
     summary = "Fribbels save (file written 2026-10-05 12:00 UTC): 2 hero(es): 1 new, 0 updated, 0 unchanged, 1 skipped"
     assert summary in first.stdout
-    assert "1 item(s) worn by no hero of the save" in first.stdout
+    assert "1 item(s) worn by no hero of the file" in first.stdout
     build = show()
     assert build["source"] == "fribbels" and build["artifact"] == {"code": "efz01", "level": 15}
     assert build["gear"]["weapon"]["external_id"] == "ingame:9001"
@@ -1044,7 +1045,10 @@ def test_the_users_save_is_read() -> None:
     text = (root / "saves" / "fribbels.json").read_text(encoding="utf-8-sig")
     save = read_fribbels_save(text, {}, {}, captured_at=NOW)
     assert save.heroes, "no hero read"
-    bad = [w for w in save.warnings if w.startswith(("item #", "hero #")) or "unknown hero id" in w]
+    unknown = "(0 in the save)"  # Fribbels' own "unknown" values: reported, not a format problem
+    bad = [
+        w for w in save.warnings if (w.startswith(("item #", "hero #")) and unknown not in w) or "unknown hero id" in w
+    ]
     assert not bad, bad[:5]
     items = [FribbelsItem.model_validate(raw) for raw in json.loads(text)["items"]]  # all read, as checked above
     assert any(i.wearer is not None for i in items), "no game wearer recorded (what does 'not worn' look like?)"

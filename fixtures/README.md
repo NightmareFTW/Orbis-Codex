@@ -16,6 +16,7 @@ Expected local layout (not committed):
 | `fixtures/screenshots/hero_manage_bbk.png` | Hero management screen (sets + gear stat contribution) |
 | `fixtures/screenshots/stove_guide_lisette.png` | Stove Strategy Guide page (reference only) |
 | `fixtures/saves/fribbels.json` | Fribbels E7 Optimizer save ("Save all optimizer data"); golden test of `roster import-fribbels` |
+| `fixtures/saves/gear.txt` | Fribbels importer data (written when Fribbels reads the game); golden test of `roster import-fribbels` |
 | `fixtures/stove/**.json` | Saved real Stove API responses (integration tests) |
 
 Unit tests use small **synthetic** responses committed under `tests/` that mimic the schemas

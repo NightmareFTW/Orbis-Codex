@@ -93,7 +93,11 @@ Key data facts (details in docs/DATA_SOURCES.md):
   level/awakening/displayed stats kept from the roster; a save file older than the roster build never replaces it,
   screen-read or hand-entered pieces only replaced with `--trust-save`. Reviewed by two rounds of multi-agent
   adversarial review (26 + 13 findings fixed).
-  Pending: the user's real save (`fixtures/saves/fribbels.json`, git-ignored) to confirm the format.
+  Checked on the user's real export (local fixture `fixtures/saves/fribbels.json`).
+- **M4.1 Fribbels importer data — done** (SPEC D53): the same command reads `gear.txt` (Fribbels' importer output,
+  preferred): every hero by its own code and game id (`owned_hero.game_id`, migration 0005; copies kept apart), stars,
+  awakening, worn gear incl. sets Fribbels does not know. Fields `d`/`s` not used yet (NV-31/32). Real files are local
+  fixtures (`fixtures/saves/{fribbels.json,gear.txt}`), never committed.
 - Next: **M9a** passive watch (path B; first speed up the ~15 s scan).
 - Game client language: English, sometimes Portuguese → `game_language` setting (D39). Windows version shown by doctor.
 - Roster import paths (D45), picked by the user: A = Fribbels save file (M4, done), B = passive screen
@@ -102,5 +106,5 @@ Key data facts (details in docs/DATA_SOURCES.md):
 - Network import "like Fribbels" (D38): approved by the user, **paused**. This session's safety system blocked building a
   traffic-capture + third-party-upload tool. Resume only after the user explicitly allows it; until then the golden
   rule above (no network capture) applies unchanged.
-- Still missing: the user's screen captures (SPEC Q2) — needed for M5b/M6; a Fribbels save only for the optional M4.
+- Received: the user's screen captures and Fribbels files (local fixtures only).
   The repo is **public**: never commit captures or save files.

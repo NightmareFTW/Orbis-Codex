@@ -1,8 +1,13 @@
-"""Import a Fribbels Optimizer save file (M4, path A of SPEC D45; rules in D52): the user runs Fribbels and its own
-importer, saves "Save all optimizer data", and this module reads that local JSON file. Orbis Codex never captures
-game traffic.
+"""Import Fribbels' local files (M4, path A of SPEC D45; rules in D52, D53): the user runs Fribbels and its own
+importer, and this module reads the files it leaves in its saves folder. Orbis Codex never captures game traffic.
 
-File format, from Fribbels' code (status `community` until checked against a real save of the user's):
+Two formats, auto-detected:
+- importer data (`gear.txt`, preferred, D53): written by Fribbels' importer when it reads the game; the game's own
+  units (hero `code`, game `id`, stars `g`, awakening `z`) and items (wearer `p`/`ingameEquippedId`, game set `f`),
+  so nothing is inferred (`_read_importer_data`);
+- the optimizer save ("Save all optimizer data", D52), described below; checked on the user's real export.
+
+Optimizer save format, from Fribbels' code:
 - `app/js/lib/saves.js`: `{"heroes": [...], "items": [...]}`, the backend objects serialised by Gson;
 - items (`backend/.../model/Item.java`): `gear` ("Weapon"…), `rank` ("Epic"…), `set` ("SpeedSet"…), `enhance`,
   `level` (item level), `main` and `substats` (`model/Stat.java`: `type` "AttackPercent"…, `value` with rates in
@@ -48,7 +53,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from e7ac.catalog.names import NameIndex
 from e7ac.catalog.resolve import ResolvedEntity
-from e7ac.domain.codes import SourceId, Stat
+from e7ac.domain.codes import SourceId, Stat, is_hero_code, is_set_code
 from e7ac.domain.roster import (
     ArtifactRef,
     BuildSource,
@@ -116,7 +121,10 @@ class FribbelsItem(_Model):
     equippedById: str | None = None  # noqa: N815
     gear: str
     rank: str
-    set: str
+    set: str | None = None
+    """Fribbels' set name; absent for sets Fribbels does not know yet (importer data)."""
+    f: str | None = None
+    """The game's set code (importer data only, e.g. "set_speed")."""
     enhance: int
     level: int
     main: FribbelsStat
@@ -133,6 +141,17 @@ class FribbelsItem(_Model):
         """The game hero wearing the piece at the last game import (None: not worn, or no game data)."""
         wearer = (self.ingameEquippedId or "").strip()
         return None if wearer.casefold() in NO_WEARER else wearer
+
+
+class GameHero(_Model):
+    """A hero of Fribbels' importer data (`gear.txt`): the game's own unit as Fribbels' scanner wrote it
+    (`scanner.js` convertUnits: `stars = g`, `awaken = z`)."""
+
+    id: str
+    code: str
+    name: str = ""
+    g: int | None = None
+    z: int | None = None
 
 
 class FribbelsHero(_Model):
@@ -160,10 +179,14 @@ class HeroImport:
     """Slots whose piece in the save could not be used, with the reason."""
     game_id: str | None = None
     """The game hero this Fribbels hero was matched to (None: no game gear taken)."""
+    exact: bool = False
+    """True for importer data: the hero code and game id are the game's own, nothing is inferred."""
 
 
 @dataclass(slots=True)
 class FribbelsSave:
+    importer_data: bool = False
+    """True for Fribbels' importer data (`gear.txt`, the game's own heroes and items), False for an optimizer save."""
     heroes: list[HeroImport] = field(default_factory=list)
     unused_items: int = 0
     """Readable pieces worn by no imported hero (inventory, plans, heroes Fribbels does not have)."""
@@ -230,6 +253,8 @@ def read_fribbels_save(
         or not isinstance(data.get("items"), list)
     ):
         raise FribbelsFileError('not a Fribbels save: "heroes" and "items" lists expected ("Save all optimizer data")')
+    if is_importer_data(data):
+        return _read_importer_data(data, heroes, captured_at)
     save = FribbelsSave()
     saved = _items(data["items"], save.warnings)
     fribbels_heroes: list[FribbelsHero] = []
@@ -286,7 +311,12 @@ def gear_of(item: FribbelsItem) -> Gear:
     are taken only from pieces imported from the game (`op`): on pieces added or edited by hand they are guesses."""
     slot = _mapped(SLOTS, item.gear, "gear slot")
     grade = _mapped(RANKS, item.rank, "rank")
-    set_code = _mapped(SETS, item.set, "set")
+    if item.f is not None and is_set_code(item.f):
+        set_code = item.f  # the game's own set code (importer data): also for sets Fribbels does not know
+    elif item.set is not None:
+        set_code = _mapped(SETS, item.set, "set")
+    else:
+        raise ValueError("no set")
     if item.level == 0:
         raise ValueError("item level unknown (0 in the save)")
     if item.main.value == 0:
@@ -433,7 +463,7 @@ def _slots(pieces: Iterable[_Saved]) -> str:
     return ", ".join(sorted(str(s.item.gear).lower() for s in pieces))
 
 
-def _fill(worn: _Worn, hero: FribbelsHero, candidates: Iterable[_Saved]) -> None:
+def _fill(worn: _Worn, hero: FribbelsHero | None, candidates: Iterable[_Saved]) -> None:
     by_slot: dict[GearSlot | None, list[_Saved]] = {}
     for s in candidates:
         by_slot.setdefault(s.slot, []).append(s)
@@ -457,8 +487,10 @@ def _fill(worn: _Worn, hero: FribbelsHero, candidates: Iterable[_Saved]) -> None
             worn.pieces[slot] = chosen
 
 
-def _tie_break(hero: FribbelsHero, slot: GearSlot, pieces: Sequence[_Saved]) -> _Saved | None:
+def _tie_break(hero: FribbelsHero | None, slot: GearSlot, pieces: Sequence[_Saved]) -> _Saved | None:
     """Several pieces claim one slot: the one Fribbels equips on the hero, if that settles it."""
+    if hero is None:
+        return None
     equipped = [s for s in pieces if s.item.equippedById == hero.id]
     if len(equipped) == 1:
         return equipped[0]
@@ -496,6 +528,147 @@ def _keys(s: _Saved) -> list[str]:
     return keys + ([f"{FRIBBELS_ID_PREFIX}{s.item.id}"] if s.item.id else [])
 
 
+# ------------------------------------------------------------------------------------------------ importer data
+
+
+ABSENT_AWAKENING: Final = 0.8
+"""Confidence of awakening 0 read from an absent `z` (the game leaves zero fields out; `assumed`)."""
+
+
+def is_importer_data(data: Mapping[str, Any]) -> bool:
+    """Fribbels' importer data (`gear.txt`): its heroes are the game's units (a hero `code` and the stars `g`)."""
+    heroes = data.get("heroes")
+    return isinstance(heroes, list) and any(isinstance(h, dict) and "code" in h and "g" in h for h in heroes[:50])
+
+
+def _read_importer_data(
+    data: Mapping[str, Any], heroes: Mapping[str, ResolvedEntity], captured_at: datetime
+) -> FribbelsSave:
+    """Builds from Fribbels' importer data: every game hero by its own code and game id, wearing the pieces the game
+    puts on it (`ingameEquippedId`), with its stars and awakening. Nothing is inferred and no name is matched."""
+    save = FribbelsSave(importer_data=True)
+    saved = _items(data["items"], save.warnings)
+    game_heroes: list[GameHero] = []
+    for index, raw in enumerate(data["heroes"]):
+        try:
+            game_heroes.append(GameHero.model_validate(raw))
+        except ValidationError as exc:
+            save.warnings.append(f"hero #{index + 1}: not read ({_first_error(exc)})")
+    by_wearer: dict[str, list[_Saved]] = {}
+    for s in saved:
+        if s.item.wearer:
+            by_wearer.setdefault(s.item.wearer, []).append(s)
+    worn: dict[str, _Worn] = {}
+    for hero in game_heroes:
+        w = worn[hero.id] = _Worn(game_id=hero.id)
+        _fill(w, None, by_wearer.get(hero.id, []))
+        entry = HeroImport(name=hero.name or hero.code, fribbels_id=hero.id, game_id=hero.id, exact=True)
+        save.heroes.append(entry)
+        try:
+            _game_hero(entry, hero, heroes, w, captured_at)
+        except (ValidationError, ValueError) as exc:  # one odd hero never stops the import of the others
+            entry.build = None
+            reason = _first_error(exc) if isinstance(exc, ValidationError) else str(exc)
+            entry.problems.append(f"not read: {reason}")
+    known = {hero.id for hero in game_heroes}
+    used = {id(s) for w in worn.values() for s in w.pieces.values()}
+    save.unused_items = sum(1 for s in saved if s.gear is not None and id(s) not in used)
+    names = {hero.id: hero.name or hero.code for hero in game_heroes}
+    for s in saved:
+        wearer = s.item.wearer
+        if wearer in known:
+            place: tuple[str | None, str] = (wearer, f"on {names[wearer]}")
+        elif wearer is not None:
+            place = (None, "worn in the game by a hero missing from the file")
+        else:
+            place = (None, "in the inventory")
+        for key in _keys(s):
+            save.locations[key] = place
+    save.wearers = {key: s.item.wearer for s in saved if s.item.wearer for key in _keys(s)}
+    save.warnings.extend(f"{s.label()}: not read ({s.problem})" for s in saved if s.gear is None and not s.reported)
+    missing = [s for s in saved if s.item.wearer and s.item.wearer not in known]
+    if missing:
+        save.warnings.append(f"{len(missing)} item(s) worn by hero ids missing from the file's heroes: not taken")
+    return save
+
+
+def _game_hero(
+    entry: HeroImport,
+    hero: GameHero,
+    heroes: Mapping[str, ResolvedEntity],
+    worn: _Worn,
+    captured_at: datetime,
+) -> None:
+    if not is_hero_code(hero.code):
+        entry.problems.append(f"{hero.code} is not a hero code (a monster or material): not imported")
+        return
+    if hero.code not in heroes:
+        entry.problems.append(f"{hero.code} is not in the catalog (run e7 catalog sync)")
+        return
+    entry.hero_code = hero.code
+    entry.name = heroes[hero.code].name
+    if hero.g not in range(1, 7):
+        entry.problems.append(f"stars {hero.g!r} not usable: not imported")
+        return
+    assert hero.g is not None
+    stars = hero.g
+    confidence: dict[str, float] = {"level": ASSUMED}
+    if hero.z is None:
+        awakening = 0
+        confidence["awakening"] = ABSENT_AWAKENING
+    elif 0 <= hero.z <= stars:
+        awakening = hero.z
+    else:
+        entry.notes.append(f"awakening {hero.z!r} not usable with {stars} stars: assumed {stars}")
+        awakening, confidence["awakening"] = stars, ASSUMED
+    entry.notes.extend(worn.notes)
+    entry.unusable = dict(worn.unusable)
+    gear = _gear_confidence(worn, confidence, entry)
+    entry.build = HeroBuild.model_validate(
+        {
+            "hero_code": hero.code,
+            "stars": stars,
+            "awakening": awakening,
+            "level": stars * 10,  # MECH-HERO-01: the data has the hero's experience, not its level
+            "gear": gear,
+            "captured_at": captured_at,
+            "source": BuildSource.FRIBBELS,
+            "confidence": confidence,
+        }
+    )
+
+
+def _gear_confidence(worn: _Worn, confidence: dict[str, float], entry: HeroImport) -> dict[GearSlot, Gear]:
+    """The worn pieces, with lower confidences (and notes) for Fribbels' estimates."""
+    gear: dict[GearSlot, Gear] = {}
+    by_hand: list[str] = []
+    estimated: list[str] = []
+    for slot, s in worn.pieces.items():
+        assert s.gear is not None
+        gear[slot] = s.gear
+        if not s.item.from_game:
+            by_hand.append(slot.value)
+        elif s.gear.enhance < MAX_ENHANCE:
+            estimated.append(slot.value)
+            confidence[f"gear.{slot.value}"] = ESTIMATED
+        if not s.item.from_game or slot in worn.untracked or not worn.clean:
+            confidence[f"gear.{slot.value}"] = USER_ENTERED
+    if worn.untracked:
+        entry.notes.append(
+            f"{', '.join(sorted(slot.value for slot in worn.untracked))}: equipped in Fribbels, and the save does not "
+            f"say who wears it in the game (added by hand or an old import): confidence {USER_ENTERED}"
+        )
+    if by_hand:
+        entry.notes.append(
+            f"{', '.join(by_hand)}: added or edited by hand in Fribbels: confidence {USER_ENTERED}, rolls not taken"
+        )
+    if estimated:
+        entry.notes.append(
+            f"{', '.join(estimated)}: +N below +15 is Fribbels' estimate (a multiple of 3, up to 2 below the real one)"
+        )
+    return gear
+
+
 # ------------------------------------------------------------------------------------------------ heroes
 
 
@@ -524,34 +697,9 @@ def _hero(
         confidence["stars"] = ASSUMED
     else:
         confidence["stars"] = USER_ENTERED  # from the game at Fribbels' first import, then editable there
-    gear: dict[GearSlot, Gear] = {}
-    by_hand: list[str] = []
-    estimated: list[str] = []
-    for slot, s in worn.pieces.items():
-        assert s.gear is not None
-        gear[slot] = s.gear
-        if not s.item.from_game:
-            by_hand.append(slot.value)
-        elif s.gear.enhance < MAX_ENHANCE:
-            estimated.append(slot.value)
-            confidence[f"gear.{slot.value}"] = ESTIMATED
-        if not s.item.from_game or slot in worn.untracked or not worn.clean:
-            confidence[f"gear.{slot.value}"] = USER_ENTERED
     entry.notes.extend(worn.notes)
     entry.unusable = dict(worn.unusable)
-    if worn.untracked:
-        entry.notes.append(
-            f"{', '.join(sorted(slot.value for slot in worn.untracked))}: equipped in Fribbels, and the save does not "
-            f"say who wears it in the game (added by hand or an old import): confidence {USER_ENTERED}"
-        )
-    if by_hand:
-        entry.notes.append(
-            f"{', '.join(by_hand)}: added or edited by hand in Fribbels: confidence {USER_ENTERED}, rolls not taken"
-        )
-    if estimated:
-        entry.notes.append(
-            f"{', '.join(estimated)}: +N below +15 is Fribbels' estimate (a multiple of 3, up to 2 below the real one)"
-        )
+    gear = _gear_confidence(worn, confidence, entry)
     entity = heroes[code]
     data: dict[str, Any] = {
         "hero_code": code,
@@ -773,7 +921,7 @@ def _merge_gear(
                 reason = (
                     f"the save's piece is not usable ({unusable[slot]})"
                     if slot in unusable
-                    else "not in the save (Fribbels imports only items from a chosen +N up)"
+                    else "not in the file (Fribbels leaves out items below its import +N and sets it does not know)"
                 )
                 notes.append(f"{slot.value}: {reason}: kept the roster's piece")
             continue

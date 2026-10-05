@@ -48,6 +48,15 @@ Checkboxes: `[x]` done · `[ ]` pending. Milestones are small vertical slices; o
   - **How to try:** in Fribbels, import your account from the game and use "Save all optimizer data"; then
     `.\OrbisCodex.cmd roster import-fribbels "$HOME\Documents\FribbelsOptimizerSaves\<file>.json" --dry-run`, and again
     without `--dry-run` to store it (`... roster list` shows the heroes).
+- [x] **M4.1 Fribbels importer data** *(SPEC D53)* — `e7 roster import-fribbels` also reads `gear.txt` (auto-detected),
+  the file Fribbels' importer writes when it reads the game: every hero by its own code and game id (copies kept apart,
+  `owned_hero.game_id`, migration 0005), stars, awakening, the gear it wears (sets Fribbels does not know included).
+  - Acceptance: the user's real files import (378 heroes from gear.txt; a second run reports them unchanged; the export
+    on top agrees on 231 heroes); golden tests on both files skip cleanly without them.
+  - ✅ Done 2026-10-05.
+  - **How to try:** after Fribbels' import from the game,
+    `.\OrbisCodex.cmd roster import-fribbels "$HOME\Documents\FribbelsOptimizerSaves\gear.txt" --dry-run`, then again
+    without `--dry-run`; `... roster list` shows every hero with its stars and awakening.
 - [x] **M5a Capture tooling** — read-only game-window locator (window title/class + system process list, never a handle to the game), `mss` capture of the window's client area, blank-frame check, lossless PNG, `e7 capture` (one shot, `--delay`, `--list-windows`, `--hwnd`) and a `--hotkey` scan mode (RegisterHotKey, no keyboard hook); `e7 doctor` reports the game window; a guard test forbids process handles, memory access, input injection, keyboard hooks and packet capture anywhere in the code.
   - Acceptance: tests with fake windows/backends on every OS, real window listing and screen grab on the Windows CI runner; the user captures the screens listed in SPEC Q2 with it.
   - ✅ Done 2026-10-04 (in-game check pending: the window identifiers of the Stove client are community-sourced).
