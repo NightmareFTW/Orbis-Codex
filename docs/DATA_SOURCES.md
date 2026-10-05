@@ -231,17 +231,29 @@ ATK 21→273, HP 32→416.
   do that** (SPEC D36). We only read a save file the user already has (optional M4).
 
 ### Save file (read by `e7 roster import-fribbels`, M4 / SPEC D52)
-- Written by Fribbels' "Save all optimizer data" (default folder `Documents/FribbelsOptimizerSaves/`, also
-  `autosave.json`): `{"heroes": [...], "items": [...]}`, the backend objects serialised by Gson (`app/js/lib/saves.js`).
+- Written by Fribbels' "Save all optimizer data" as a dated `<date>-export.json` (default folder
+  `Documents/FribbelsOptimizerSaves/`). ⚠️ `autosave.json` there is rewritten on every load, save and most edits, so its
+  file time says nothing about when the data was read from the game: prefer an export made right after Fribbels'
+  game import. Shape: `{"heroes": [...], "items": [...]}`, the backend objects serialised by Gson (`app/js/lib/saves.js`).
 - Items (`backend/.../model/Item.java`): `gear` ("Weapon"…"Boots"), `rank` ("Normal"…"Epic"), `set` ("SpeedSet"… →
   catalog code via `SET_PIECES`), `enhance`, `level`, `main` and `substats` (`model/Stat.java`: `type`
-  "AttackPercent"…, integer `value` — rates in percent —, `rolls`, `modified`), `id`, `ingameId`, `equippedById`; also
-  `wss`, `locked`, reforge fields… (not read).
-- Heroes (`model/Hero.java`): `id`, `name`, `stars`, and the bonuses typed by the user in Fribbels: `artifactName`,
-  `artifactLevel`, `imprintNumber` (the hero's own imprint), `eeNumber` — strings, "None" when unset
-  (`app/js/lib/dialog.js`). Fribbels' computed stats/CP are in the save but are not game readings (not taken).
-- Not in the save: level, awakening, skill enhancements, displayed stats.
-- Fribbels' importer keeps one hero per name and only items from a chosen "+N" up (`scanner.js`).
+  "AttackPercent"…, `value` — rates in percent, rounded to 0.1 —, `rolls`, `modified`), `op` (the game's raw data),
+  `id` (Fribbels'), `ingameId`, `ingameEquippedId`, `equippedById`; also `wss`, `locked`, reforge fields… (not read).
+- What each field really is (`app/js/lib/scanner.js`, `ItemsRequestHandler.java`, checked 2026-10-05):
+  - `ingameEquippedId` = `"" + item.p`, the game hero wearing the piece at the last game import (what "not worn" looks
+    like is `assumed`: "0", "-1", "undefined", empty); `equippedById` is Fribbels' planner state, which the optimizer's
+    "Equip" changes without the game. The save keeps no game hero id on heroes.
+  - `enhance` of a game-imported piece is derived: `max((min(#ops − 1, countByRank) − offsetByRank) × 3, 0)`, exact
+    at +15, a multiple of 3 below (up to 2 under the real +N).
+  - `rolls` of game-imported pieces come from `op` (1 + rolls; reforge "u" and modification "c" ops excluded); for
+    pieces added or edited by hand (`op` dropped) Fribbels guesses them (`reforge.js`).
+  - 0 as `main.value` or `level` means "unknown" (`convertMainStat`, `convertLevel`, `itemAugmenter.fixProblemItem`).
+- Heroes (`model/Hero.java`): `id` (Fribbels'), `name`, `stars` (the game's grade for a newly imported hero, never
+  refreshed later; editable in the bonus dialog, 6 or 5), `equipment` by slot, and the bonuses typed by the user in
+  Fribbels: `artifactName`, `artifactLevel`, `imprintNumber` (the hero's own imprint), `eeNumber` — strings, "None"
+  when unset (`app/js/lib/dialog.js`). Fribbels' computed stats/CP are in the save but are not game readings.
+- Not in the save: level, awakening (read by the importer but not kept on the hero), skill enhancements, displayed stats.
+- Fribbels' importer keeps one hero per name and only items from a chosen "+N" up (`scanner.js` filterItems).
 - Status `community` (derived from the code; checked against synthetic files only). **Pending:** the user's real save
   (`fixtures/saves/fribbels.json`, git-ignored) for the golden test. The 2020 sample in the repo (`testgear.json`) is
   an older layout (heroes with final stats + `equipment` by slot).

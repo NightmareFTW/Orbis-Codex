@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import Mapping, Sequence
 
 from e7ac.catalog.facts import EntityType, Fact
@@ -254,6 +255,40 @@ def test_a_rescan_keeps_what_the_screen_cannot_show_of_the_same_piece() -> None:
     changed = [piece(GearSlot.WEAPON, read(Stat.ATK, 540.0), SUBS), *FULL[1:]]
     other = scan(images(changed), existing=existing)
     assert other.build is not None and other.build.gear[GearSlot.WEAPON].external_id is None  # another piece
+
+
+def test_a_scan_after_a_fribbels_import_keeps_rolls_and_game_id_and_takes_the_real_plus_n() -> None:
+    first = scan(images())
+    assert first.build is not None
+    weapon = first.build.gear[GearSlot.WEAPON]
+    imported = weapon.model_copy(  # as a Fribbels save gives it: game id and rolls, no score, +N estimated as 12
+        update={
+            "enhance": 12,
+            "score": None,
+            "external_id": "ingame:9001",
+            "substats": tuple(s.model_copy(update={"rolls": 2, "modified": True}) for s in weapon.substats),
+        }
+    )
+    existing = first.build.model_copy(update={"gear": {**first.build.gear, GearSlot.WEAPON: imported}})
+    real = PieceRead(
+        GearSlot.WEAPON,
+        read(Stat.ATK, 525.0),
+        tuple(SUBS),
+        Read(90, 1.0),
+        Read(14, 1.0),
+        Read(80, 1.0),
+        Read("red", 1.0),
+        SetMatch("set_speed", "set_speed", 0.9, "set_att", 0.3, BOX),
+        (),
+    )
+    again = scan(images([real, *FULL[1:]]), existing=existing)
+    assert again.build is not None
+    kept = again.build.gear[GearSlot.WEAPON]
+    assert (kept.enhance, kept.score, kept.external_id) == (14, 80, "ingame:9001")
+    assert all(s.rolls == 2 and s.modified for s in kept.substats)
+    far = dataclasses.replace(real, enhance=Read(15, 1.0))  # +15 is beyond the estimate's band: another piece
+    other = scan(images([far, *FULL[1:]]), existing=existing)
+    assert other.build is not None and other.build.gear[GearSlot.WEAPON].external_id is None
 
 
 def test_reader_warnings_and_contract_errors_block_only_their_piece() -> None:

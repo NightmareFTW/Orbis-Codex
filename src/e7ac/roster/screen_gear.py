@@ -36,6 +36,7 @@ from e7ac.domain.roster import (
     StatValue,
     Substat,
 )
+from e7ac.roster.pieces import combine, same_piece
 from e7ac.roster.validation import Severity, validate_gear
 
 if TYPE_CHECKING:  # the image readers import OpenCV: loaded only when a capture is read
@@ -178,8 +179,8 @@ def _gear(images: HeroImageReading, existing: HeroBuild | None, data: dict[str, 
         made, certainty, missing = _piece(piece)
         if made is not None:
             same = current.get(slot)
-            # the screen does not show rolls, modified/reforged flags or the source id: keep them for the same piece
-            gear[slot] = same if same is not None and _visible(same) == _visible(made) else made
+            # the screen does not show rolls, modified/reforged flags or the game id: keep them for the same piece
+            gear[slot] = combine(same, made) if same is not None and same_piece(same, made) else made
             confidence[f"gear.{slot.value}"] = certainty
             continue
         what = "; ".join(missing)
@@ -189,13 +190,6 @@ def _gear(images: HeroImageReading, existing: HeroBuild | None, data: dict[str, 
         else:
             notes.append(f"{slot.value}: not stored ({what}): rescan, or enter it with e7 roster edit")
     data["gear"] = gear
-
-
-def _visible(gear: Gear) -> tuple[object, ...]:
-    """What Hero Info shows of a piece (everything but rolls, modified/reforged flags and the source id)."""
-    subs = tuple((s.stat, round(s.value, 6)) for s in gear.substats)
-    main = (gear.main.stat, round(gear.main.value, 6))
-    return gear.slot, gear.set_code, gear.grade, gear.item_level, gear.enhance, main, subs, gear.score
 
 
 def _piece(piece: PieceRead) -> tuple[Gear | None, float, list[str]]:

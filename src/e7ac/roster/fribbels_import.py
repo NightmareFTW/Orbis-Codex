@@ -1,30 +1,42 @@
-"""Import a Fribbels Optimizer save file (M4, path A of SPEC D45): the user runs Fribbels and its own importer, saves
-"Save all optimizer data", and this module reads that local JSON file. Orbis Codex never captures game traffic.
+"""Import a Fribbels Optimizer save file (M4, path A of SPEC D45; rules in D52): the user runs Fribbels and its own
+importer, saves "Save all optimizer data", and this module reads that local JSON file. Orbis Codex never captures
+game traffic.
 
-File format, derived from Fribbels' code (status `community` until checked against a real save of the user's):
+File format, from Fribbels' code (status `community` until checked against a real save of the user's):
 - `app/js/lib/saves.js`: `{"heroes": [...], "items": [...]}`, the backend objects serialised by Gson;
 - items (`backend/.../model/Item.java`): `gear` ("Weapon"…), `rank` ("Epic"…), `set` ("SpeedSet"…), `enhance`,
-  `level` (item level), `main` and `substats` (`model/Stat.java`: `type` "AttackPercent"…, integer `value` with rates
-  in percent, `rolls`, `modified`), `id`, `ingameId` (the game's item id), `equippedById` (a Fribbels hero id);
-- heroes (`model/Hero.java`): `id`, `name`, `stars`, plus bonuses the user types into Fribbels ("Add Artifact/EE/
-  Imprint bonus stats"): `artifactName`/`artifactLevel`, `imprintNumber` (the hero's own imprint value, from
-  `self_devotion`), `eeNumber` — all strings, "None" when unset (`app/js/lib/dialog.js`).
+  `level` (item level), `main` and `substats` (`model/Stat.java`: `type` "AttackPercent"…, `value` with rates in
+  percent, `rolls`, `modified`), `op` (the game's raw data: only on pieces imported from the game and not edited
+  since), `id` (Fribbels'), `ingameId` (the game's item id), `ingameEquippedId` (the game hero wearing it at the last
+  game import, `scanner.js`), `equippedById` (the Fribbels hero it is equipped on: Fribbels' planner state, which its
+  optimizer's "Equip" changes without the game);
+- heroes (`model/Hero.java`): `id` (Fribbels' own; the game hero id is not kept), `name`, `stars` (from the game when
+  the hero was first imported, then editable in Fribbels' bonus dialog, 6 or 5), `equipment` by slot, and bonuses the
+  user types in that dialog: `artifactName`/`artifactLevel`, `imprintNumber` (the hero's own imprint value, from
+  `self_devotion`), `eeNumber` — strings, "None" when unset (`app/js/lib/dialog.js`).
 
-What is NOT taken, on purpose:
-- Fribbels' hero stats and CP: computed by Fribbels (with reforge previews), not read from the game; the displayed
-  stats stay a screen reading (MECH-STAT-01);
-- the item `wss` score: Fribbels' own metric, not the game's piece score;
-- awakening and level: not in Fribbels' hero model (the importer drops them; Fribbels assumes max awakening). They are
-  kept from the roster, or assumed with confidence 0 and reported;
-- unequipped items (inventory): counted only; the roster stores builds.
-Fribbels' importer keeps one hero per name and only items from a chosen "+N" up (scanner.js / ItemsRequestHandler):
-a slot missing from the save keeps the roster's piece, with a note.
+How the game's gear is rebuilt (never Fribbels' plan): a hero's game id is the wearer id that a strict majority of its
+game-imported Fribbels pieces carry; its gear is then every piece the game import put on that id. Pieces equipped in
+Fribbels but worn elsewhere (or in the inventory) in the game are a plan: not taken, with a note. Pieces with no game
+data (added by hand, or an old screenshot import) are taken from Fribbels' equipment at confidence 0.7.
+
+Values Fribbels estimates, taken with a lower confidence and a note: the +N of a game-imported piece below +15 (derived
+from the number of enhancements: a multiple of 3, up to 2 below the real one); the stars. Substat rolls of a piece
+added or edited by hand are Fribbels' guesses: not taken. A 0 main stat value or item level means "unknown" in
+Fribbels: that piece is not used.
+
+What is NOT taken, on purpose: Fribbels' hero stats and CP (computed by Fribbels, not read from the game; the displayed
+stats stay a screen reading, MECH-STAT-01); the item `wss` score (Fribbels' metric, not the game's piece score);
+awakening, level and skill enhancements (not in the save: kept from the roster, or assumed with confidence 0 and
+reported); unequipped items (counted only).
 """
 
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
+import math
+from collections import Counter
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Final
@@ -48,6 +60,7 @@ from e7ac.domain.roster import (
     StatValue,
     Substat,
 )
+from e7ac.roster.pieces import GAME_ID_PREFIX, MAX_ENHANCE, combine, same_piece, visible
 from e7ac.sources.fribbels import SET_PIECES
 
 STAT_TYPES: Final[Mapping[str, Stat]] = {
@@ -71,13 +84,19 @@ RANKS: Final[Mapping[str, GearGrade]] = {grade.value.capitalize(): grade for gra
 SETS: Final[Mapping[str, str]] = {name: code for code, (name, _) in SET_PIECES.items()}
 """Fribbels set names ("SpeedSet") -> catalog set codes (`enums/Set.java`, MECH-GEAR-05)."""
 UNSET: Final = frozenset({"", "none", "null"})
+NO_WEARER: Final = frozenset({"", "0", "-1", "undefined", "null", "none"})
+"""`ingameEquippedId` values taken as "not worn" (`"" + item.p` in scanner.js; the game's value is `assumed`)."""
 USER_ENTERED: Final = 0.7
-"""Confidence of the artifact, imprint and EE a user typed into Fribbels (not read from the game)."""
+"""Confidence of what the user typed or edited in Fribbels (or Fribbels defaulted: stars), not read from the game."""
+ESTIMATED: Final = 0.8
+"""`gear.<slot>` confidence of a game-imported piece below +15: its +N is Fribbels' estimate."""
 ASSUMED: Final = 0.0
 
 
 class _Model(BaseModel):
-    model_config = ConfigDict(extra="ignore", frozen=True, populate_by_name=True)
+    model_config = ConfigDict(
+        extra="ignore", frozen=True, populate_by_name=True, allow_inf_nan=False, coerce_numbers_to_str=True
+    )
 
 
 class FribbelsStat(_Model):
@@ -90,6 +109,8 @@ class FribbelsStat(_Model):
 class FribbelsItem(_Model):
     id: str | None = None
     ingameId: str | None = None  # noqa: N815 - the save file's own key
+    ingameEquippedId: str | None = None  # noqa: N815
+    equippedById: str | None = None  # noqa: N815
     gear: str
     rank: str
     set: str
@@ -97,7 +118,18 @@ class FribbelsItem(_Model):
     level: int
     main: FribbelsStat
     substats: list[FribbelsStat] = []
-    equippedById: str | None = None  # noqa: N815
+    op: list[Any] | None = None
+
+    @property
+    def from_game(self) -> bool:
+        """Imported from the game and not edited since (an edit drops `op`)."""
+        return bool(self.op) and bool(self.ingameId)
+
+    @property
+    def wearer(self) -> str | None:
+        """The game hero wearing the piece at the last game import (None: not worn, or no game data)."""
+        wearer = (self.ingameEquippedId or "").strip()
+        return None if wearer.casefold() in NO_WEARER else wearer
 
 
 class FribbelsHero(_Model):
@@ -105,9 +137,10 @@ class FribbelsHero(_Model):
     name: str
     stars: int | None = None
     artifactName: str | None = None  # noqa: N815
-    artifactLevel: str | int | None = None  # noqa: N815
-    imprintNumber: str | float | None = None  # noqa: N815
-    eeNumber: str | float | None = None  # noqa: N815
+    artifactLevel: str | None = None  # noqa: N815
+    imprintNumber: str | None = None  # noqa: N815
+    eeNumber: str | None = None  # noqa: N815
+    equipment: dict[str, Any] | None = None
 
 
 @dataclass(slots=True)
@@ -120,14 +153,23 @@ class HeroImport:
     build: HeroBuild | None = None
     problems: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    unusable: dict[GearSlot, str] = field(default_factory=dict)
+    """Slots whose piece in the save could not be used, with the reason."""
 
 
 @dataclass(slots=True)
 class FribbelsSave:
     heroes: list[HeroImport] = field(default_factory=list)
-    unequipped_items: int = 0
+    unused_items: int = 0
+    """Readable pieces worn by no imported hero (inventory, plans, heroes Fribbels does not have)."""
     warnings: list[str] = field(default_factory=list)
     """Entries of the file that could not be read (each named), never dropped silently."""
+    locations: dict[str, tuple[str | None, str]] = field(default_factory=dict)
+    """External id -> (Fribbels hero id or None, where the save puts the piece), for pieces whose place is known."""
+
+    def elsewhere(self, entry: HeroImport) -> dict[str, str]:
+        """External ids the save puts somewhere other than on this hero."""
+        return {key: label for key, (owner, label) in self.locations.items() if owner != entry.fribbels_id}
 
 
 class FribbelsFileError(ValueError):
@@ -153,34 +195,47 @@ def read_fribbels_save(
     ):
         raise FribbelsFileError('not a Fribbels save: "heroes" and "items" lists expected ("Save all optimizer data")')
     save = FribbelsSave()
-    items = _items(data["items"], save.warnings)
-    names = hero_names(heroes)
-    artifact_codes = _artifact_codes(artifacts)
-    equipped: dict[str, list[tuple[FribbelsItem, Gear]]] = {}
-    for item, gear in items:
-        if item.equippedById:
-            equipped.setdefault(item.equippedById, []).append((item, gear))
-        else:
-            save.unequipped_items += 1
+    saved = _items(data["items"], save.warnings)
+    fribbels_heroes: list[FribbelsHero] = []
     for index, raw in enumerate(data["heroes"]):
         try:
-            hero = FribbelsHero.model_validate(raw)
+            fribbels_heroes.append(FribbelsHero.model_validate(raw))
         except ValidationError as exc:
             save.warnings.append(f"hero #{index + 1}: not read ({_first_error(exc)})")
-            continue
+    known = {hero.id for hero in fribbels_heroes}
+    orphans = Counter(s.item.equippedById for s in saved if s.item.equippedById and s.item.equippedById not in known)
+    for unknown, count in sorted(orphans.items()):
+        save.warnings.append(f"{count} item(s) equipped by an unknown hero id {unknown}: ignored")
+    worn = _game_gear(fribbels_heroes, saved)
+    names, artifact_names = catalog_names(heroes), catalog_names(artifacts)
+    for hero in fribbels_heroes:
         entry = HeroImport(name=hero.name, fribbels_id=hero.id)
         save.heroes.append(entry)
-        _hero(entry, hero, names, heroes, artifact_codes, equipped.get(hero.id, []), captured_at)
-    for unknown in sorted(set(equipped) - {h.fribbels_id for h in save.heroes}):
-        save.warnings.append(f"{len(equipped[unknown])} item(s) equipped by an unknown hero id {unknown}: ignored")
+        try:
+            _hero(entry, hero, names, heroes, artifact_names, worn[hero.id], captured_at)
+        except (ValidationError, ValueError) as exc:  # one odd hero never stops the import of the others
+            entry.build = None
+            reason = _first_error(exc) if isinstance(exc, ValidationError) else str(exc)
+            entry.problems.append(f"not read: {reason}")
+    used = {id(s) for w in worn.values() for s in w.pieces.values()}
+    save.unused_items = sum(1 for s in saved if s.gear is not None and id(s) not in used)
+    save.locations = _locations(fribbels_heroes, saved, worn)
+    save.warnings.extend(f"{s.label()}: not read ({s.problem})" for s in saved if s.gear is None and not s.reported)
+    matched = {w.game_id for w in worn.values() if w.game_id}
+    unmatched = [s for s in saved if s.item.wearer and s.item.wearer not in matched]
+    if unmatched:
+        save.warnings.append(
+            f"{len(unmatched)} item(s) worn in the game by {len({s.item.wearer for s in unmatched})} hero(es) the save "
+            "does not match to a Fribbels hero (not imported by Fribbels, or all their gear moved in it): not taken"
+        )
     return save
 
 
-def hero_names(heroes: Mapping[str, ResolvedEntity]) -> NameIndex:
-    """Exact names of the catalog heroes: the chosen name plus the name Fribbels gives the hero when the sources
-    disagree (the save uses Fribbels' names). A name shared by several heroes stays ambiguous and is never matched."""
+def catalog_names(entities: Mapping[str, ResolvedEntity]) -> NameIndex:
+    """Exact names of catalog entities: the chosen name plus the name Fribbels gives the entity when the sources
+    disagree (the save uses Fribbels' names). A name shared by several codes stays ambiguous and is never matched."""
     names = NameIndex()
-    for code, entity in heroes.items():
+    for code, entity in entities.items():
         names.add(entity.name, code)
         resolved = entity.fields.get("name")
         for alternative in resolved.alternatives if resolved is not None else ():
@@ -190,17 +245,22 @@ def hero_names(heroes: Mapping[str, ResolvedEntity]) -> NameIndex:
 
 
 def gear_of(item: FribbelsItem) -> Gear:
-    """The domain gear piece of a Fribbels item (ValueError naming the field when it cannot be mapped)."""
+    """The domain gear piece of a Fribbels item (ValueError naming the field when it cannot be mapped). Substat rolls
+    are taken only from pieces imported from the game (`op`): on pieces added or edited by hand they are guesses."""
     slot = _mapped(SLOTS, item.gear, "gear slot")
     grade = _mapped(RANKS, item.rank, "rank")
     set_code = _mapped(SETS, item.set, "set")
+    if item.level == 0:
+        raise ValueError("item level unknown (0 in the save)")
+    if item.main.value == 0:
+        raise ValueError("main stat value unknown (0 in the save)")
     main = _stat(item.main)
     substats = tuple(
-        Substat(stat=stat.stat, value=stat.value, rolls=s.rolls, modified=bool(s.modified))
+        Substat(stat=stat.stat, value=stat.value, rolls=s.rolls if item.from_game else None, modified=bool(s.modified))
         for s in item.substats
         for stat in (_stat(s),)
     )
-    external = f"ingame:{item.ingameId}" if item.ingameId else (f"fribbels:{item.id}" if item.id else None)
+    external = f"{GAME_ID_PREFIX}{item.ingameId}" if item.ingameId else (f"fribbels:{item.id}" if item.id else None)
     return Gear(
         slot=slot,
         set_code=set_code,
@@ -213,20 +273,161 @@ def gear_of(item: FribbelsItem) -> Gear:
     )
 
 
-# ------------------------------------------------------------------------------------------------ internals
+# ------------------------------------------------------------------------------------------------ items
 
 
-def _items(raw_items: Sequence[Any], warnings: list[str]) -> list[tuple[FribbelsItem, Gear]]:
-    items: list[tuple[FribbelsItem, Gear]] = []
+@dataclass(slots=True, eq=False)
+class _Saved:
+    index: int
+    item: FribbelsItem
+    gear: Gear | None
+    problem: str = ""
+    reported: bool = False
+
+    @property
+    def slot(self) -> GearSlot | None:
+        return self.gear.slot if self.gear is not None else SLOTS.get(self.item.gear)
+
+    def label(self) -> str:
+        return f"item #{self.index + 1}" + (f" ({self.item.ingameId or self.item.id})" if self.item.id else "")
+
+
+@dataclass(slots=True)
+class _Worn:
+    """A hero's gear as the save shows it in the game, with notes on what was not taken."""
+
+    pieces: dict[GearSlot, _Saved] = field(default_factory=dict)
+    notes: list[str] = field(default_factory=list)
+    unusable: dict[GearSlot, str] = field(default_factory=dict)
+    game_id: str | None = None
+    untracked: set[GearSlot] = field(default_factory=set)
+    """Slots filled from Fribbels' own equipment because the save does not say who wears the piece in the game."""
+
+
+def _items(raw_items: Sequence[Any], warnings: list[str]) -> list[_Saved]:
+    saved: list[_Saved] = []
     for index, raw in enumerate(raw_items):
         try:
             item = FribbelsItem.model_validate(raw)
-            items.append((item, gear_of(item)))
         except ValidationError as exc:
             warnings.append(f"item #{index + 1}: not read ({_first_error(exc)})")
-        except ValueError as exc:
-            warnings.append(f"item #{index + 1}: not read ({exc})")
-    return items
+            continue
+        try:
+            saved.append(_Saved(index, item, gear_of(item)))
+        except (ValidationError, ValueError) as exc:
+            reason = _first_error(exc) if isinstance(exc, ValidationError) else str(exc)
+            saved.append(_Saved(index, item, None, reason))  # reported on its hero, or as a warning at the end
+    return saved
+
+
+def _game_gear(heroes: Sequence[FribbelsHero], saved: Sequence[_Saved]) -> dict[str, _Worn]:
+    """Each Fribbels hero's gear as worn in the game (see the module docstring)."""
+    planned: dict[str, list[_Saved]] = {}
+    by_wearer: dict[str, list[_Saved]] = {}
+    for s in saved:
+        if s.item.equippedById:
+            planned.setdefault(s.item.equippedById, []).append(s)
+        if s.item.wearer:
+            by_wearer.setdefault(s.item.wearer, []).append(s)
+    worn = {hero.id: _Worn() for hero in heroes}
+    for hero in heroes:
+        tracked = [s for s in planned.get(hero.id, []) if s.item.ingameEquippedId is not None]
+        wearers = Counter(s.item.wearer for s in tracked if s.item.wearer)
+        if wearers:
+            top, count = wearers.most_common(1)[0]
+            if count * 2 > len(tracked):
+                worn[hero.id].game_id = top
+    claimed = Counter(w.game_id for w in worn.values() if w.game_id)
+    for hero in heroes:
+        w = worn[hero.id]
+        mine = planned.get(hero.id, [])
+        tracked = [s for s in mine if s.item.ingameEquippedId is not None]
+        plan: list[_Saved] = []
+        if w.game_id is not None and claimed[w.game_id] > 1:
+            w.game_id = None
+            w.notes.append("game gear not taken: another hero of the save matches the same game hero")
+        elif w.game_id is not None:
+            candidates = by_wearer[w.game_id]
+            moved = [s for s in candidates if s.item.equippedById != hero.id]
+            if moved:
+                w.notes.append(f"{_slots(moved)}: worn in the game, moved in Fribbels: the game's piece taken")
+            plan = [s for s in tracked if s.item.wearer != w.game_id]
+            _fill(w, hero, candidates)
+        else:
+            plan = tracked
+        if plan:
+            w.notes.append(
+                f"{_slots(plan)}: equipped in Fribbels only (worn by another hero or in the inventory in the "
+                "game, e.g. an optimizer result): not taken"
+            )
+        for s in tracked if w.game_id is None else plan:
+            s.reported = True
+        untracked = [
+            s for s in mine if s.item.ingameEquippedId is None and s.slot not in w.pieces and s.slot not in w.unusable
+        ]
+        before = set(w.pieces)
+        _fill(w, hero, untracked)
+        w.untracked = set(w.pieces) - before
+    return worn
+
+
+def _slots(pieces: Iterable[_Saved]) -> str:
+    return ", ".join(sorted(str(s.item.gear).lower() for s in pieces))
+
+
+def _fill(worn: _Worn, hero: FribbelsHero, candidates: Iterable[_Saved]) -> None:
+    by_slot: dict[GearSlot | None, list[_Saved]] = {}
+    for s in candidates:
+        by_slot.setdefault(s.slot, []).append(s)
+    for slot, pieces in by_slot.items():
+        for s in pieces:
+            s.reported = True
+        if slot is None:
+            worn.notes.extend(f"{s.label()}: not read ({s.problem})" for s in pieces)
+            continue
+        chosen = pieces[0] if len(pieces) == 1 else _tie_break(hero, slot, pieces)
+        if chosen is None:
+            listed = ", ".join(s.label() for s in pieces)
+            worn.notes.append(f"{slot.value}: {len(pieces)} pieces in the save ({listed}): none taken")
+            continue
+        if len(pieces) > 1:
+            worn.notes.append(f"{slot.value}: {len(pieces)} pieces in the save: {chosen.label()} taken")
+        if chosen.gear is None:
+            worn.unusable[slot] = chosen.problem
+            worn.notes.append(f"{slot.value}: the save's piece is not usable ({chosen.problem})")
+        else:
+            worn.pieces[slot] = chosen
+
+
+def _tie_break(hero: FribbelsHero, slot: GearSlot, pieces: Sequence[_Saved]) -> _Saved | None:
+    """Several pieces claim one slot: the one Fribbels equips on the hero, if that settles it."""
+    equipped = [s for s in pieces if s.item.equippedById == hero.id]
+    if len(equipped) == 1:
+        return equipped[0]
+    shown = (hero.equipment or {}).get(slot.value.capitalize())
+    shown_id = shown.get("id") if isinstance(shown, dict) else None
+    matches = [s for s in pieces if shown_id and s.item.id == shown_id]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _locations(
+    heroes: Sequence[FribbelsHero], saved: Sequence[_Saved], worn: Mapping[str, _Worn]
+) -> dict[str, tuple[str | None, str]]:
+    """Where the save puts each piece it knows the place of: on an imported hero, or in the game's inventory."""
+    owners = {id(s): hero for hero in heroes for s in worn[hero.id].pieces.values()}
+    locations: dict[str, tuple[str | None, str]] = {}
+    for s in saved:
+        if s.gear is None or not s.gear.external_id:
+            continue
+        hero = owners.get(id(s))
+        if hero is not None:
+            locations[s.gear.external_id] = (hero.id, f"on {hero.name}")
+        elif s.item.ingameId and s.item.ingameEquippedId is not None and s.item.wearer is None:
+            locations[s.gear.external_id] = (None, "in the inventory")
+    return locations
+
+
+# ------------------------------------------------------------------------------------------------ heroes
 
 
 def _hero(
@@ -234,8 +435,8 @@ def _hero(
     hero: FribbelsHero,
     names: NameIndex,
     heroes: Mapping[str, ResolvedEntity],
-    artifact_codes: Mapping[str, str],
-    pieces: Sequence[tuple[FribbelsItem, Gear]],
+    artifact_names: NameIndex,
+    worn: _Worn,
     captured_at: datetime,
 ) -> None:
     if names.is_ambiguous(hero.name):
@@ -246,48 +447,76 @@ def _hero(
         entry.problems.append(f"no catalog hero is called {hero.name!r} (run e7 catalog sync)")
         return
     entry.hero_code = code
-    confidence: dict[str, float] = {}
+    confidence: dict[str, float] = {"awakening": ASSUMED, "level": ASSUMED}
     stars = hero.stars if hero.stars in range(1, 7) else None
     if stars is None:
         entry.notes.append(f"stars {hero.stars!r} not usable: assumed 6")
         stars = 6
         confidence["stars"] = ASSUMED
+    else:
+        confidence["stars"] = USER_ENTERED  # from the game at Fribbels' first import, then editable there
     gear: dict[GearSlot, Gear] = {}
-    for item, piece in pieces:
-        if piece.slot in gear:
-            entry.notes.append(f"two {piece.slot.value} pieces equipped in the save: {item.id} ignored")
-            continue
-        gear[piece.slot] = piece
+    by_hand: list[str] = []
+    estimated: list[str] = []
+    for slot, s in worn.pieces.items():
+        assert s.gear is not None
+        gear[slot] = s.gear
+        if not s.item.from_game:
+            by_hand.append(slot.value)
+        elif s.gear.enhance < MAX_ENHANCE:
+            estimated.append(slot.value)
+            confidence[f"gear.{slot.value}"] = ESTIMATED
+        if not s.item.from_game or slot in worn.untracked:
+            confidence[f"gear.{slot.value}"] = USER_ENTERED
+    entry.notes.extend(worn.notes)
+    entry.unusable = dict(worn.unusable)
+    if worn.untracked:
+        entry.notes.append(
+            f"{', '.join(sorted(slot.value for slot in worn.untracked))}: equipped in Fribbels, and the save does not "
+            f"say who wears it in the game (added by hand or an old import): confidence {USER_ENTERED}"
+        )
+    if by_hand:
+        entry.notes.append(
+            f"{', '.join(by_hand)}: added or edited by hand in Fribbels: confidence {USER_ENTERED}, rolls not taken"
+        )
+    if estimated:
+        entry.notes.append(
+            f"{', '.join(estimated)}: +N below +15 is Fribbels' estimate (a multiple of 3, up to 2 below the real one)"
+        )
+    entity = heroes[code]
     data: dict[str, Any] = {
         "hero_code": code,
         "stars": stars,
         "awakening": stars,
-        "level": stars * 10,  # MECH-HERO-01: Fribbels models max level / max awakening, the save has neither
+        "level": stars * 10,  # MECH-HERO-01: the save has neither level nor awakening
         "gear": gear,
         "captured_at": captured_at,
         "source": BuildSource.FRIBBELS,
-        "confidence": {**confidence, "awakening": ASSUMED, "level": ASSUMED},
-        "artifact": _artifact(hero, artifact_codes, entry, confidence),
-        "imprint": _imprint(hero, heroes[code], entry, confidence),
-        "exclusive_equipment": _exclusive(hero, heroes[code], entry, confidence),
+        "artifact": _artifact(hero, artifact_names, entry, confidence),
+        "imprint": _imprint(hero, entity, entry, confidence),
+        "exclusive_equipment": _exclusive(hero, entity, entry, confidence),
     }
-    data["confidence"].update(confidence)
-    try:
-        entry.build = HeroBuild.model_validate(data)
-    except ValidationError as exc:
-        entry.problems.append(f"not a valid build: {_first_error(exc)}")
+    data["confidence"] = confidence
+    entry.build = HeroBuild.model_validate(data)
 
 
 def _artifact(
-    hero: FribbelsHero, codes: Mapping[str, str], entry: HeroImport, confidence: dict[str, float]
+    hero: FribbelsHero, names: NameIndex, entry: HeroImport, confidence: dict[str, float]
 ) -> ArtifactRef | None:
     if _unset(hero.artifactName):
         return None
     assert hero.artifactName is not None
-    code = codes.get(hero.artifactName.strip())
-    level = _number(hero.artifactLevel)
+    shown = f"artifact {hero.artifactName!r} +{hero.artifactLevel}"
+    if names.is_ambiguous(hero.artifactName):
+        entry.notes.append(f"{shown}: several catalog artifacts have this name: not stored")
+        return None
+    code = names.lookup(hero.artifactName)
+    try:
+        level = _number(hero.artifactLevel)
+    except ValueError:
+        level = None
     if code is None or level is None or not level.is_integer() or not 0 <= level <= 30:
-        entry.notes.append(f"artifact {hero.artifactName!r} +{hero.artifactLevel} not usable: not stored")
+        entry.notes.append(f"{shown} not usable: not stored")
         return None
     confidence["artifact"] = USER_ENTERED
     return ArtifactRef(code=code, level=int(level))
@@ -297,7 +526,11 @@ def _imprint(
     hero: FribbelsHero, entity: ResolvedEntity, entry: HeroImport, confidence: dict[str, float]
 ) -> Imprint | None:
     """Fribbels' imprint field is the hero's own (self) imprint value, typed by the user (dialog.js)."""
-    value = _number(hero.imprintNumber)
+    try:
+        value = _number(hero.imprintNumber)
+    except ValueError as exc:
+        entry.notes.append(f"imprint {exc}: not stored")
+        return None
     if value is None:
         return None
     stat_code, grades = entity.value("imprint.stat"), entity.value("imprint.values")
@@ -320,7 +553,11 @@ def _imprint(
 def _exclusive(
     hero: FribbelsHero, entity: ResolvedEntity, entry: HeroImport, confidence: dict[str, float]
 ) -> ExclusiveEquipment | None:
-    value = _number(hero.eeNumber)
+    try:
+        value = _number(hero.eeNumber)
+    except ValueError as exc:
+        entry.notes.append(f"exclusive equipment {exc}: not stored")
+        return None
     if value is None:
         return None
     stat_code = entity.value("ee.stat")
@@ -330,15 +567,6 @@ def _exclusive(
     stat = Stat(stat_code)
     confidence["exclusive_equipment"] = USER_ENTERED
     return ExclusiveEquipment(stat=stat, value=round(value / 100, 6) if stat.is_rate else value)
-
-
-def _artifact_codes(artifacts: Mapping[str, ResolvedEntity]) -> dict[str, str]:
-    """Display name -> code, names shared by several codes left out (never matched)."""
-    by_name: dict[str, set[str]] = {}
-    for code, entity in artifacts.items():
-        if entity.name:
-            by_name.setdefault(entity.name.strip(), set()).add(code)
-    return {name: next(iter(codes)) for name, codes in by_name.items() if len(codes) == 1}
 
 
 def _stat(raw: FribbelsStat) -> StatValue:
@@ -357,13 +585,17 @@ def _unset(value: object) -> bool:
     return value is None or (isinstance(value, str) and value.strip().casefold() in UNSET)
 
 
-def _number(value: str | float | None) -> float | None:
+def _number(value: str | None) -> float | None:
+    """None when unset; ValueError when set but not a finite number (never silently "unset")."""
     if _unset(value):
         return None
     try:
-        return float(str(value).strip().rstrip("%"))
+        number = float(str(value).strip().rstrip("%").strip())
     except ValueError:
-        return None
+        raise ValueError(f"{value!r} is not a number") from None
+    if not math.isfinite(number):
+        raise ValueError(f"{value!r} is not a finite number")
+    return number
 
 
 def _first_error(exc: ValidationError) -> str:
@@ -372,65 +604,166 @@ def _first_error(exc: ValidationError) -> str:
     return f"{where}: {error['msg']}" if where else str(error["msg"])
 
 
-def merge_with_current(build: HeroBuild, current: HeroBuild | None) -> tuple[HeroBuild, list[str]]:
-    """The imported build on top of the hero's current one (SPEC D52). What the save does not carry is kept: level
-    and awakening, skill enhancements, a slot below Fribbels' import threshold, and the displayed stats and CP while
-    everything they depend on is unchanged. An artifact, imprint or EE typed into Fribbels never silently replaces a
-    different one in the roster (read from the game, or entered here): the roster's is kept, with a note, unless it
-    has a lower confidence. Returns the validated build and the notes."""
+# ------------------------------------------------------------------------------------------------ merging
+
+
+def merge_with_current(
+    build: HeroBuild,
+    current: HeroBuild | None,
+    *,
+    unusable: Mapping[GearSlot, str] | None = None,
+    elsewhere: Mapping[str, str] | None = None,
+) -> tuple[HeroBuild, list[str]]:
+    """The imported build on top of the hero's current one (SPEC D52). Returns the validated build and notes.
+
+    - What the save does not carry is kept: level, awakening, skill enhancements; a slot missing from the save keeps
+      the roster's piece, unless the save puts that piece elsewhere (`elsewhere`: external id -> place);
+    - a piece the roster and the save both have is combined (game id and rolls from the save, the real +N and the
+      score from a screen reading: `roster.pieces`);
+    - stars, artifact, imprint and EE typed or defaulted in Fribbels replace the roster's only when the roster's are
+      no more certain (e.g. an earlier import); otherwise the roster's are kept. Every difference gets a note;
+    - the displayed stats and CP are kept only while nothing they depend on changed."""
     if current is None:
         return build, []
     notes: list[str] = []
     confidence = dict(build.confidence)
     update: dict[str, Any] = {"skills": current.skills}
+    _merge_stars(build, current, update, confidence, notes)
+    update["gear"] = _merge_gear(build, current, confidence, notes, unusable or {}, elsewhere or {})
+    for name in ("artifact", "imprint", "exclusive_equipment"):
+        _merge_bonus(name, build, current, update, confidence, notes)
+    merged = HeroBuild.model_validate({**build.model_dump(), **update, "confidence": confidence})
+    if _same_stat_inputs(merged, current):
+        for name in ("final_stats", "cp"):
+            _take(confidence, current.confidence, name)
+        merged = HeroBuild.model_validate(
+            {**merged.model_dump(), "final_stats": current.final_stats, "cp": current.cp, "confidence": confidence}
+        )
+    elif current.final_stats is not None or current.cp is not None:
+        notes.append("the build changed: the displayed stats and CP of the last screen reading are dropped (rescan it)")
+    return merged, notes
+
+
+def _save_wins(name: str, build: HeroBuild, current: HeroBuild) -> bool:
+    """A typed/defaulted value from the save replaces the roster's only when the roster's is no more certain."""
+    theirs, mine = build.confidence.get(name, 1.0), current.confidence.get(name, 1.0)
+    return theirs > ASSUMED and theirs >= mine
+
+
+def _merge_stars(
+    build: HeroBuild, current: HeroBuild, update: dict[str, Any], confidence: dict[str, float], notes: list[str]
+) -> None:
+    stars = build.stars
+    if build.stars == current.stars or not _save_wins("stars", build, current):
+        stars = current.stars
+        if build.stars != current.stars and build.confidence.get("stars") != ASSUMED:
+            notes.append(
+                f"stars: the save says {build.stars}, the roster {current.stars}: kept the roster's "
+                "(Fribbels' stars can be stale or set in its bonus dialog)"
+            )
+        if current.confidence.get("stars", 1.0) >= build.confidence.get("stars", 1.0):
+            _take(confidence, current.confidence, "stars")
+    else:
+        notes.append(f"stars: the save's {build.stars} replaces the roster's {current.stars}")
+    update["stars"] = stars
     for name in ("level", "awakening"):
         if confidence.get(name) == ASSUMED:
             update[name] = getattr(current, name)
             _take(confidence, current.confidence, name)
-    if update.get("awakening", build.awakening) > build.stars:
-        update["awakening"] = build.stars
-        notes.append(f"awakening {current.awakening} is above the save's {build.stars} stars: lowered to {build.stars}")
-    gear = dict(build.gear)
-    for slot, piece in current.gear.items():
-        if slot not in gear:
-            gear[slot] = piece
-            _take(confidence, current.confidence, f"gear.{slot.value}")
-            notes.append(f"{slot.value}: not in the save (Fribbels imports only items from a chosen +N up): kept")
-    update["gear"] = gear
-    for name in ("artifact", "imprint", "exclusive_equipment"):
-        mine, theirs = getattr(current, name), getattr(build, name)
-        if mine is None:
-            continue
-        label = name.replace("_", " ")
-        if theirs is not None and _bonus_key(mine) != _bonus_key(theirs):
-            mine_confidence = current.confidence.get(name, 1.0)
-            if mine_confidence < build.confidence.get(name, 1.0):
-                notes.append(
-                    f"{label}: the save's {_describe(theirs)} replaces the roster's {_describe(mine)} "
-                    f"(read with confidence {mine_confidence:.2f})"
-                )
+    level = update.get("level", build.level)
+    if level > stars * 10:
+        notes.append(f"level {level} is above the {stars}-star cap: lowered to {stars * 10}")
+        update["level"], confidence["level"] = stars * 10, ASSUMED
+    if update.get("awakening", build.awakening) > stars:
+        notes.append(f"awakening {update.get('awakening', build.awakening)} is above {stars} stars: lowered to {stars}")
+        update["awakening"], confidence["awakening"] = stars, ASSUMED
+
+
+def _merge_gear(
+    build: HeroBuild,
+    current: HeroBuild,
+    confidence: dict[str, float],
+    notes: list[str],
+    unusable: Mapping[GearSlot, str],
+    elsewhere: Mapping[str, str],
+) -> dict[GearSlot, Gear]:
+    gear: dict[GearSlot, Gear] = {}
+    for slot in GearSlot:
+        new, old = build.gear.get(slot), current.gear.get(slot)
+        key = f"gear.{slot.value}"
+        if new is None:
+            if old is None:
                 continue
-            notes.append(
-                f"{label}: the save says {_describe(theirs)}, the roster {_describe(mine)}: kept the roster's "
-                "(Fribbels' bonus stats are typed by hand; use e7 roster edit if the save is right)"
-            )
+            where = elsewhere.get(old.external_id) if old.external_id else None
+            if where is not None:
+                notes.append(f"{slot.value}: the roster's piece is {where} in the save: removed from this hero")
+            else:
+                gear[slot] = old
+                _take(confidence, current.confidence, key)
+                reason = (
+                    f"the save's piece is not usable ({unusable[slot]})"
+                    if slot in unusable
+                    else "not in the save (Fribbels imports only items from a chosen +N up)"
+                )
+                notes.append(f"{slot.value}: {reason}: kept the roster's piece")
+            continue
+        if old is not None and same_piece(old, new):
+            gear[slot] = combine(old, new)
+            certainty = max(build.confidence.get(key, 1.0), current.confidence.get(key, 1.0))
+            confidence.pop(key, None)
+            if certainty < 1.0:
+                confidence[key] = certainty
+        else:
+            gear[slot] = new
+    return gear
+
+
+def _merge_bonus(
+    name: str,
+    build: HeroBuild,
+    current: HeroBuild,
+    update: dict[str, Any],
+    confidence: dict[str, float],
+    notes: list[str],
+) -> None:
+    mine, theirs = getattr(current, name), getattr(build, name)
+    known_none = mine is None and name in current.confidence  # e.g. an imprint the screen read as "Locked"
+    if mine is None and not known_none:
+        return
+    label = name.replace("_", " ")
+    if theirs is None or (mine is not None and _bonus_key(mine) == _bonus_key(theirs)):
         update[name] = mine
         _take(confidence, current.confidence, name)
-        if isinstance(mine, Imprint) and isinstance(theirs, Imprint) and _bonus_key(mine) == _bonus_key(theirs):
-            filled = {"grade": mine.grade or theirs.grade, "mode": mine.mode or theirs.mode}
-            update[name] = mine.model_copy(update=filled)
-            for part, known in (("grade", mine.grade), ("mode", mine.mode)):
-                if known is None:
-                    confidence[f"imprint.{part}"] = build.confidence.get(f"imprint.{part}", 1.0)
-    merged = HeroBuild.model_validate({**build.model_dump(), **update, "confidence": confidence})
-    if _stat_inputs(merged) == _stat_inputs(current):
-        merged = merged.model_copy(update={"final_stats": current.final_stats, "cp": current.cp})
-        _take(confidence, current.confidence, "final_stats")
-        _take(confidence, current.confidence, "cp")
-        merged = HeroBuild.model_validate({**merged.model_dump(), "confidence": confidence})
-    elif current.final_stats is not None or current.cp is not None:
-        notes.append("the build changed: the displayed stats and CP of the last screen reading are dropped (rescan it)")
-    return merged, notes
+        if isinstance(mine, Imprint) and isinstance(theirs, Imprint):
+            update[name] = _same_imprint(mine, theirs, build, confidence, notes)
+        return
+    if _save_wins(name, build, current):
+        notes.append(
+            f"{label}: the save's {_describe(theirs)} replaces the roster's {_describe(mine)} "
+            f"(confidence {current.confidence.get(name, 1.0):.2f})"
+        )
+        return
+    update[name] = mine
+    _take(confidence, current.confidence, name)
+    notes.append(
+        f"{label}: the save says {_describe(theirs)}, the roster {_describe(mine)}: kept the roster's "
+        "(Fribbels' bonus stats are typed by hand; use e7 roster edit if the save is right)"
+    )
+
+
+def _same_imprint(
+    mine: Imprint, theirs: Imprint, build: HeroBuild, confidence: dict[str, float], notes: list[str]
+) -> Imprint:
+    """The same imprint value: the save may tell its grade, taken from the self-imprint table (Fribbels' value is the
+    hero's own imprint), so it is used only for a self imprint; a team mode read on screen is kept."""
+    if mine.mode is not None and theirs.mode is not None and mine.mode is not theirs.mode:
+        notes.append(f"imprint: the save treats it as {theirs.mode.value}, the roster read {mine.mode.value}: kept")
+    mode = mine.mode or theirs.mode
+    grade = mine.grade or (theirs.grade if mode is ImprintMode.SELF else None)
+    for part, known, value in (("mode", mine.mode, mode), ("grade", mine.grade, grade)):
+        if known is None and value is not None:
+            confidence[f"imprint.{part}"] = build.confidence.get(f"imprint.{part}", 1.0)
+    return mine.model_copy(update={"mode": mode, "grade": grade})
 
 
 def _take(target: dict[str, float], source: Mapping[str, float], name: str) -> None:
@@ -447,7 +780,9 @@ def _bonus_key(value: ArtifactRef | Imprint | ExclusiveEquipment) -> tuple[objec
     return value.stat, None if value.value is None else round(value.value, 6)
 
 
-def _describe(value: ArtifactRef | Imprint | ExclusiveEquipment) -> str:
+def _describe(value: ArtifactRef | Imprint | ExclusiveEquipment | None) -> str:
+    if value is None:
+        return "none"
     if isinstance(value, ArtifactRef):
         return f"{value.code} +{value.level}"
     if value.stat is None or value.value is None:
@@ -456,14 +791,14 @@ def _describe(value: ArtifactRef | Imprint | ExclusiveEquipment) -> str:
     return f"{value.stat.value} {amount}"
 
 
-def _stat_inputs(build: HeroBuild) -> tuple[object, ...]:
-    """What the displayed stats depend on, as far as a save can change it."""
-    gear = sorted((slot.value, _visible(piece)) for slot, piece in build.gear.items())
-    imprint = build.imprint and (*_bonus_key(build.imprint), build.imprint.mode)
-    ee = build.exclusive_equipment and _bonus_key(build.exclusive_equipment)
-    return build.stars, build.awakening, build.level, gear, build.artifact, imprint, ee
+def _same_stat_inputs(merged: HeroBuild, current: HeroBuild) -> bool:
+    """Whether the displayed stats of `current` still describe `merged`. The imprint mode is left out: the merge never
+    changes a known mode, and learning an unknown one changes nothing in the game."""
 
+    def inputs(build: HeroBuild) -> tuple[object, ...]:
+        gear = sorted((slot.value, visible(piece), piece.enhance) for slot, piece in build.gear.items())
+        imprint = build.imprint and _bonus_key(build.imprint)
+        ee = build.exclusive_equipment and _bonus_key(build.exclusive_equipment)
+        return build.stars, build.awakening, build.level, gear, build.artifact, imprint, ee
 
-def _visible(gear: Gear) -> tuple[object, ...]:
-    subs = tuple((s.stat, round(s.value, 6)) for s in gear.substats)
-    return gear.set_code, gear.grade, gear.item_level, gear.enhance, gear.main.stat, round(gear.main.value, 6), subs
+    return inputs(merged) == inputs(current)

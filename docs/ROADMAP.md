@@ -35,13 +35,16 @@ Checkboxes: `[x]` done · `[ ]` pending. Milestones are small vertical slices; o
 
 - [x] **M4 Fribbels save import** *(SPEC D44/D45/D52: path A of the two import paths, bulk first load of ~400 heroes)* —
   `roster/fribbels_import.py` reads the save file the user made with Fribbels' own importer ("Save all optimizer
-  data"); `e7 roster import-fribbels <file> [--dry-run] [--force]`.
-  - Acceptance: a report per hero (new/updated/unchanged/skipped with the reason); exact name matching only; gear with
-    rolls and game item ids; level/awakening/displayed stats kept from the roster; an older save never replaces a newer
-    build; synthetic tests always run, the golden test skips cleanly without `fixtures/saves/fribbels.json`.
-  - ✅ Done 2026-10-05 on synthetic saves built from Fribbels' code. **Pending:** a check against the user's real save
-    (the format is `community` until then).
-  - **How to try:** in Fribbels, import your account and use "Save all optimizer data"; then
+  data"); `e7 roster import-fribbels <file> [--dry-run] [--trust-save] [--force]`.
+  - Acceptance: a report per hero (new/updated/unchanged/skipped with the reason, every note and warning shown); exact
+    name matching only; gear as worn in the game (never Fribbels' optimizer plans), with rolls and game ids; Fribbels'
+    estimates (+N below +15, stars, hand-edited pieces) at a lower confidence; level/awakening/displayed stats kept
+    from the roster; a save file modified before the roster build never replaces it, and gear read on screen only
+    with `--trust-save`; synthetic tests always run, the golden test skips cleanly without `fixtures/saves/fribbels.json`.
+  - ✅ Done 2026-10-05 on synthetic saves built from Fribbels' code, then a multi-agent adversarial review: 26 confirmed
+    findings fixed (D52), the tests catch 11 deliberate mutations of the key rules. **Pending:** a check against the
+    user's real save (the format is `community` until then).
+  - **How to try:** in Fribbels, import your account from the game and use "Save all optimizer data"; then
     `.\OrbisCodex.cmd roster import-fribbels "$HOME\Documents\FribbelsOptimizerSaves\<file>.json" --dry-run`, and again
     without `--dry-run` to store it (`... roster list` shows the heroes).
 - [x] **M5a Capture tooling** — read-only game-window locator (window title/class + system process list, never a handle to the game), `mss` capture of the window's client area, blank-frame check, lossless PNG, `e7 capture` (one shot, `--delay`, `--list-windows`, `--hwnd`) and a `--hotkey` scan mode (RegisterHotKey, no keyboard hook); `e7 doctor` reports the game window; a guard test forbids process handles, memory access, input injection, keyboard hooks and packet capture anywhere in the code.
