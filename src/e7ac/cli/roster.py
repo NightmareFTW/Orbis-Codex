@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import codecs
 import json
+import time
 from collections import Counter
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Final, NoReturn
@@ -38,12 +40,12 @@ from e7ac.roster.store import (
     set_arena_relevant,
 )
 from e7ac.roster.validation import CatalogContext, Issue, Severity, validate_build
-from e7ac.settings import SettingsError, load_settings
+from e7ac.settings import GameLanguage, SettingsError, load_settings
 from e7ac.storage.db import open_database, session_scope
 from e7ac.storage.models import CatalogEntityRow, HeroSnapshotRow, OwnedHeroRow
-from e7ac.vision.hero_screen import ScreenError, ScreenKind, parse_hero_screen
+from e7ac.vision.hero_screen import HeroScreenReading, ScreenError, ScreenKind, parse_hero_screen
 from e7ac.vision.image import ImageError, captured_at, expand_image_paths, load_image
-from e7ac.vision.ocr import RapidOcrReader, TextReader
+from e7ac.vision.ocr import RapidOcrReader, TextLine, TextReader
 
 if TYPE_CHECKING:
     from e7ac.roster.fribbels_import import HeroImport
@@ -615,8 +617,7 @@ def scan(
     matcher = set_matcher_factory(sorted(catalog.sets))
     if matcher is None:
         typer.echo("note: set icons are not cached, so gear sets cannot be read: run e7 catalog sync", err=True)
-    from e7ac.vision.hero_info import read_hero_images  # OpenCV: loaded only when captures are read
-
+    context = _ScanContext(heroes, catalog, artifact_names, matcher, language)
     reader = reader_factory()
     failed = 0
     for path in paths:
@@ -629,40 +630,164 @@ def scan(
             typer.echo(f"  Error: {exc}", err=True)
             failed += 1
             continue
-        seen = None
-        if reading.kind is ScreenKind.HERO_INFO:
-            seen = read_hero_images(
-                image, lines, reading, reader, artifact_names=artifact_names, set_matcher=matcher, language=language
-            )
-        with session_scope(engine) as session:
-            owned, current = _scan_target(session, reading.name, heroes, owned_id)
-            result = build_from_screen(
-                reading, heroes, captured_at=captured_at(path), existing=current, images=seen, catalog=catalog
-            )
-            kind = "Equipment tab" if reading.kind is ScreenKind.EQUIPMENT else "Hero Info"
-            _print_scan(result, kind)
-            if result.build is None:
-                failed += 1
-                continue
-            issues = _issues(session, result.build, quiet=True)
-            _print_issues(issues)
-            if any(i.severity is Severity.ERROR for i in issues) and not force:
-                typer.echo("  Error: not saved: fix the errors above (or use --force)", err=True)
-                failed += 1
-                continue
-            if dry_run:
-                typer.echo("  (dry run: nothing saved)")
-                continue
-            if owned is None:
-                created = add_owned_hero(session, result.build)
-                typer.echo(f"  Saved as new roster hero #{created.id}")
-            elif current is not None and _same_build(result.build, current):
-                typer.echo(f"  #{owned.id}: unchanged")
-            else:
-                snapshot = add_snapshot(session, owned, result.build)
-                typer.echo(f"  #{owned.id}: new snapshot {snapshot.id}")
+        if not _store_screen(
+            engine, image, lines, reading, reader, context, captured_at(path), owned_id, dry_run, force
+        ):
+            failed += 1
     if failed:
         raise typer.Exit(code=1)
+
+
+# Pause between two captures of the watch mode (tests replace it to stop the loop).
+watch_sleep: Callable[[float], None] = time.sleep
+
+
+@roster_app.command("watch")
+def watch(
+    interval: Annotated[float, typer.Option(min=0.2, max=10, help="Seconds between two captures.")] = 1.0,
+    hwnd: Annotated[int | None, typer.Option(help="Watch this window (handle from e7 capture --list-windows).")] = None,
+    threshold: Annotated[
+        float, typer.Option(min=0.001, max=0.5, help="How different a screen must be to count as new (0-1).")
+    ] = 0.04,
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Read and check only; save nothing.")] = False,
+    force: Annotated[bool, typer.Option(help="Store even if validation finds errors.")] = False,
+) -> None:
+    """Watch the game and read each hero screen you open (Hero Info or the Equipment tab), like `roster scan`.
+
+    Browse your heroes in the game; each new screen is read once it stops changing. Read-only: it only copies screen
+    pixels (never a key or click to the game). Other screens are ignored. Press Ctrl+C to stop."""
+    from e7ac.cli import capture as capture_cli
+    from e7ac.vision.capture import CaptureError
+    from e7ac.vision.watch import ScreenWatcher, thumbnail
+    from e7ac.vision.window import PROFILES, WindowError, select_game_window
+
+    try:
+        settings = load_settings(default_paths().settings_file)
+    except SettingsError as exc:
+        _fail(str(exc))
+    engine = _engine()
+    with session_scope(engine) as session:
+        heroes = _catalog_heroes(session)
+        if heroes is None:
+            _fail("heroes are identified by name, which needs the catalog: run e7 catalog sync")
+        catalog, artifact_names = _screen_catalog(session)
+    matcher = set_matcher_factory(sorted(catalog.sets))
+    if matcher is None:
+        typer.echo("note: set icons are not cached, so gear sets cannot be read: run e7 catalog sync", err=True)
+    context = _ScanContext(heroes, catalog, artifact_names, matcher, settings.game_language)
+    capture_cli.prepare_process()
+    backend = capture_cli.backend_factory()
+    reader = reader_factory()  # loaded once: each screen then costs only its reading
+    watcher = ScreenWatcher(threshold)
+    typer.echo("Watching the game: open Hero Info (or the Equipment tab) for each hero. Press Ctrl+C to stop.")
+    read = stored = 0
+    problem = ""
+    try:
+        while True:
+            try:
+                window = select_game_window(capture_cli.window_lister(), PROFILES[settings.client], hwnd)
+                frame = backend.grab(window)
+            except (WindowError, CaptureError) as exc:
+                if str(exc) != problem:  # say it once, not every second
+                    typer.echo(f"  waiting: {exc}", err=True)
+                problem = str(exc)
+                watch_sleep(interval)
+                continue
+            problem = ""
+            image = _frame_image(frame)
+            if watcher.feed(thumbnail(image)):
+                try:
+                    lines = reader.read(image)
+                    reading = parse_hero_screen(lines, settings.game_language)
+                except ScreenError:
+                    reading = None  # not a hero screen: nothing to do
+                if reading is not None:
+                    read += 1
+                    typer.echo(f"{frame.captured_at:%H:%M:%S} {reading.name or '?'}:")
+                    try:
+                        ok = _store_screen(
+                            engine, image, lines, reading, reader, context, frame.captured_at, None, dry_run, force
+                        )
+                    except typer.Exit:  # e.g. several owned copies: reported, the watch goes on
+                        ok = False
+                    stored += ok
+            watch_sleep(interval)
+    except KeyboardInterrupt:
+        pass
+    typer.echo(f"Stopped. {read} hero screen(s) read, {stored} stored or unchanged.")
+
+
+def _frame_image(frame: Any) -> Any:
+    """The frame as the BGR array the readers use (OpenCV order)."""
+    import numpy as np
+
+    rgb = np.frombuffer(frame.rgb, dtype=np.uint8).reshape(frame.height, frame.width, 3)
+    return np.ascontiguousarray(rgb[:, :, ::-1])
+
+
+@dataclass(frozen=True, slots=True)
+class _ScanContext:
+    """What every screen reading needs, loaded once (catalog, set icons, game language)."""
+
+    heroes: dict[str, ResolvedEntity]
+    catalog: ScreenCatalog
+    artifact_names: dict[str, str]
+    matcher: Any
+    language: GameLanguage
+
+
+def _store_screen(
+    engine: Engine,
+    image: Any,
+    lines: list[TextLine],
+    reading: HeroScreenReading,
+    reader: TextReader,
+    context: _ScanContext,
+    when: datetime,
+    owned_id: int | None,
+    dry_run: bool,
+    force: bool,
+) -> bool:
+    """Build, check and store one hero screen reading (scan and watch). False when nothing could be stored."""
+    from e7ac.vision.hero_info import read_hero_images  # OpenCV: loaded only when captures are read
+
+    seen = None
+    if reading.kind is ScreenKind.HERO_INFO:
+        seen = read_hero_images(
+            image,
+            lines,
+            reading,
+            reader,
+            artifact_names=context.artifact_names,
+            set_matcher=context.matcher,
+            language=context.language,
+        )
+    with session_scope(engine) as session:
+        owned, current = _scan_target(session, reading.name, context.heroes, owned_id)
+        result = build_from_screen(
+            reading, context.heroes, captured_at=when, existing=current, images=seen, catalog=context.catalog
+        )
+        kind = "Equipment tab" if reading.kind is ScreenKind.EQUIPMENT else "Hero Info"
+        _print_scan(result, kind)
+        if result.build is None:
+            return False
+        issues = _issues(session, result.build, quiet=True)
+        _print_issues(issues)
+        if any(i.severity is Severity.ERROR for i in issues) and not force:
+            typer.echo("  Error: not saved: fix the errors above (or use --force)", err=True)
+            return False
+        if dry_run:
+            typer.echo("  (dry run: nothing saved)")
+            return True
+        if owned is None:
+            created = add_owned_hero(session, result.build)
+            typer.echo(f"  Saved as new roster hero #{created.id}")
+        elif current is not None and _same_build(result.build, current):
+            typer.echo(f"  #{owned.id}: unchanged")
+        else:
+            snapshot = add_snapshot(session, owned, result.build)
+            typer.echo(f"  #{owned.id}: new snapshot {snapshot.id}")
+    return True
 
 
 @roster_app.command("import-fribbels")

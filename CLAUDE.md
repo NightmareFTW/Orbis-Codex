@@ -111,7 +111,8 @@ Key data facts (details in docs/DATA_SOURCES.md):
   preferred): every hero by its own code and game id (`owned_hero.game_id`, migration 0005; copies kept apart), stars,
   awakening, worn gear incl. sets Fribbels does not know. Fields `d`/`s` not used yet (NV-31/32). Real files are local
   fixtures (`fixtures/saves/{fribbels.json,gear.txt}`), never committed.
-- Next: **M9a** passive watch (path B; first speed up the ~15 s scan).
+- **M9a Passive watch — done** (SPEC D54): `vision/watch.py` (settled/new screen detection), `e7 roster watch` (shares `_store_screen` with `roster scan`; OCR engine loaded once). Threshold to tune on the user's PC.
+- Next: user's choice — M8 roster UI, or Phase 2/3 (opponent builds, Arena predictions). The M4.1 gear.txt multi-agent review was interrupted and skipped to save tokens (checked by tests + real data).
 - Game client language: English, sometimes Portuguese → `game_language` setting (D39). Windows version shown by doctor.
 - Roster import paths (D45), picked by the user: A = Fribbels save file (M4, done), B = passive screen
   watch (M9a). Network import inside our app (M5c, D38): **not possible here** — blocked twice by Anthropic's safety
