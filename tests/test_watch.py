@@ -13,7 +13,7 @@ from e7ac.cli import roster as roster_cli
 from e7ac.cli.app import app
 from e7ac.vision.capture import Frame
 from e7ac.vision.watch import ScreenWatcher, differs, thumbnail
-from e7ac.vision.window import WindowError, WindowInfo
+from e7ac.vision.window import Rect, WindowError, WindowInfo
 from tests.test_hero_screen import BBK_ROWS, FakeReader, equipment_screen
 from tests.test_vision import window
 
@@ -56,6 +56,32 @@ def test_small_changes_such_as_an_idle_animation_are_not_a_new_screen() -> None:
     assert differs(thumbnail(base), thumbnail(image(160, (360, 640))))
 
 
+class RecordingSignal:
+    """The watch badge, recorded."""
+
+    def __init__(self) -> None:
+        self.events: list[tuple[object, ...]] = []
+
+    def place(self, area: Rect) -> None:
+        if not self.events or self.events[-1] != ("place", area):
+            self.events.append(("place", area))
+
+    def settling(self) -> None:
+        self.events.append(("settling",))
+
+    def captured(self, waiting: int) -> None:
+        self.events.append(("captured",))
+
+    def result(self, name: str, ok: bool) -> None:
+        self.events.append(("result", name, ok))
+
+    def close(self) -> None:
+        self.events.append(("close",))
+
+
+SIGNALS = RecordingSignal()
+
+
 class FrameQueue:
     """A capture backend that returns prepared frames, then raises KeyboardInterrupt through the sleep hook."""
 
@@ -88,6 +114,8 @@ def watching(monkeypatch: pytest.MonkeyPatch) -> Iterator[dict[str, int]]:
 
     monkeypatch.setattr(roster_cli, "watch_sleep", sleep)
     monkeypatch.setattr(roster_cli, "watch_clock", lambda: clock["now"])
+    monkeypatch.setattr(roster_cli, "signal_factory", lambda beep: (SIGNALS, ""))
+    SIGNALS.events.clear()
     monkeypatch.setattr(capture_cli, "prepare_process", lambda: None)
     monkeypatch.setattr(capture_cli, "window_lister", lambda: [window()])
     monkeypatch.setattr(
@@ -106,6 +134,11 @@ def test_watch_reads_and_stores_each_new_hero_screen(
     assert result.exit_code == 0, result.output
     assert result.stdout.count("Blood Blade Karin:") == 2  # two settled screens
     assert "Saved as new roster hero #1" in result.stdout and "#1: unchanged" in result.stdout
+    kinds = [e[0] for e in SIGNALS.events if e[0] != "place"]
+    assert kinds == ["settling", "captured", "settling", "captured", "result", "result", "close"] or (
+        kinds.count("captured") == 2 and kinds[-1] == "close"  # results may arrive while the next screen settles
+    )
+    assert ("result", "Blood Blade Karin", True) in SIGNALS.events
     assert "Stopped. 2 hero screen(s) read, 2 stored or unchanged, 0 incomplete screen(s) ignored." in result.stdout
 
 
@@ -148,3 +181,51 @@ def test_watch_ignores_incomplete_hero_screens(
 def test_watch_needs_a_catalog(watching: dict[str, int]) -> None:
     result = runner.invoke(app, ["roster", "watch"])
     assert result.exit_code == 2 and "needs the catalog" in result.stderr
+
+
+def test_the_badge_is_off_with_no_signal(
+    watching: dict[str, int], monkeypatch: pytest.MonkeyPatch, synthetic_catalog: list[str]
+) -> None:
+    monkeypatch.setattr(capture_cli, "backend_factory", lambda: FrameQueue([10] * 6))
+    result = runner.invoke(app, ["roster", "watch", "--no-signal", "--dry-run"])
+    assert result.exit_code == 0, result.output
+    assert SIGNALS.events == []
+
+
+def test_the_watcher_says_when_to_hold_still() -> None:
+    watcher = ScreenWatcher(settle=1.0)
+    a, b = thumbnail(image(30)), thumbnail(image(200))
+    states = []
+    for thumb, now in ((a, 0.0), (a, 1.0), (b, 1.5), (b, 2.0), (b, 2.5)):
+        watcher.feed(thumb, now)
+        states.append(watcher.settling)
+    assert states == [True, False, True, True, False]  # read at 1.0 and 2.5: no hold-still once read
+
+
+@pytest.mark.parametrize(
+    ("area", "excluded", "spot"),
+    [
+        (Rect(100, 200, 1600, 900), True, (750, 208)),  # invisible to capture: top centre of the game
+        (Rect(100, 200, 1600, 900), False, (750, 136)),  # visible to capture: just above the game window
+        (Rect(0, 0, 1600, 900), False, (650, 906)),  # no room above: just below
+        (Rect(0, 0, 1920, 1080), False, None),  # full screen: nowhere outside the game, so not shown
+    ],
+)
+def test_the_badge_never_covers_what_is_read(area: Rect, excluded: bool, spot: tuple[int, int] | None) -> None:
+    from e7ac.ui.watch_signal import _spot
+
+    assert _spot(area, excluded, screen_height=1080) == spot
+
+
+@pytest.mark.windows
+def test_the_badge_starts_and_closes_on_windows() -> None:
+    from e7ac.ui.watch_signal import open_signal
+
+    badge, why = open_signal(beep=False)
+    if why:
+        pytest.skip(why)
+    badge.place(Rect(100, 200, 1600, 900))
+    badge.settling()
+    badge.captured(1)
+    badge.result("Blood Blade Karin", True)
+    badge.close()

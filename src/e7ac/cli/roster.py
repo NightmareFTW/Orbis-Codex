@@ -642,6 +642,16 @@ def scan(
 # Pause between two captures and the clock of the watch mode (tests replace them to drive and stop the loop).
 watch_sleep: Callable[[float], None] = time.sleep
 watch_clock: Callable[[], float] = time.monotonic
+
+
+# The visual signal of the watch mode (tests replace it with a recorder).
+def _open_signal(beep: bool) -> tuple[Any, str]:
+    from e7ac.ui.watch_signal import open_signal
+
+    return open_signal(beep)
+
+
+signal_factory: Callable[[bool], tuple[Any, str]] = _open_signal
 WATCH_BACKLOG: Final = 5
 """Screens waiting to be read above which the watch says it is behind (none is ever dropped)."""
 
@@ -658,12 +668,17 @@ def watch(
     ] = 0.04,
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Read and check only; save nothing.")] = False,
     force: Annotated[bool, typer.Option(help="Store even if validation finds errors.")] = False,
+    signal: Annotated[
+        bool, typer.Option(help="Show a small badge on the game: hold still / captured, next hero / result.")
+    ] = True,
+    beep: Annotated[bool, typer.Option(help="Also beep when a screen is captured (and on a failed reading).")] = False,
 ) -> None:
     """Watch the game and read each hero screen you open (Hero Info or the Equipment tab), like `roster scan`.
 
-    Browse your heroes in the game, pausing about 2 seconds on each; screens are captured continuously and read in
-    the background, in order, so none is skipped while another is being read. Read-only: it only copies screen
-    pixels (never a key or click to the game). Other screens are ignored. Press Ctrl+C to stop."""
+    Browse your heroes in the game, pausing on each until the badge on the game says "Captured - next hero" (about
+    2 seconds); screens are captured continuously and read in the background, in order, so none is skipped.
+    Read-only: it only copies screen pixels (never a key or click to the game). Other screens are ignored. Press
+    Ctrl+C to stop."""
     import queue
     import threading
 
@@ -689,6 +704,9 @@ def watch(
     capture_cli.prepare_process()
     backend = capture_cli.backend_factory()
     reader = reader_factory()  # loaded once: each screen then costs only its reading
+    badge, why = signal_factory(beep) if signal else (None, "")
+    if why:
+        typer.echo(f"note: {why}", err=True)
     pending: queue.Queue[tuple[Any, datetime] | None] = queue.Queue()
     counts = {"read": 0, "stored": 0, "ignored": 0}
 
@@ -710,6 +728,8 @@ def watch(
             except typer.Exit:  # e.g. several owned copies: reported, the watch goes on
                 ok = False
             counts["stored"] += ok
+            if badge is not None:
+                badge.result(reading.name, ok)
 
     worker = threading.Thread(target=read_screens, name="e7-watch-reader", daemon=True)
     worker.start()
@@ -730,11 +750,18 @@ def watch(
                 continue
             problem = ""
             image = _frame_image(frame)
+            was_settling = watcher.settling
+            if badge is not None:
+                badge.place(frame.window.client)
             if watcher.feed(thumbnail(image), watch_clock()):
                 pending.put((image, frame.captured_at))
+                if badge is not None:
+                    badge.captured(pending.qsize())
                 if pending.qsize() > WATCH_BACKLOG and not behind:
                     typer.echo(f"  reading is behind ({pending.qsize()} screens waiting): nothing is skipped", err=True)
                 behind = pending.qsize() > WATCH_BACKLOG
+            elif badge is not None and watcher.settling and not was_settling:
+                badge.settling()
             watch_sleep(interval)
     except KeyboardInterrupt:
         pass
@@ -743,6 +770,8 @@ def watch(
     pending.put(None)
     with contextlib.suppress(KeyboardInterrupt):
         worker.join()
+    if badge is not None:
+        badge.close()
     typer.echo(
         f"Stopped. {counts['read']} hero screen(s) read, {counts['stored']} stored or unchanged, "
         f"{counts['ignored']} incomplete screen(s) ignored."

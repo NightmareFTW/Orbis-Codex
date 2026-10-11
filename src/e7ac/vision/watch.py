@@ -52,10 +52,14 @@ class ScreenWatcher:
         self._reference: NDArray[np.float32] | None = None
         self._changed_at = 0.0
         self._read: NDArray[np.float32] | None = None
+        self.settling = False
+        """True while a new screen is shown but not settled yet (the user should hold still)."""
 
     def feed(self, thumb: NDArray[np.float32], now: float) -> bool:
         if self._reference is None or differs(self._reference, thumb, self.threshold):
             self._reference, self._changed_at = thumb, now
+        new = self._read is None or differs(self._read, thumb, self.threshold)
+        self.settling = new and now - self._changed_at < self.settle
         if now - self._changed_at < self.settle:
             return False
         if self._read is not None and not differs(self._read, thumb, self.threshold):
