@@ -8,6 +8,19 @@
 - Batch questions; for non-blocking details pick a sensible default, record it in `docs/SPEC.md` (§9 decisions) and continue.
 - Throwaway experiments go in `spikes/` (never imported by `src/`).
 
+## Pending at the very end of the project: authorship cleanup (user request 2026-10-11)
+When the user says everything is finished — not before — rewrite the repository so it shows only the user's work:
+- every commit's author and committer -> `Diogo Borges <jdiogopessoa@hotmail.com>` (the identity of the user's own
+  GitHub commits); strip the `Co-Authored-By: Claude …` and `Claude-Session: …` lines from every message;
+- method chosen: rewrite in this same repository and force-push `main` (not a new repository). Check first that the
+  environment allows the force-push (branch deletion was refused with HTTP 403 on 2026-10-05);
+- scope to confirm with the user at that time: commits only, or also the content (`CLAUDE.md`, the few mentions of
+  Claude/Anthropic in docs, comments and `.github/workflows/ci.yml`);
+- tell the user what stays outside the history: PR #1 keeps showing the old commits (GitHub cannot delete PRs), the
+  old CI runs keep their messages (the user deletes them), and the remote branch `claude/focused-ride-ollauq`, already
+  merged into `main`, is the user's to delete. After the force-push their local clone must be reset to `origin/main`.
+Until then, keep committing as now (attribution lines included).
+
 ## Golden rules
 - **Never invent game numbers** (multipliers, set bonuses, base stats, formulas, AI behaviour). Every datum carries
   `source` + `status` (`verified` / `community` / `assumed` / `unknown`). Unverifiable → `assumed`, lower confidence,
