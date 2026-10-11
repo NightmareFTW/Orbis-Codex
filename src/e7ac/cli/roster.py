@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import codecs
+import contextlib
 import json
 import time
 from collections import Counter
@@ -638,13 +639,19 @@ def scan(
         raise typer.Exit(code=1)
 
 
-# Pause between two captures of the watch mode (tests replace it to stop the loop).
+# Pause between two captures and the clock of the watch mode (tests replace them to drive and stop the loop).
 watch_sleep: Callable[[float], None] = time.sleep
+watch_clock: Callable[[], float] = time.monotonic
+WATCH_BACKLOG: Final = 5
+"""Screens waiting to be read above which the watch says it is behind (none is ever dropped)."""
 
 
 @roster_app.command("watch")
 def watch(
-    interval: Annotated[float, typer.Option(min=0.2, max=10, help="Seconds between two captures.")] = 1.0,
+    interval: Annotated[float, typer.Option(min=0.1, max=10, help="Seconds between two captures.")] = 0.5,
+    settle: Annotated[
+        float, typer.Option(min=0.2, max=10, help="Seconds a screen must stay still before it is read.")
+    ] = 1.5,
     hwnd: Annotated[int | None, typer.Option(help="Watch this window (handle from e7 capture --list-windows).")] = None,
     threshold: Annotated[
         float, typer.Option(min=0.001, max=0.5, help="How different a screen must be to count as new (0-1).")
@@ -654,8 +661,12 @@ def watch(
 ) -> None:
     """Watch the game and read each hero screen you open (Hero Info or the Equipment tab), like `roster scan`.
 
-    Browse your heroes in the game; each new screen is read once it stops changing. Read-only: it only copies screen
+    Browse your heroes in the game, pausing about 2 seconds on each; screens are captured continuously and read in
+    the background, in order, so none is skipped while another is being read. Read-only: it only copies screen
     pixels (never a key or click to the game). Other screens are ignored. Press Ctrl+C to stop."""
+    import queue
+    import threading
+
     from e7ac.cli import capture as capture_cli
     from e7ac.vision.capture import CaptureError
     from e7ac.vision.watch import ScreenWatcher, thumbnail
@@ -678,43 +689,64 @@ def watch(
     capture_cli.prepare_process()
     backend = capture_cli.backend_factory()
     reader = reader_factory()  # loaded once: each screen then costs only its reading
-    watcher = ScreenWatcher(threshold)
-    typer.echo("Watching the game: open Hero Info (or the Equipment tab) for each hero. Press Ctrl+C to stop.")
-    read = stored = 0
+    pending: queue.Queue[tuple[Any, datetime] | None] = queue.Queue()
+    counts = {"read": 0, "stored": 0, "ignored": 0}
+
+    def read_screens() -> None:  # the background reader: one screen at a time, in capture order
+        while (item := pending.get()) is not None:
+            image, when = item
+            try:
+                lines = reader.read(image)
+                reading = parse_hero_screen(lines, settings.game_language)
+            except ScreenError:
+                continue  # not a hero screen
+            if reading.name is None or reading.level is None or reading.cp is None:
+                counts["ignored"] += 1  # a popup or a screen caught mid-change: never a half-read hero
+                continue
+            counts["read"] += 1
+            typer.echo(f"{when.astimezone():%H:%M:%S} {reading.name}:")
+            try:
+                ok = _store_screen(engine, image, lines, reading, reader, context, when, None, dry_run, force)
+            except typer.Exit:  # e.g. several owned copies: reported, the watch goes on
+                ok = False
+            counts["stored"] += ok
+
+    worker = threading.Thread(target=read_screens, name="e7-watch-reader", daemon=True)
+    worker.start()
+    watcher = ScreenWatcher(threshold, settle)
+    typer.echo("Watching the game: open Hero Info (or the Equipment tab) and pause ~2 s on each hero. Ctrl+C stops.")
     problem = ""
+    behind = False
     try:
         while True:
             try:
                 window = select_game_window(capture_cli.window_lister(), PROFILES[settings.client], hwnd)
                 frame = backend.grab(window)
             except (WindowError, CaptureError) as exc:
-                if str(exc) != problem:  # say it once, not every second
+                if str(exc) != problem:  # say it once, not at every capture
                     typer.echo(f"  waiting: {exc}", err=True)
                 problem = str(exc)
                 watch_sleep(interval)
                 continue
             problem = ""
             image = _frame_image(frame)
-            if watcher.feed(thumbnail(image)):
-                try:
-                    lines = reader.read(image)
-                    reading = parse_hero_screen(lines, settings.game_language)
-                except ScreenError:
-                    reading = None  # not a hero screen: nothing to do
-                if reading is not None:
-                    read += 1
-                    typer.echo(f"{frame.captured_at:%H:%M:%S} {reading.name or '?'}:")
-                    try:
-                        ok = _store_screen(
-                            engine, image, lines, reading, reader, context, frame.captured_at, None, dry_run, force
-                        )
-                    except typer.Exit:  # e.g. several owned copies: reported, the watch goes on
-                        ok = False
-                    stored += ok
+            if watcher.feed(thumbnail(image), watch_clock()):
+                pending.put((image, frame.captured_at))
+                if pending.qsize() > WATCH_BACKLOG and not behind:
+                    typer.echo(f"  reading is behind ({pending.qsize()} screens waiting): nothing is skipped", err=True)
+                behind = pending.qsize() > WATCH_BACKLOG
             watch_sleep(interval)
     except KeyboardInterrupt:
         pass
-    typer.echo(f"Stopped. {read} hero screen(s) read, {stored} stored or unchanged.")
+    if pending.qsize():
+        typer.echo(f"Finishing the {pending.qsize()} screen(s) still waiting... (Ctrl+C again to drop them)")
+    pending.put(None)
+    with contextlib.suppress(KeyboardInterrupt):
+        worker.join()
+    typer.echo(
+        f"Stopped. {counts['read']} hero screen(s) read, {counts['stored']} stored or unchanged, "
+        f"{counts['ignored']} incomplete screen(s) ignored."
+    )
 
 
 def _frame_image(frame: Any) -> Any:

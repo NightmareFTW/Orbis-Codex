@@ -1,8 +1,10 @@
 """Passive watch (M9a, SPEC D45 path B, D54): decide when the game shows a new, settled screen worth reading.
 
-Pure image comparison of small greyscale thumbnails: no OCR, no input to the game. A frame is read once it equals the
-previous frame (the screen stopped changing) and differs from the last frame that was read. The threshold is
-`assumed` (to be tuned on the user's PC: the Hero Info hero model has an idle animation).
+Pure image comparison of small greyscale thumbnails: no OCR, no input to the game. A screen is read once no big
+change happened for `settle` seconds (the game rolls the stat numbers up and fades the bonus in after a hero switch:
+small changes the thumbnail cannot see, so time is what lets them finish) and it differs from the last screen read.
+Threshold and settle time are `assumed` (user's PC, 2026-10-11: reading at the first equal frame caught rolling
+numbers such as "speed 2"; an idle hero animation stays below the threshold).
 """
 
 from __future__ import annotations
@@ -16,6 +18,8 @@ THUMB_SIZE: Final = (64, 36)
 """Width, height of the comparison thumbnail (16:9, like the game window)."""
 DEFAULT_THRESHOLD: Final = 0.04
 """Mean absolute difference (0..1) above which two thumbnails are different screens (`assumed`)."""
+DEFAULT_SETTLE: Final = 1.5
+"""Seconds without a big change before a screen is read (`assumed`: lets number roll-ups and fades finish)."""
 
 
 def thumbnail(image: NDArray[np.uint8]) -> NDArray[np.float32]:
@@ -37,17 +41,24 @@ def differs(a: NDArray[np.float32], b: NDArray[np.float32], threshold: float = D
 
 
 class ScreenWatcher:
-    """Feed one thumbnail per capture; `feed` says when the screen is new and settled (read it now)."""
+    """Feed one thumbnail per capture with the time; `feed` says when the screen is new and settled (read it now).
 
-    def __init__(self, threshold: float = DEFAULT_THRESHOLD) -> None:
+    A change is measured against the screen as it was at the last change (so a slow fade adds up), and only a change
+    above the threshold restarts the settle time."""
+
+    def __init__(self, threshold: float = DEFAULT_THRESHOLD, settle: float = DEFAULT_SETTLE) -> None:
         self.threshold = threshold
-        self._previous: NDArray[np.float32] | None = None
+        self.settle = settle
+        self._reference: NDArray[np.float32] | None = None
+        self._changed_at = 0.0
         self._read: NDArray[np.float32] | None = None
 
-    def feed(self, thumb: NDArray[np.float32]) -> bool:
-        settled = self._previous is not None and not differs(self._previous, thumb, self.threshold)
-        self._previous = thumb
-        if not settled or (self._read is not None and not differs(self._read, thumb, self.threshold)):
+    def feed(self, thumb: NDArray[np.float32], now: float) -> bool:
+        if self._reference is None or differs(self._reference, thumb, self.threshold):
+            self._reference, self._changed_at = thumb, now
+        if now - self._changed_at < self.settle:
+            return False
+        if self._read is not None and not differs(self._read, thumb, self.threshold):
             return False
         self._read = thumb
         return True
