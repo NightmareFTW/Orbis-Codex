@@ -19,12 +19,13 @@ from e7ac.opponents.assumed import Profile, assumed_build
 from e7ac.paths import default_paths
 from e7ac.predict.battle import Combatant, confidence_interval, simulate
 from e7ac.predict.damage import SkillPower, hits_to_defeat, skill_power
+from e7ac.predict.effects import Kit, kit_from
 from e7ac.predict.turn_order import START_CR_MAX, Unit, first_turns
 from e7ac.roster.composition import compose_final_stats
 from e7ac.roster.screen_gear import ScreenCatalog
 from e7ac.roster.store import build_from_row, list_owned
 from e7ac.settings import SettingsError, load_settings
-from e7ac.sources.epic7db import fetch_cooldowns
+from e7ac.sources.epic7db import fetch_kit
 from e7ac.sources.http import FetchError
 from e7ac.sources.stove_usage import UsageError, fetch_hero_usage
 from e7ac.storage.db import session_scope
@@ -52,6 +53,7 @@ class _Fighter:
     name: str = ""
     """Catalog name (epic7db pages are found by it)."""
     cooldowns: dict[int, int] = field(default_factory=dict)
+    kit: Kit = field(default_factory=Kit)
 
 
 @predict_app.command("order")
@@ -111,7 +113,10 @@ def win(
     missing = [f.label for f in fighters if not f.stats]
     if missing:
         _fail(f"no stats for {', '.join(missing)} (Stove has no data: only the speed was given)")
-    units = [Combatant(f.label, f.side, f.stats, f.speed, f.skills, f.cooldowns) for f in fighters]
+    units = [Combatant(f.label, f.side, f.stats, f.speed, f.skills, f.cooldowns, f.kit) for f in fighters]
+    skipped = sorted({name for f in fighters for name in f.kit.unmodelled})
+    if skipped:
+        typer.echo(f"note: effects not simulated yet: {', '.join(skipped)}", err=True)
     unknown = [f.label for f in fighters if 3 not in f.cooldowns and 3 in f.skills]
     if unknown:
         typer.echo(f"note: S3 cooldown unknown for {', '.join(unknown)}: S3 on the first action only", err=True)
@@ -120,7 +125,7 @@ def win(
     typer.echo(f"Win {odds.win:.1%} (+/-{margin:.1%})  loss {odds.loss:.1%}  draw {odds.draw:.1%}")
     typer.echo(
         f"  {odds.runs:,} simulated battles, {odds.mean_actions:.0f} actions on average; confidence: low "
-        "(no buffs, passives, heals, barriers, artifacts or combat set effects yet)"
+        "(skill effects read automatically; no heals, barriers, counters, artifacts or combat set effects yet)"
     )
     for warning in odds.warnings:
         typer.echo(f"  warning: {warning}", err=True)
@@ -190,7 +195,9 @@ def _fighters(team: str, vs: str, world: World | None, offline: bool) -> list[_F
                         fighter.skills[slot] = power
     with catalog_cli.http_factory(paths, offline) as http:
         for fighter in fighters:
-            fighter.cooldowns = fetch_cooldowns(http, fighter.name) if fighter.name else {}
+            skills = fetch_kit(http, fighter.name) if fighter.name else {}
+            fighter.cooldowns = {s: k.cooldown for s, k in skills.items() if k.cooldown is not None}
+            fighter.kit = kit_from(skills)
         for fighter in (f for f in fighters if f.side == "them"):
             try:
                 usage = fetch_hero_usage(http, region, fighter.code)
@@ -234,6 +241,8 @@ def _stats(
             Stat.SPEED: f.speed,
             Stat.CRIT_CHANCE: f.crit_chance,
             Stat.CRIT_DAMAGE: f.crit_damage,
+            Stat.EFFECTIVENESS: f.effectiveness,
+            Stat.EFFECT_RESISTANCE: f.effect_resistance,
         }, ""
     if hero is None:
         return None, "no catalog entry to compute them from gear (run: e7 catalog sync)"

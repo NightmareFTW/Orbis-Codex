@@ -25,6 +25,10 @@ Until then, keep committing as now (attribution lines included).
 Translate the whole user interface (CLI messages, the watch badge, the future window/overlay) to pt-PT, not
 Brazilian. Until then every user-facing text stays in English only.
 
+## Planned for the week of 2026-10-19 (user request 2026-10-12)
+Start the **manual refinement of hero kits** (skill effects read by hand, beyond the automatic epic7db tags of SPEC D63)
+for the heroes the user meets most in Arena: ask the user for that list first, ~0.5–1% of the weekly limit per hero.
+
 ## Golden rules
 - **Never invent game numbers** (multipliers, set bonuses, base stats, formulas, AI behaviour). Every datum carries
   `source` + `status` (`verified` / `community` / `assumed` / `unknown`). Unverifiable → `assumed`, lower confidence,
@@ -130,7 +134,8 @@ Key data facts (details in docs/DATA_SOURCES.md):
 - **M11 slice 1 — done** (SPEC D59): `predict/turn_order.py`, `e7 predict order --team … --vs …` (first-turn odds,
   opponent speed drawn from Stove); slice 2 (D60): `predict/damage.py`, `e7 predict hits` (S1/S3 hits to defeat).
   Slice 3 (D61): `predict/battle.py`, `e7 predict win` (simulated battles, low confidence). Slice 4 (D62): S3
-  cooldowns from epic7db (`sources/epic7db.py`). User chose precision before UI. Next: buffs/debuffs, key passives.
+  cooldowns from epic7db (`sources/epic7db.py`). Slice 5 (D63): skill effects read automatically from epic7db icons
+  and text (`predict/effects.py`). User chose precision before UI. Next: hand refinement (week of 2026-10-19).
 - Game client language: English, sometimes Portuguese → `game_language` setting (D39). Windows version shown by doctor.
 - Roster import paths (D45), picked by the user: A = Fribbels save file (M4, done), B = passive screen
   watch (M9a). Network import inside our app (M5c, D38): **not possible here** — blocked twice by Anthropic's safety
