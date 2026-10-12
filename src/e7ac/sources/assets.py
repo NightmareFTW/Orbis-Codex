@@ -1,4 +1,5 @@
-"""Game artwork used as image references by the screen readers: the official Stove set icons (M7).
+"""Game artwork used as image references by the screen readers: the official Stove set icons (M7) and class icons
+(Arena VS badges, M17a).
 
 The Hero Info screen shows a gear piece's set only as a badge (`vision.sets`), drawn with the same artwork as the
 Stove Strategy Guide's "wearingStatus" set icons (seen in game for 9 sets on the user's captures, 2026-10-04;
@@ -120,6 +121,35 @@ def load_set_icons(cache_dir: Path, codes: Iterable[str]) -> dict[str, bytes]:
             continue  # a damaged cache file counts as missing (reported by the caller, re-fetched by the next sync)
         icons[code] = data
     return icons
+
+
+CLASS_SPRITE_URL: Final = "https://static-pubcomm.onstove.com/live/epic7/brand/images/guide/icon_spr.png"
+"""The Stove guide's icon sprite (460x260 RGBA, 2026-10-12): its top row holds the six class icons, the same white
+icons as on the game's Arena VS badges (SPEC D64). Offsets in `vision.arena_badges`."""
+CLASS_SPRITE_NAMESPACE: Final = "assets/class_icons"
+
+
+def fetch_class_sprite(http: CachedHttp, *, refresh: bool = False) -> str | None:
+    """Download (or revalidate) the class icon sprite: None when a usable copy is cached, else the reason."""
+    try:
+        http.get_bytes(
+            CLASS_SPRITE_NAMESPACE, CLASS_SPRITE_URL, max_age=SET_ICON_MAX_AGE, refresh=refresh, validate=validate_png
+        )
+    except FetchError as exc:
+        return _without_url(exc.reason, CLASS_SPRITE_URL)
+    return None
+
+
+def load_class_sprite(cache_dir: Path) -> bytes | None:
+    """PNG bytes of the cached class icon sprite (cache only), or None."""
+    data = read_cached_bytes(cache_dir, CLASS_SPRITE_NAMESPACE, CLASS_SPRITE_URL)
+    if data is None:
+        return None
+    try:
+        validate_png(data)
+    except ValueError:
+        return None
+    return data
 
 
 def _without_url(reason: str, url: str) -> str:

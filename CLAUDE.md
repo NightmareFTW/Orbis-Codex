@@ -48,7 +48,7 @@ heroes (above); (2) the main window (PySide6, ~150–200 MB: confirm the depende
 ## Commands
 ```bash
 uv sync                      # install (dev group included)
-uv run e7 --help             # CLI: --version, doctor, paths, config, catalog, roster, opponent, predict, capture
+uv run e7 --help             # CLI: --version, doctor, paths, config, catalog, roster, opponent, predict, arena, capture
 uv run pytest                # tests (fixture tests skip if fixtures are missing; network tests need E7AC_NETWORK_TESTS=1)
 uv run ruff check . && uv run ruff format --check .
 uv run mypy                  # strict, src + tests
@@ -139,6 +139,9 @@ Key data facts (details in docs/DATA_SOURCES.md):
   Slice 3 (D61): `predict/battle.py`, `e7 predict win` (simulated battles, low confidence). Slice 4 (D62): S3
   cooldowns from epic7db (`sources/epic7db.py`). Slice 5 (D63): skill effects read automatically from epic7db icons
   and text (`predict/effects.py`). User chose precision before UI. Next: hand refinement (week of 2026-10-19).
+- **M17a slice 1 — done** (SPEC D64): `vision/arena_badges.py`, `arena/{identify,references}.py`, `e7 arena scan CAPTURE
+  [--confirm/--no-confirm] [--win]`: Arena VS screen → badges (element, class) → candidates → asked once, then learned
+  (`<home>/references/arena/`). Local fixtures `fixtures/screenshots/arena/`, `fixtures/stove/class_icons/` (never committed).
 - Game client language: English, sometimes Portuguese → `game_language` setting (D39). Windows version shown by doctor.
 - Roster import paths (D45), picked by the user: A = Fribbels save file (M4, done), B = passive screen
   watch (M9a). Network import inside our app (M5c, D38): **not possible here** — blocked twice by Anthropic's safety

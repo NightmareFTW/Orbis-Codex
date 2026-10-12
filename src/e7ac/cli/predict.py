@@ -12,7 +12,7 @@ from e7ac.catalog.resolve import ResolvedEntity
 from e7ac.catalog.store import current_snapshot, load_entity
 from e7ac.cli import catalog as catalog_cli
 from e7ac.cli.roster import _catalog_heroes, _engine, _fail, _resolve_hero_code, _screen_catalog
-from e7ac.domain.codes import Stat
+from e7ac.domain.codes import Stat, is_hero_code
 from e7ac.domain.roster import HeroBuild
 from e7ac.domain.world import World
 from e7ac.opponents.assumed import Profile, assumed_build
@@ -187,6 +187,8 @@ def _fighters(team: str, vs: str, world: World | None, offline: bool) -> list[_F
             fighters.append(_Fighter(label, "them", _resolve_hero_code(session, label), speed=given or None))
         for fighter in fighters:
             fighter.name = heroes[fighter.code].name if fighter.code in heroes else ""
+            if is_hero_code(fighter.label) and fighter.name:
+                fighter.label = fighter.name  # codes given (e7 arena scan): show names
             if snapshot is not None:
                 for slot in (1, 3):
                     entity = load_entity(session, snapshot.id, EntityType.SKILL, f"{fighter.code}:s{slot}")

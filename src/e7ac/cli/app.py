@@ -8,6 +8,7 @@ from typing import Annotated
 import typer
 
 from e7ac import __version__
+from e7ac.cli.arena import arena_app
 from e7ac.cli.capture import capture as capture_command
 from e7ac.cli.catalog import catalog_app
 from e7ac.cli.opponent import opponent_app
@@ -37,6 +38,7 @@ app.add_typer(catalog_app, name="catalog")
 app.add_typer(roster_app, name="roster")
 app.add_typer(opponent_app, name="opponent")
 app.add_typer(predict_app, name="predict")
+app.add_typer(arena_app, name="arena")
 app.command("capture")(capture_command)
 
 
