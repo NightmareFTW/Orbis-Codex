@@ -101,6 +101,7 @@ Last reviewed: 2026-10-03.
 | MECH-CR-02 | Starting CR = random uniform 0–5% per unit (so +5% speed guarantees order). | e7calc speed tuner/solver | `community` | One web summary claims ±5% in PvP → conflict; keep as parameter. |
 | MECH-CR-03 | Tie-breaking when two units reach 100% simultaneously. | — | `unknown` | |
 | MECH-CR-04 | Extra turn: the unit acts again immediately. | Skill text | `community` | Interaction with CR display to verify. |
+| MECH-CD-01 | A skill with an N-turn cooldown is ready again N of the unit's own turns after it was used; skills are ready at battle start. | epic7db cooldown labels ("5 Turns"); counting rule not confirmed | `assumed` | Used by `predict/battle.py`. NV-33. |
 
 ## 8. Extra actions
 
@@ -178,3 +179,4 @@ skills vs speed buffs (Speed Up = +30% speed per e7calc `spdUp 1.3`, `community`
 | NV-30 | Set badges of the 15 sets not seen in game (artwork assumed = Stove icon); whether a duplicated 2-piece set shows one CP icon per completed set; the CP-row icon order; the Equipment tab's "No set effect" line | Set recognition, pieces vs icons check | Captures wearing those sets / 3× Health |
 | NV-31 | Fribbels importer data `d` per unit: 5 on the four heroes whose imprint the captures show as SSS, 1 on the two with B, 1–9 overall; maybe the imprint (devotion) level on a scale that depends on the hero | Imprint grade from importer data (not used) | More heroes with a known imprint grade (Hero Info captures) |
 | NV-32 | Fribbels importer data `s` per unit: three numbers (e.g. 5/5/5, 6/3/6, 8/–/7) that look like skill enhancement counts | Skill enhancements from importer data (not used) | Skill Enhance screens of 2–3 heroes |
+| NV-33 | Cooldown counting (MECH-CD-01): ready again N or N+1 own turns later; any skill that starts on cooldown | Win probability | A recorded battle: turn of the first and second S3 of one hero |

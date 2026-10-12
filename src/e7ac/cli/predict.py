@@ -24,6 +24,7 @@ from e7ac.roster.composition import compose_final_stats
 from e7ac.roster.screen_gear import ScreenCatalog
 from e7ac.roster.store import build_from_row, list_owned
 from e7ac.settings import SettingsError, load_settings
+from e7ac.sources.epic7db import fetch_cooldowns
 from e7ac.sources.http import FetchError
 from e7ac.sources.stove_usage import UsageError, fetch_hero_usage
 from e7ac.storage.db import session_scope
@@ -48,6 +49,9 @@ class _Fighter:
     """A number, or a sampler of the opponent's likely speeds."""
     spread: str = ""
     skills: dict[int, SkillPower] = field(default_factory=dict)
+    name: str = ""
+    """Catalog name (epic7db pages are found by it)."""
+    cooldowns: dict[int, int] = field(default_factory=dict)
 
 
 @predict_app.command("order")
@@ -100,14 +104,17 @@ def win(
     world: Annotated[World | None, _WORLD] = None,
     offline: Annotated[bool, _OFFLINE] = False,
 ) -> None:
-    """Chance to win, from many simulated battles: turn order (speed, start CR) and damage (S3 first, then S1; focus
-    fire). Opponents use their typical Stove build and a speed drawn from Stove. A first estimate: buffs, passives,
-    heals, barriers, artifacts and combat set effects are not simulated yet."""
+    """Chance to win, from many simulated battles: turn order (speed, start CR) and damage (S3 whenever its cooldown
+    allows, else S1; focus fire). Opponents use their typical Stove build and a speed drawn from Stove. A first
+    estimate: buffs, passives, heals, barriers, artifacts and combat set effects are not simulated yet."""
     fighters = _fighters(team, vs, world, offline)
     missing = [f.label for f in fighters if not f.stats]
     if missing:
         _fail(f"no stats for {', '.join(missing)} (Stove has no data: only the speed was given)")
-    units = [Combatant(f.label, f.side, f.stats, f.speed, f.skills) for f in fighters]
+    units = [Combatant(f.label, f.side, f.stats, f.speed, f.skills, f.cooldowns) for f in fighters]
+    unknown = [f.label for f in fighters if 3 not in f.cooldowns and 3 in f.skills]
+    if unknown:
+        typer.echo(f"note: S3 cooldown unknown for {', '.join(unknown)}: S3 on the first action only", err=True)
     odds = simulate(units)
     margin = confidence_interval(odds.win, odds.runs)
     typer.echo(f"Win {odds.win:.1%} (+/-{margin:.1%})  loss {odds.loss:.1%}  draw {odds.draw:.1%}")
@@ -174,6 +181,7 @@ def _fighters(team: str, vs: str, world: World | None, offline: bool) -> list[_F
             label, _, given = (part.strip() for part in entry.partition("="))
             fighters.append(_Fighter(label, "them", _resolve_hero_code(session, label), speed=given or None))
         for fighter in fighters:
+            fighter.name = heroes[fighter.code].name if fighter.code in heroes else ""
             if snapshot is not None:
                 for slot in (1, 3):
                     entity = load_entity(session, snapshot.id, EntityType.SKILL, f"{fighter.code}:s{slot}")
@@ -181,6 +189,8 @@ def _fighters(team: str, vs: str, world: World | None, offline: bool) -> list[_F
                     if power is not None:
                         fighter.skills[slot] = power
     with catalog_cli.http_factory(paths, offline) as http:
+        for fighter in fighters:
+            fighter.cooldowns = fetch_cooldowns(http, fighter.name) if fighter.name else {}
         for fighter in (f for f in fighters if f.side == "them"):
             try:
                 usage = fetch_hero_usage(http, region, fighter.code)

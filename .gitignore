@@ -36,3 +36,4 @@ build/
 .idea/
 .DS_Store
 Thumbs.db
+fixtures/epic7db/

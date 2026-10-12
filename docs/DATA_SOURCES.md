@@ -307,6 +307,9 @@ ATK 21→273, HP 32→416.
   imprints, awakening; artifact pages.
 - robots.txt: `Disallow:` (empty) → allowed. No licence → personal use only, cached, ≤ 1 req/s.
 - Planned use: skill text + cooldowns + soul gain for kits and mechanic tags (M2/M14). Slug ↔ code mapping via Fribbels `_id`.
+- **Used since 2026-10-12 (SPEC D62)** for skill cooldowns: `<slug>_skill_<n>.webp` icon, then `<div class="cooldown">` with
+  "None" / "Passive" / "<n> Turns"; slug from the catalog name (lower case, apostrophes dropped, symbols → hyphens);
+  the page must contain the hero name. Cached 30 days (`epic7db/heroes`). Real pages are local fixtures (`fixtures/epic7db/`).
 
 ## 5. epic7x.com
 - WordPress; character reviews and a "Skill Multipliers" page. Copyrighted content. Secondary reference only.
