@@ -34,6 +34,8 @@ class SkillPower:
     def_scaling: float = 0.0
     penetration: float = 0.0
     approximate: bool = False
+    targets: int = 1
+    """Enemies hit (Fribbels `targets`; above 1: all enemies, `assumed`)."""
 
 
 def skill_power(entity: ResolvedEntity) -> SkillPower | None:
@@ -50,6 +52,7 @@ def skill_power(entity: ResolvedEntity) -> SkillPower | None:
         def_scaling=_number(entity.value("self_def_scaling")),
         penetration=_number(entity.value("penetration")),
         approximate=any(entity.value(name) is not None for name in _UNMODELLED),
+        targets=int(_number(entity.value("targets")) or 1),
     )
 
 
@@ -61,6 +64,11 @@ def expected_hit(attacker: Mapping[Stat, float], skill: SkillPower, defender: Ma
     crit = min(attacker[Stat.CRIT_CHANCE], 1.0)
     hit_type = crit * min(attacker[Stat.CRIT_DAMAGE], CD_CAP) + (1 - crit)
     return offense * defence * hit_type
+
+
+def base_hit(attacker: Mapping[Stat, float], skill: SkillPower, defender: Mapping[Stat, float]) -> float:
+    """Damage of a non-critical hit (multiply by min(CD, 350%) for a critical one)."""
+    return expected_hit({**attacker, Stat.CRIT_CHANCE: 0.0}, skill, defender)
 
 
 def hits_to_defeat(attacker: Mapping[Stat, float], skill: SkillPower, defender: Mapping[Stat, float]) -> int:

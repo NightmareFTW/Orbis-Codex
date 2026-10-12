@@ -17,6 +17,7 @@ from e7ac.domain.roster import HeroBuild
 from e7ac.domain.world import World
 from e7ac.opponents.assumed import Profile, assumed_build
 from e7ac.paths import default_paths
+from e7ac.predict.battle import Combatant, confidence_interval, simulate
 from e7ac.predict.damage import SkillPower, hits_to_defeat, skill_power
 from e7ac.predict.turn_order import START_CR_MAX, Unit, first_turns
 from e7ac.roster.composition import compose_final_stats
@@ -90,6 +91,32 @@ def hits(
     typer.echo("Hits to defeat, with S1 / S3 (skills fully enhanced; ~ = skill only partly modelled):")
     _table("Your hits", yours, theirs)
     _table("Their hits", theirs, yours)
+
+
+@predict_app.command("win")
+def win(
+    team: Annotated[str, _TEAM],
+    vs: Annotated[str, _VS],
+    world: Annotated[World | None, _WORLD] = None,
+    offline: Annotated[bool, _OFFLINE] = False,
+) -> None:
+    """Chance to win, from many simulated battles: turn order (speed, start CR) and damage (S3 first, then S1; focus
+    fire). Opponents use their typical Stove build and a speed drawn from Stove. A first estimate: buffs, passives,
+    heals, barriers, artifacts and combat set effects are not simulated yet."""
+    fighters = _fighters(team, vs, world, offline)
+    missing = [f.label for f in fighters if not f.stats]
+    if missing:
+        _fail(f"no stats for {', '.join(missing)} (Stove has no data: only the speed was given)")
+    units = [Combatant(f.label, f.side, f.stats, f.speed, f.skills) for f in fighters]
+    odds = simulate(units)
+    margin = confidence_interval(odds.win, odds.runs)
+    typer.echo(f"Win {odds.win:.1%} (+/-{margin:.1%})  loss {odds.loss:.1%}  draw {odds.draw:.1%}")
+    typer.echo(
+        f"  {odds.runs:,} simulated battles, {odds.mean_actions:.0f} actions on average; confidence: low "
+        "(no buffs, passives, heals, barriers, artifacts or combat set effects yet)"
+    )
+    for warning in odds.warnings:
+        typer.echo(f"  warning: {warning}", err=True)
 
 
 def _table(title: str, attackers: list[_Fighter], defenders: list[_Fighter]) -> None:

@@ -129,7 +129,8 @@ Key data facts (details in docs/DATA_SOURCES.md):
   {histogram,assumed}.py`, `e7 opponent show HERO --profile typical|strong|top`.
 - **M11 slice 1 — done** (SPEC D59): `predict/turn_order.py`, `e7 predict order --team … --vs …` (first-turn odds,
   opponent speed drawn from Stove); slice 2 (D60): `predict/damage.py`, `e7 predict hits` (S1/S3 hits to defeat).
-  Next: win probability combining turn order and hits.
+  Slice 3 (D61): `predict/battle.py`, `e7 predict win` (simulated battles, low confidence). Next: skill cooldowns and
+  buffs/debuffs (biggest gaps), then the UI.
 - Game client language: English, sometimes Portuguese → `game_language` setting (D39). Windows version shown by doctor.
 - Roster import paths (D45), picked by the user: A = Fribbels save file (M4, done), B = passive screen
   watch (M9a). Network import inside our app (M5c, D38): **not possible here** — blocked twice by Anthropic's safety
