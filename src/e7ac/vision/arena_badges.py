@@ -91,6 +91,18 @@ class Badge:
         return min(self.element_confidence, self.class_confidence)
 
 
+WORK_HEIGHT: Final = 740
+"""Frames taller than this are shrunk before reading (the badges are measured at 0.5x-2.9x of a 740 px capture;
+faster, and crops get the same size from every capture)."""
+
+
+def normalise(image: BgrImage) -> BgrImage:
+    if image.shape[0] <= WORK_HEIGHT + 20:
+        return image
+    scale = WORK_HEIGHT / image.shape[0]
+    return np.asarray(cv2.resize(image, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA), np.uint8)
+
+
 def class_templates(sprite_png: bytes) -> dict[HeroClass, Template]:
     """The six class icons cut from the Stove guide sprite (top row)."""
     sprite = cv2.imdecode(np.frombuffer(sprite_png, np.uint8), cv2.IMREAD_UNCHANGED)

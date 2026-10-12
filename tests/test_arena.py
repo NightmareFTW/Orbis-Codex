@@ -233,3 +233,37 @@ def test_scan_asks_learns_and_prints_the_predict_command(
     assert len(list((root / "c2011").glob("*.png"))) == 1 and ReferenceStore(root).last_team() == ["c2011"]
     quiet = runner.invoke(app, ["arena", "scan", "vs.png", "--no-confirm"])
     assert quiet.exit_code == 0 and len(list((root / "c2011").glob("*.png"))) == 1  # nothing stored without asking
+
+
+def test_watch_reads_each_vs_screen_once_and_predicts(
+    synthetic_catalog: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from e7ac.cli import arena as arena_cli
+    from e7ac.cli import predict as predict_cli
+    from e7ac.cli.app import app
+
+    vs = np.full((740, 1326, 3), 7, np.uint8)
+    blank = np.zeros((740, 1326, 3), np.uint8)
+    badges = [Badge("you", 100 + 40 * i, 100, 33, 29, Element.DARK, 1.0, HeroClass.THIEF, 1.0) for i in range(4)] + [
+        Badge("them", 900 + 40 * i, 100, 33, 29, Element.FIRE, 1.0, HeroClass.WARRIOR, 1.0) for i in range(4)
+    ]
+
+    def frames(client: object, hwnd: int | None) -> Any:
+        yield from [None, blank, vs, vs, vs, blank, vs, vs]
+        raise KeyboardInterrupt
+
+    def read(image: Any, templates: object) -> list[Badge]:
+        if image[0, 0, 0] != 7:
+            raise ArenaScreenError("not VS")
+        return badges
+
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(arena_cli, "game_frames", frames)
+    monkeypatch.setattr(arena_cli, "_templates", lambda paths, offline: {})
+    monkeypatch.setattr(arena_cli, "read_badges", read)
+    monkeypatch.setattr(predict_cli, "win", lambda team, vs, world, offline: calls.append((team, vs)))
+    result = CliRunner().invoke(app, ["arena", "watch"], input="\n" * 30)
+    assert result.exit_code == 0, result.output
+    # the same hero 4 times on a side is never accepted: asked (skipped here), so no prediction yet
+    assert "Not identified" in result.output and calls == []
+    assert len(list((default_paths().captures_dir / "arena").glob("*.png"))) == 2  # one per VS screen shown
