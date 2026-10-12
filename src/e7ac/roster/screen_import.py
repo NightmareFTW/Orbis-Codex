@@ -13,7 +13,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Final
@@ -30,7 +30,12 @@ from e7ac.vision.hero_screen import HeroScreenReading, ScreenKind
 from e7ac.vision.labels import match_label
 
 if TYPE_CHECKING:  # imports OpenCV: loaded only when a capture is read
+    from e7ac.vision.bonus_cells import BonusReread
     from e7ac.vision.hero_info import HeroImageReading
+
+BonusRereader = Callable[[Sequence[Stat], Callable[[Stat, float | None], bool]], Mapping[Stat, "BonusReread"]]
+"""Re-reads the "▲" bonus cells of the given rows of the capture; the callable accepts a candidate bonus (None: no
+bonus) only when it agrees with the catalog base (`vision.bonus_cells.reread_bonuses`, SPEC D57)."""
 
 FINAL_FIELDS: Final[Mapping[Stat, str]] = {
     Stat.ATK: "atk",
@@ -115,10 +120,12 @@ def build_from_screen(
     existing: HeroBuild | None = None,
     images: HeroImageReading | None = None,
     catalog: ScreenCatalog | None = None,
+    reread: BonusRereader | None = None,
 ) -> ScreenBuild:
     """`heroes`: catalog hero entities by code. `existing`: the hero's current build (fields the screen lacks).
     `images`: what the image readers found on a Hero Info capture (gear, icons, stars); `catalog`: the artifact and
-    set entities for the final-stat check."""
+    set entities for the final-stat check; `reread`: re-reads the bonus of Equipment-tab rows the base check does not
+    confirm."""
     result = ScreenBuild(hero_name=reading.name)
     result.notes.extend(f"screen: {w}" for w in reading.warnings)
     code = _hero_code(reading, heroes, result)
@@ -138,7 +145,7 @@ def build_from_screen(
     if reading.kind is ScreenKind.EQUIPMENT and reading.level not in (None, BASE_LEVEL):
         result.notes.append(f"Lv. {reading.level}: the base-stat check is for Lv. {BASE_LEVEL} heroes only, not run")
     elif reading.kind is ScreenKind.EQUIPMENT:
-        _base_checks(reading, hero, result, confidence)
+        _base_checks(reading, hero, result, confidence, reread)
     elif images is None or not images.panel.present:
         result.notes.append("Hero Info screen: no '▲' bonus shown, so the base-stat check is not possible")
     data: dict[str, Any] = existing.model_dump() if existing is not None else {"hero_code": code}
@@ -230,15 +237,35 @@ def _final_stats(reading: HeroScreenReading, result: ScreenBuild) -> FinalStats 
 
 
 def _base_checks(
-    reading: HeroScreenReading, hero: ResolvedEntity, result: ScreenBuild, confidence: dict[str, float]
+    reading: HeroScreenReading,
+    hero: ResolvedEntity,
+    result: ScreenBuild,
+    confidence: dict[str, float],
+    reread: BonusRereader | None,
 ) -> None:
-    unchecked = []
+    checks: dict[Stat, BaseCheck] = {}
+    finals: dict[Stat, float] = {}
     for stat, stat_reading in reading.stats.items():
         expected = hero.value(BASE_FIELDS[stat])
         if stat_reading.final is None or not isinstance(expected, (int, float)) or isinstance(expected, bool):
             continue
-        observed = round(stat_reading.final - (stat_reading.bonus or 0.0), 6)
-        check = BaseCheck(stat, observed, float(expected), bonus_read=stat_reading.bonus is not None)
+        finals[stat] = stat_reading.final
+        checks[stat] = _check(stat, stat_reading.final, stat_reading.bonus, float(expected))
+    unsettled = [stat for stat, check in checks.items() if check.verdict != "ok"]
+    if reread is not None and unsettled:
+
+        def agrees(stat: Stat, bonus: float | None) -> bool:  # only ever a filter on what the OCR read
+            return _check(stat, finals[stat], bonus, checks[stat].expected).ok
+
+        found = reread(unsettled, agrees)
+        for stat, cell in found.items():
+            checks[stat] = _check(stat, finals[stat], cell.bonus, checks[stat].expected)
+        if found:
+            result.notes.append(
+                f"bonus re-read from its cell for {', '.join(s.value for s in found)}: agrees with the catalog base"
+            )
+    unchecked = []
+    for stat, check in checks.items():
         result.base_checks.append(check)
         key = f"final_stats.{FINAL_FIELDS[stat]}"
         if check.verdict == "ok":
@@ -256,6 +283,10 @@ def _base_checks(
             f"bonus not read for {', '.join(unchecked)}: not checked against the catalog base (the values are "
             "probably right; a new capture can check them)"
         )
+
+
+def _check(stat: Stat, final: float, bonus: float | None, expected: float) -> BaseCheck:
+    return BaseCheck(stat, round(final - (bonus or 0.0), 6), expected, bonus_read=bonus is not None)
 
 
 def _level_and_stars(

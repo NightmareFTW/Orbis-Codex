@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import cached_property
-from typing import Any, Final, Protocol
+from typing import Any, Final, Protocol, runtime_checkable
 
 INTRA_OP_THREADS: Final = 4
 """Keep inference from taking every core while the game runs."""
@@ -53,6 +53,13 @@ class TextReader(Protocol):
     def read(self, image: Any) -> list[TextLine]: ...
 
 
+@runtime_checkable
+class CellReader(Protocol):
+    """Recognition alone (no text detection) of small images that each hold one text: a value cell re-read."""
+
+    def recognise(self, images: Sequence[Any]) -> list[tuple[str, float]]: ...
+
+
 def _box(points: Sequence[Sequence[float]]) -> Box:
     xs = [float(p[0]) for p in points]
     ys = [float(p[1]) for p in points]
@@ -74,6 +81,16 @@ class RapidOcrReader:
                 "EngineConfig.onnxruntime.intra_op_num_threads": INTRA_OP_THREADS,
             }
         )
+
+    def recognise(self, images: Sequence[Any]) -> list[tuple[str, float]]:
+        """(text, score) per image, in one batch, by the recogniser alone. Called on it directly: the engine's own
+        call (`use_det=False`) would keep that option as engine state for the next full-frame read."""
+        from rapidocr.ch_ppocr_rec import TextRecInput
+
+        if not images:
+            return []
+        result = self._engine.text_rec(TextRecInput(img=list(images), return_word_box=False))
+        return [(str(text), float(score)) for text, score in zip(result.txts, result.scores, strict=True)]
 
     def read(self, image: Any) -> list[TextLine]:
         result = self._engine(image, return_word_box=True)

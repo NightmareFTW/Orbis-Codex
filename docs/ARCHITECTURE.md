@@ -76,7 +76,7 @@ src/e7ac/
   catalog/       # fact store, merge/resolve rules, snapshots, coverage/conflict reports
   roster/        # importers (screen_import + screen_gear, fribbels_import, manual), pieces (same physical piece
                  # across sources), composition check, validation, history, JSON backup
-  vision/        # capture, window, screens (hero_screen, gear_panel, hero_info), ocr, icon classifiers
+  vision/        # capture, window, screens (hero_screen, bonus_cells, gear_panel, hero_info), watch, ocr, icon classifiers
                  # (stat_icons, sets, imprint_icon, star_row); a labelling tool later (M8)
   opponents/     # histogram model, profiles (P50/P75/P90), sampler, CP calibration
   predict/       # features, heuristic model, explanation text

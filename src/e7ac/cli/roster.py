@@ -7,7 +7,7 @@ import contextlib
 import json
 import time
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -47,7 +47,7 @@ from e7ac.storage.db import open_database, session_scope
 from e7ac.storage.models import CatalogEntityRow, HeroSnapshotRow, OwnedHeroRow
 from e7ac.vision.hero_screen import HeroScreenReading, ScreenError, ScreenKind, parse_hero_screen
 from e7ac.vision.image import ImageError, captured_at, expand_image_paths, load_image
-from e7ac.vision.ocr import RapidOcrReader, TextLine, TextReader
+from e7ac.vision.ocr import CellReader, RapidOcrReader, TextLine, TextReader
 
 if TYPE_CHECKING:
     from e7ac.roster.fribbels_import import HeroImport
@@ -866,10 +866,23 @@ def _store_screen(
             set_matcher=context.matcher,
             language=context.language,
         )
+    reread = None
+    if reading.kind is ScreenKind.EQUIPMENT and isinstance(reader, CellReader):
+        from e7ac.vision.bonus_cells import reread_bonuses
+
+        def reread(stats: Sequence[Stat], accept: Callable[[Stat, float | None], bool]) -> Any:
+            return reread_bonuses(image, reading, lines, reader, stats, accept)
+
     with session_scope(engine) as session:
         owned, current = _scan_target(session, reading, context.heroes, owned_id)
         result = build_from_screen(
-            reading, context.heroes, captured_at=when, existing=current, images=seen, catalog=context.catalog
+            reading,
+            context.heroes,
+            captured_at=when,
+            existing=current,
+            images=seen,
+            catalog=context.catalog,
+            reread=reread,
         )
         kind = "Equipment tab" if reading.kind is ScreenKind.EQUIPMENT else "Hero Info"
         _print_scan(result, kind)
