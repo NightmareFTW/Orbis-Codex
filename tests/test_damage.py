@@ -18,3 +18,9 @@ def test_expected_hit_follows_the_documented_formula() -> None:
     hit_type = 0.5 * 3.5 + 0.5  # crit damage capped at 350% (MECH-DMG-05)
     assert expected_hit(ATTACKER, skill, DEFENDER) == pytest.approx(offense * defence * hit_type)
     assert hits_to_defeat(ATTACKER, skill, DEFENDER) == 3  # 20000 / ~9261 per hit
+
+
+def test_a_skill_that_cannot_crit_never_does() -> None:
+    plain = SkillPower(rate=1.0, pow=1.0, enhance=0.0)
+    fixed = SkillPower(rate=1.0, pow=1.0, enhance=0.0, can_crit=False)
+    assert expected_hit(ATTACKER, fixed, DEFENDER) == pytest.approx(expected_hit(ATTACKER, plain, DEFENDER) / 2.25)

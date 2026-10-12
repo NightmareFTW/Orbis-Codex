@@ -34,6 +34,8 @@ class SkillPower:
     def_scaling: float = 0.0
     penetration: float = 0.0
     approximate: bool = False
+    can_crit: bool = True
+    """False when the skill's hit types (Fribbels `hit_types`) leave out "crit" (e.g. a fixed-damage skill)."""
     targets: int = 1
     """Enemies hit (Fribbels `targets`; above 1: all enemies, `assumed`)."""
 
@@ -52,6 +54,7 @@ def skill_power(entity: ResolvedEntity) -> SkillPower | None:
         def_scaling=_number(entity.value("self_def_scaling")),
         penetration=_number(entity.value("penetration")),
         approximate=any(entity.value(name) is not None for name in _UNMODELLED),
+        can_crit=not isinstance(hit_types := entity.value("hit_types"), list) or "crit" in hit_types,
         targets=int(_number(entity.value("targets")) or 1),
     )
 
@@ -61,7 +64,7 @@ def expected_hit(attacker: Mapping[Stat, float], skill: SkillPower, defender: Ma
     offense += attacker[Stat.DEF] * skill.def_scaling
     offense *= ATK_CONSTANT * skill.pow * (1 + skill.enhance)
     defence = 1 / (1 + defender[Stat.DEF] * (1 - skill.penetration) / 300)
-    crit = min(attacker[Stat.CRIT_CHANCE], 1.0)
+    crit = min(attacker[Stat.CRIT_CHANCE], 1.0) if skill.can_crit else 0.0
     hit_type = crit * min(attacker[Stat.CRIT_DAMAGE], CD_CAP) + (1 - crit)
     return offense * defence * hit_type
 

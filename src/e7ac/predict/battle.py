@@ -88,7 +88,7 @@ def _battle(
         skill = unit.skills.get(slot)
         if skill is not None and enemies:
             targets = enemies if skill.targets > 1 else [min(enemies, key=lambda j: hp[j] / hits[(actor, j, slot)])]
-            crit = rng.random() < min(unit.stats[Stat.CRIT_CHANCE], 1.0)
+            crit = skill.can_crit and rng.random() < min(unit.stats[Stat.CRIT_CHANCE], 1.0)
             factor = min(unit.stats[Stat.CRIT_DAMAGE], CD_CAP) if crit else 1.0
             for j in targets:
                 hp[j] -= hits[(actor, j, slot)] * factor
