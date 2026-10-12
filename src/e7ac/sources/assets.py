@@ -16,13 +16,13 @@ works offline.
 from __future__ import annotations
 
 import struct
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
 from typing import Final
 
-from e7ac.domain.codes import is_set_code
+from e7ac.domain.codes import is_hero_code, is_set_code
 from e7ac.sources.http import CachedHttp, FetchError, read_cached_bytes
 
 SET_ICON_URL: Final = "https://static-pubcomm.onstove.com/event/live/epic7/guide/wearingStatus/images/sets/{code}.png"
@@ -150,6 +150,52 @@ def load_class_sprite(cache_dir: Path) -> bytes | None:
     except ValueError:
         return None
     return data
+
+
+HERO_ICON_URL: Final = "https://static-pubcomm.onstove.com/event/live/epic7/guide/images/hero/{code}_s.png"
+"""The game's own hero face icon (112x112; byte-identical to the game file for c1104, 2026-10-12): the Arena Attack
+Guide shows the opponent's defence team with these faces (SPEC D66)."""
+HERO_ICON_NAMESPACE: Final = "assets/hero_icons"
+
+
+def hero_icon_url(code: str) -> str:
+    if not is_hero_code(code):
+        raise ValueError(f"not a hero code: {code!r}")
+    return HERO_ICON_URL.format(code=code)
+
+
+def fetch_hero_icons(
+    http: CachedHttp, codes: Iterable[str], *, progress: Callable[[int, int], None] | None = None
+) -> dict[str, str]:
+    """Download the face icon of every hero code not cached yet (one request per second): code -> reason for each
+    failure. Cached icons are not revalidated here (art rarely changes; a new hero is a new code)."""
+    wanted = sorted({c for c in codes if is_hero_code(c)})
+    missing = [c for c in wanted if read_cached_bytes(http.cache_dir, HERO_ICON_NAMESPACE, hero_icon_url(c)) is None]
+    failed: dict[str, str] = {}
+    for done, code in enumerate(missing, 1):
+        url = hero_icon_url(code)
+        try:
+            http.get_bytes(HERO_ICON_NAMESPACE, url, max_age=timedelta(days=3650), validate=validate_png)
+        except FetchError as exc:
+            failed[code] = _without_url(exc.reason, url)
+        if progress is not None:
+            progress(done, len(missing))
+    return failed
+
+
+def load_hero_icons(cache_dir: Path, codes: Iterable[str]) -> dict[str, bytes]:
+    """PNG bytes of the cached hero face icons among `codes` (cache only)."""
+    icons: dict[str, bytes] = {}
+    for code in sorted({c for c in codes if is_hero_code(c)}):
+        data = read_cached_bytes(cache_dir, HERO_ICON_NAMESPACE, hero_icon_url(code))
+        if data is None:
+            continue
+        try:
+            validate_png(data)
+        except ValueError:
+            continue
+        icons[code] = data
+    return icons
 
 
 def _without_url(reason: str, url: str) -> str:

@@ -17,7 +17,7 @@ from e7ac.domain.roster import HeroBuild
 from e7ac.domain.world import World
 from e7ac.opponents.assumed import Profile, assumed_build
 from e7ac.paths import default_paths
-from e7ac.predict.battle import Combatant, confidence_interval, simulate
+from e7ac.predict.battle import BattleOdds, Combatant, confidence_interval, simulate
 from e7ac.predict.damage import SkillPower, hits_to_defeat, skill_power
 from e7ac.predict.effects import Kit, kit_from
 from e7ac.predict.turn_order import START_CR_MAX, Unit, first_turns
@@ -109,6 +109,11 @@ def win(
     """Chance to win, from many simulated battles: turn order (speed, start CR) and damage (S3 whenever its cooldown
     allows, else S1; focus fire). Opponents use their typical Stove build and a speed drawn from Stove. A first
     estimate: buffs, passives, heals, barriers, artifacts and combat set effects are not simulated yet."""
+    win_odds(team, vs, world, offline)
+
+
+def win_odds(team: str, vs: str, world: World | None, offline: bool) -> BattleOdds:
+    """`predict win` with its printout; the odds are returned (the Arena watch shows them on its badge)."""
     fighters = _fighters(team, vs, world, offline)
     missing = [f.label for f in fighters if not f.stats]
     if missing:
@@ -129,6 +134,7 @@ def win(
     )
     for warning in odds.warnings:
         typer.echo(f"  warning: {warning}", err=True)
+    return odds
 
 
 def _table(title: str, attackers: list[_Fighter], defenders: list[_Fighter]) -> None:
