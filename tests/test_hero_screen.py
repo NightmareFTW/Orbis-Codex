@@ -225,6 +225,21 @@ def test_equipment_screen_build_is_cross_checked_with_the_catalog() -> None:
     assert build.confidence["final_stats.atk"] == 1.0 and build.confidence["awakening"] == ASSUMED
     assert build.imprint == Imprint(grade=ImprintGrade.SSS, stat=Stat.EFFECTIVENESS, value=0.15, mode=ImprintMode.SELF)
     assert build.confidence["imprint.mode"] == build.confidence["imprint.grade"] == INFERRED_MODE
+    assert not result.doubtful
+
+
+def test_a_failed_base_check_makes_the_reading_doubtful() -> None:
+    rows = [(label, final, None if label == "Health" else bonus) for label, final, bonus in STAT_ROWS]  # ▲ unread
+    result = build_from_screen(parse_hero_screen(equipment_screen(rows=rows)), {"c1193": RENOA}, captured_at=NOW)
+    assert result.build is not None and result.doubtful
+    assert [check.stat for check in result.base_checks if not check.ok] == [Stat.HP]
+
+
+def test_the_base_check_is_not_run_below_level_60() -> None:
+    lines = [line("Lv. 5/50", 162, 315, height=55) if ln.text == "Lv. Max/60" else ln for ln in equipment_screen()]
+    result = build_from_screen(parse_hero_screen(lines), {"c1193": RENOA}, captured_at=NOW)
+    assert result.build is not None and result.base_checks == [] and not result.doubtful
+    assert "Lv. 5: the base-stat check is for Lv. 60 heroes only, not run" in result.notes
 
 
 def test_the_imprint_mode_is_inferred_only_from_clear_catalog_evidence() -> None:

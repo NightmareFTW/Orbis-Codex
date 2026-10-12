@@ -11,6 +11,7 @@ from typer.testing import CliRunner
 from e7ac.cli import capture as capture_cli
 from e7ac.cli import roster as roster_cli
 from e7ac.cli.app import app
+from e7ac.paths import default_paths
 from e7ac.vision.capture import Frame
 from e7ac.vision.watch import ScreenWatcher, differs, thumbnail
 from e7ac.vision.window import Rect, WindowError, WindowInfo
@@ -72,8 +73,8 @@ class RecordingSignal:
     def captured(self, waiting: int) -> None:
         self.events.append(("captured",))
 
-    def result(self, name: str, ok: bool) -> None:
-        self.events.append(("result", name, ok))
+    def result(self, name: str, outcome: str) -> None:
+        self.events.append(("result", name, outcome))
 
     def close(self) -> None:
         self.events.append(("close",))
@@ -138,8 +139,25 @@ def test_watch_reads_and_stores_each_new_hero_screen(
     assert kinds == ["settling", "captured", "settling", "captured", "result", "result", "close"] or (
         kinds.count("captured") == 2 and kinds[-1] == "close"  # results may arrive while the next screen settles
     )
-    assert ("result", "Blood Blade Karin", True) in SIGNALS.events
+    assert ("result", "Blood Blade Karin", "stored") in SIGNALS.events
     assert "Stopped. 2 hero screen(s) read, 2 stored or unchanged, 0 incomplete screen(s) ignored." in result.stdout
+
+
+def test_a_doubtful_reading_is_stored_flagged_and_its_capture_kept(
+    watching: dict[str, int], monkeypatch: pytest.MonkeyPatch, synthetic_catalog: list[str]
+) -> None:
+    rows = [(label, final, None if label == "Health" else bonus) for label, final, bonus in BBK_ROWS]  # ▲ unread
+    monkeypatch.setattr(
+        roster_cli, "reader_factory", lambda: FakeReader(equipment_screen(rows=rows, name="Blood Blade Karin"))
+    )
+    monkeypatch.setattr(capture_cli, "backend_factory", lambda: FrameQueue([10] * 6))
+    result = runner.invoke(app, ["roster", "watch"])
+    assert result.exit_code == 0, result.output
+    assert "Saved as new roster hero #1" in result.stdout
+    assert ("result", "Blood Blade Karin", "doubtful") in SIGNALS.events
+    kept = list((default_paths().captures_dir / "watch").glob("*-Blood_Blade_Karin.png"))
+    assert len(kept) == 1 and f"capture kept: {kept[0]}" in result.stdout
+    assert "1 screen(s) not stored or with a failed check: their captures are in" in result.stdout
 
 
 def test_watch_waits_for_the_game_window_and_says_so_once(
@@ -227,5 +245,6 @@ def test_the_badge_starts_and_closes_on_windows() -> None:
     badge.place(Rect(100, 200, 1600, 900))
     badge.settling()
     badge.captured(1)
-    badge.result("Blood Blade Karin", True)
+    badge.result("Blood Blade Karin", "stored")
+    badge.result("Blood Blade Karin", "doubtful")
     badge.close()

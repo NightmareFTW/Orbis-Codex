@@ -21,6 +21,10 @@ When the user says everything is finished — not before — rewrite the reposit
   merged into `main`, is the user's to delete. After the force-push their local clone must be reset to `origin/main`.
 Until then, keep committing as now (attribution lines included).
 
+## Pending at the very end of the project: interface in European Portuguese (user request 2026-10-11)
+Translate the whole user interface (CLI messages, the watch badge, the future window/overlay) to pt-PT, not
+Brazilian. Until then every user-facing text stays in English only.
+
 ## Golden rules
 - **Never invent game numbers** (multipliers, set bonuses, base stats, formulas, AI behaviour). Every datum carries
   `source` + `status` (`verified` / `community` / `assumed` / `unknown`). Unverifiable → `assumed`, lower confidence,
@@ -112,6 +116,9 @@ Key data facts (details in docs/DATA_SOURCES.md):
   awakening, worn gear incl. sets Fribbels does not know. Fields `d`/`s` not used yet (NV-31/32). Real files are local
   fixtures (`fixtures/saves/{fribbels.json,gear.txt}`), never committed.
 - **M9a Passive watch — done** (SPEC D54): `vision/watch.py` (settled/new screen detection), `e7 roster watch` (shares `_store_screen` with `roster scan`; background reader; settle time) and its badge `ui/watch_signal.py` (D55: hold still / captured / result; excluded from capture). Threshold and settle time to tune on the user's PC.
+  Doubtful readings (D56): stored, amber on the badge, capture kept in `captures/watch/`; base check only at Lv. 60.
+  Open: live frames misread some stats (missing ▲ bonus, mostly Health; Speed read as one digit) — waiting for the
+  user's kept captures to find the cause.
 - Next: user's choice — M8 roster UI, or Phase 2/3 (opponent builds, Arena predictions). The M4.1 gear.txt multi-agent review was interrupted and skipped to save tokens (checked by tests + real data).
 - Game client language: English, sometimes Portuguese → `game_language` setting (D39). Windows version shown by doctor.
 - Roster import paths (D45), picked by the user: A = Fribbels save file (M4, done), B = passive screen

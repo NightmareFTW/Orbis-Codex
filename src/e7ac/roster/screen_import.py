@@ -54,6 +54,8 @@ _TWINS: Final[Mapping[Stat, str]] = {
     Stat.HP_PERCENT: Stat.HP.value,
 }
 """Flat and percent versions of a stat: a lost '%' turns one into the other."""
+BASE_LEVEL: Final = 60
+"""The catalog base stats are those of a Lv. 60 hero (MECH-STAT-03); a lower level has lower base stats."""
 ASSUMED: Final = 0.0
 """Confidence of a field the screen does not show and that had no previous value (a placeholder to correct)."""
 INFERRED_MODE: Final = 0.8
@@ -87,6 +89,13 @@ class ScreenBuild:
     composition: CompositionReport | None = None
     """The final-stat check of a Hero Info capture whose gear was read (None when it did not run)."""
 
+    @property
+    def doubtful(self) -> bool:
+        """A build was made, but a check disagrees: a stat was probably misread (worth a look, or a new capture)."""
+        failed_base = any(not check.ok for check in self.base_checks)
+        failed_composition = self.composition is not None and self.composition.applicable and self.composition.warnings
+        return self.build is not None and (failed_base or bool(failed_composition))
+
 
 def build_from_screen(
     reading: HeroScreenReading,
@@ -116,7 +125,9 @@ def build_from_screen(
     confidence: dict[str, float] = {}
     for stat, stat_reading in reading.stats.items():
         confidence[f"final_stats.{FINAL_FIELDS[stat]}"] = stat_reading.confidence
-    if reading.kind is ScreenKind.EQUIPMENT:
+    if reading.kind is ScreenKind.EQUIPMENT and reading.level not in (None, BASE_LEVEL):
+        result.notes.append(f"Lv. {reading.level}: the base-stat check is for Lv. {BASE_LEVEL} heroes only, not run")
+    elif reading.kind is ScreenKind.EQUIPMENT:
         _base_checks(reading, hero, result, confidence)
     elif images is None or not images.panel.present:
         result.notes.append("Hero Info screen: no '▲' bonus shown, so the base-stat check is not possible")

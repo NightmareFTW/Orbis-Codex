@@ -10,6 +10,7 @@ from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Final, NoReturn
 
@@ -631,9 +632,10 @@ def scan(
             typer.echo(f"  Error: {exc}", err=True)
             failed += 1
             continue
-        if not _store_screen(
+        outcome = _store_screen(
             engine, image, lines, reading, reader, context, captured_at(path), owned_id, dry_run, force
-        ):
+        )
+        if outcome is ScreenOutcome.FAILED:
             failed += 1
     if failed:
         raise typer.Exit(code=1)
@@ -672,6 +674,13 @@ def watch(
         bool, typer.Option(help="Show a small badge on the game: hold still / captured, next hero / result.")
     ] = True,
     beep: Annotated[bool, typer.Option(help="Also beep when a screen is captured (and on a failed reading).")] = False,
+    keep_doubtful: Annotated[
+        bool,
+        typer.Option(
+            help="Save the capture of each screen not stored or with a failed check (in the captures folder), "
+            "to look at it or read it again with e7 roster scan."
+        ),
+    ] = True,
 ) -> None:
     """Watch the game and read each hero screen you open (Hero Info or the Equipment tab), like `roster scan`.
 
@@ -683,7 +692,7 @@ def watch(
     import threading
 
     from e7ac.cli import capture as capture_cli
-    from e7ac.vision.capture import CaptureError
+    from e7ac.vision.capture import CaptureError, Frame, capture_name, save_png
     from e7ac.vision.watch import ScreenWatcher, thumbnail
     from e7ac.vision.window import PROFILES, WindowError, select_game_window
 
@@ -707,12 +716,14 @@ def watch(
     badge, why = signal_factory(beep) if signal else (None, "")
     if why:
         typer.echo(f"note: {why}", err=True)
-    pending: queue.Queue[tuple[Any, datetime] | None] = queue.Queue()
-    counts = {"read": 0, "stored": 0, "ignored": 0}
+    pending: queue.Queue[tuple[Any, Frame] | None] = queue.Queue()
+    counts = {"read": 0, "stored": 0, "doubtful": 0, "ignored": 0}
+    doubtful_dir = default_paths().captures_dir / "watch"
 
     def read_screens() -> None:  # the background reader: one screen at a time, in capture order
         while (item := pending.get()) is not None:
-            image, when = item
+            image, frame = item
+            when = frame.captured_at
             try:
                 lines = reader.read(image)
                 reading = parse_hero_screen(lines, settings.game_language)
@@ -724,12 +735,18 @@ def watch(
             counts["read"] += 1
             typer.echo(f"{when.astimezone():%H:%M:%S} {reading.name}:")
             try:
-                ok = _store_screen(engine, image, lines, reading, reader, context, when, None, dry_run, force)
+                outcome = _store_screen(engine, image, lines, reading, reader, context, when, None, dry_run, force)
             except typer.Exit:  # e.g. several owned copies: reported, the watch goes on
-                ok = False
-            counts["stored"] += ok
+                outcome = ScreenOutcome.FAILED
+            counts["stored"] += outcome is not ScreenOutcome.FAILED
+            if outcome is not ScreenOutcome.STORED:
+                counts["doubtful"] += 1
+                if keep_doubtful:
+                    name = capture_name(when.astimezone(), reading.name, lambda n: (doubtful_dir / n).exists())
+                    path = save_png(frame, doubtful_dir / name)
+                    typer.echo(f"  capture kept: {path}")
             if badge is not None:
-                badge.result(reading.name, ok)
+                badge.result(reading.name, outcome.value)
 
     worker = threading.Thread(target=read_screens, name="e7-watch-reader", daemon=True)
     worker.start()
@@ -754,7 +771,7 @@ def watch(
             if badge is not None:
                 badge.place(frame.window.client)
             if watcher.feed(thumbnail(image), watch_clock()):
-                pending.put((image, frame.captured_at))
+                pending.put((image, frame))
                 if badge is not None:
                     badge.captured(pending.qsize())
                 if pending.qsize() > WATCH_BACKLOG and not behind:
@@ -776,6 +793,9 @@ def watch(
         f"Stopped. {counts['read']} hero screen(s) read, {counts['stored']} stored or unchanged, "
         f"{counts['ignored']} incomplete screen(s) ignored."
     )
+    if counts["doubtful"]:
+        kept = f": their captures are in {doubtful_dir}" if keep_doubtful else ""
+        typer.echo(f"{counts['doubtful']} screen(s) not stored or with a failed check{kept}")
 
 
 def _frame_image(frame: Any) -> Any:
@@ -784,6 +804,15 @@ def _frame_image(frame: Any) -> Any:
 
     rgb = np.frombuffer(frame.rgb, dtype=np.uint8).reshape(frame.height, frame.width, 3)
     return np.ascontiguousarray(rgb[:, :, ::-1])
+
+
+class ScreenOutcome(StrEnum):
+    STORED = "stored"
+    """Stored, unchanged, or checked in a dry run."""
+    DOUBTFUL = "doubtful"
+    """Stored (or checked in a dry run), but a check disagrees: a stat was probably misread."""
+    FAILED = "failed"
+    """Nothing stored."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -808,8 +837,8 @@ def _store_screen(
     owned_id: int | None,
     dry_run: bool,
     force: bool,
-) -> bool:
-    """Build, check and store one hero screen reading (scan and watch). False when nothing could be stored."""
+) -> ScreenOutcome:
+    """Build, check and store one hero screen reading (scan and watch)."""
     from e7ac.vision.hero_info import read_hero_images  # OpenCV: loaded only when captures are read
 
     seen = None
@@ -831,15 +860,16 @@ def _store_screen(
         kind = "Equipment tab" if reading.kind is ScreenKind.EQUIPMENT else "Hero Info"
         _print_scan(result, kind)
         if result.build is None:
-            return False
+            return ScreenOutcome.FAILED
         issues = _issues(session, result.build, quiet=True)
         _print_issues(issues)
         if any(i.severity is Severity.ERROR for i in issues) and not force:
             typer.echo("  Error: not saved: fix the errors above (or use --force)", err=True)
-            return False
+            return ScreenOutcome.FAILED
+        outcome = ScreenOutcome.DOUBTFUL if result.doubtful else ScreenOutcome.STORED
         if dry_run:
             typer.echo("  (dry run: nothing saved)")
-            return True
+            return outcome
         if owned is None:
             created = add_owned_hero(session, result.build)
             typer.echo(f"  Saved as new roster hero #{created.id}")
@@ -848,7 +878,7 @@ def _store_screen(
         else:
             snapshot = add_snapshot(session, owned, result.build)
             typer.echo(f"  #{owned.id}: new snapshot {snapshot.id}")
-    return True
+    return outcome
 
 
 @roster_app.command("import-fribbels")

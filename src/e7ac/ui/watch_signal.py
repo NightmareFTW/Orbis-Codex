@@ -20,13 +20,18 @@ WIDTH: Final = 300
 HEIGHT: Final = 58
 GREY, AMBER, GREEN, RED = "#5a5a5a", "#e0a020", "#2fa84f", "#d04040"
 BACKGROUND: Final = "#1e1e1e"
+RESULTS: Final = {
+    "stored": ("stored", GREEN),
+    "doubtful": ("stored, but check the console", AMBER),
+    "failed": ("not stored - see the console", RED),
+}
 
 
 class WatchSignal(Protocol):
     def place(self, area: Rect) -> None: ...
     def settling(self) -> None: ...
     def captured(self, waiting: int) -> None: ...
-    def result(self, name: str, ok: bool) -> None: ...
+    def result(self, name: str, outcome: str) -> None: ...
     def close(self) -> None: ...
 
 
@@ -36,7 +41,7 @@ class NoSignal:
     def place(self, area: Rect) -> None: ...
     def settling(self) -> None: ...
     def captured(self, waiting: int) -> None: ...
-    def result(self, name: str, ok: bool) -> None: ...
+    def result(self, name: str, outcome: str) -> None: ...
     def close(self) -> None: ...
 
 
@@ -76,10 +81,11 @@ class TkBadge:
         self._messages.put(("top", (f"Captured - next hero{more}", GREEN)))
         self._sound(ok=True)
 
-    def result(self, name: str, ok: bool) -> None:
-        text = f"{name}: stored" if ok else f"{name}: not stored - see the console"
-        self._messages.put(("bottom", (text, GREEN if ok else RED)))
-        if not ok:
+    def result(self, name: str, outcome: str) -> None:
+        """`outcome`: "stored", "doubtful" (stored, a check failed) or "failed" (`cli.roster.ScreenOutcome`)."""
+        text, colour = RESULTS.get(outcome, RESULTS["failed"])
+        self._messages.put(("bottom", (f"{name}: {text}", colour)))
+        if outcome == "failed":
             self._sound(ok=False)
 
     def close(self) -> None:
