@@ -1,0 +1,71 @@
+"""Hits needed to defeat a hero with one skill: expected damage per hit (M11 part).
+
+Offense = (ATK x rate + HP x hp_scaling + DEF x def_scaling) x 1.871 x pow x (1 + enhancements) (MECH-DMG-01);
+defence factor 1 / (1 + DEF x (1 - penetration) / 300) (MECH-DMG-02, MECH-DMG-04); expected hit-type factor
+CC x min(CD, 350%) + (1 - CC) (MECH-DMG-05, crushing and miss left out). All `community`. Skill enhancements are
+assumed complete (the roster does not know them, NV-32). Skill fields whose formula is not documented (speed scaling,
+"increased value", extra ATK scaling, crit damage increase) are not counted: the skill is marked approximate.
+Not yet: buffs/debuffs, sets in combat (Torrent, Rage...), artifacts, elements, passives, barriers.
+"""
+
+from __future__ import annotations
+
+import math
+from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import Final
+
+from e7ac.catalog.resolve import ResolvedEntity
+from e7ac.domain.codes import Stat
+
+ATK_CONSTANT: Final = 1.871
+"""MECH-DMG-01 (community, no official source)."""
+CD_CAP: Final = 3.5
+"""MECH-DMG-05."""
+_UNMODELLED: Final = ("self_spd_scaling", "increased_value", "extra_self_atk_scaling", "crit_damage_increase")
+
+
+@dataclass(frozen=True, slots=True)
+class SkillPower:
+    rate: float
+    pow: float
+    enhance: float
+    hp_scaling: float = 0.0
+    def_scaling: float = 0.0
+    penetration: float = 0.0
+    approximate: bool = False
+
+
+def skill_power(entity: ResolvedEntity) -> SkillPower | None:
+    """None for a skill without damage numbers (buffs, passives)."""
+    rate, power = entity.value("rate"), entity.value("pow")
+    if not isinstance(rate, (int, float)) or not isinstance(power, (int, float)) or rate <= 0:
+        return None
+    enhance = entity.value("enhance")
+    return SkillPower(
+        rate=float(rate),
+        pow=float(power),
+        enhance=sum(_number(v) for v in enhance) if isinstance(enhance, list) else 0.0,
+        hp_scaling=_number(entity.value("self_hp_scaling")),
+        def_scaling=_number(entity.value("self_def_scaling")),
+        penetration=_number(entity.value("penetration")),
+        approximate=any(entity.value(name) is not None for name in _UNMODELLED),
+    )
+
+
+def expected_hit(attacker: Mapping[Stat, float], skill: SkillPower, defender: Mapping[Stat, float]) -> float:
+    offense = attacker[Stat.ATK] * skill.rate + attacker[Stat.HP] * skill.hp_scaling
+    offense += attacker[Stat.DEF] * skill.def_scaling
+    offense *= ATK_CONSTANT * skill.pow * (1 + skill.enhance)
+    defence = 1 / (1 + defender[Stat.DEF] * (1 - skill.penetration) / 300)
+    crit = min(attacker[Stat.CRIT_CHANCE], 1.0)
+    hit_type = crit * min(attacker[Stat.CRIT_DAMAGE], CD_CAP) + (1 - crit)
+    return offense * defence * hit_type
+
+
+def hits_to_defeat(attacker: Mapping[Stat, float], skill: SkillPower, defender: Mapping[Stat, float]) -> int:
+    return math.ceil(defender[Stat.HP] / expected_hit(attacker, skill, defender))
+
+
+def _number(value: object) -> float:
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else 0.0
