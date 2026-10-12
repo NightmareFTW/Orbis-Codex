@@ -41,7 +41,7 @@ Brazilian. Until then every user-facing text stays in English only.
 ## Commands
 ```bash
 uv sync                      # install (dev group included)
-uv run e7 --help             # CLI: --version, doctor, paths, config, catalog, roster, capture
+uv run e7 --help             # CLI: --version, doctor, paths, config, catalog, roster, opponent, capture
 uv run pytest                # tests (fixture tests skip if fixtures are missing; network tests need E7AC_NETWORK_TESTS=1)
 uv run ruff check . && uv run ruff format --check .
 uv run mypy                  # strict, src + tests
@@ -122,7 +122,11 @@ Key data facts (details in docs/DATA_SOURCES.md):
   (`vision/bonus_cells.py`, accepted only when they agree with the catalog base: 100% of rows on the captures and
   hold-out variants, was 82%). Harness `spikes/watch_ocr_eval.py` (truth and captures local in
   `fixtures/screenshots/watch/`).
-- Next: user's choice — M8 roster UI, or Phase 2/3 (opponent builds, Arena predictions). The M4.1 gear.txt multi-agent review was interrupted and skipped to save tokens (checked by tests + real data).
+- **Order chosen 2026-10-12:** Phase 2/3 (opponent builds, turn order, Arena win probability) before any UI; one UI
+  (roster + predictions + overlay) at the end. Token budget is tight: no multi-agent reviews unless the user asks,
+  small slices, the user's game tests as the check.
+- **M10 slice 1 — done** (SPEC D58): `sources/stove_usage.py` (hero-detail fetch, weekly refresh), `opponents/
+  {histogram,assumed}.py`, `e7 opponent show HERO --profile typical|strong|top`. Next: turn order from speed (M11 part).
 - Game client language: English, sometimes Portuguese → `game_language` setting (D39). Windows version shown by doctor.
 - Roster import paths (D45), picked by the user: A = Fribbels save file (M4, done), B = passive screen
   watch (M9a). Network import inside our app (M5c, D38): **not possible here** — blocked twice by Anthropic's safety

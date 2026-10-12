@@ -115,7 +115,7 @@ Checkboxes: `[x]` done · `[ ]` pending. Milestones are small vertical slices; o
   - Acceptance: replaying a folder of screenshots imports each hero once; the user verifies in game that "Scan hero" captures the current hero and nothing is ever sent to the game.
 
 ## Phase 2 — Opponent model
-- [ ] **M10 AssumedBuild** — histogram model (configurable edges), P50/P75/P90 profiles, Monte Carlo sampler (independent marginals, documented), set/EE/artifact priors, weekly refresh + data-age warning, CP-based percentile calibration; `e7 opponent show c2011 --profile strong`.
+- [ ] **M10 AssumedBuild** — *slice 1 done 2026-10-12 (SPEC D58): Stove usage fetch + histograms + P50/P75/P90 profiles + set/EE/artifact priors + weekly refresh + data-age warning, `e7 opponent show c2011 --profile strong`. How to try: `.\OrbisCodex.cmd opponent show "Blood Blade Karin" --profile strong`. Still to do: Monte Carlo sampler, CP calibration.* — histogram model (configurable edges), P50/P75/P90 profiles, Monte Carlo sampler (independent marginals, documented), set/EE/artifact priors, weekly refresh + data-age warning, CP-based percentile calibration; `e7 opponent show c2011 --profile strong`.
   - Acceptance: deterministic profile tests on synthetic histograms; sampler reproduces marginals (property test); calibration recovers a known percentile on synthetic data.
 
 ## Phase 3 — Predictor v1 + overlay
