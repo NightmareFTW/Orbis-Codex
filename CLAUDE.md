@@ -29,6 +29,9 @@ Brazilian. Until then every user-facing text stays in English only.
 Start the **manual refinement of hero kits** (skill effects read by hand, beyond the automatic epic7db tags of SPEC D63)
 for the heroes the user meets most in Arena: ask the user for that list first, ~0.5–1% of the weekly limit per hero.
 
+**Paused 2026-10-12** (user saving the weekly budget for other projects). On resume: (1) hand refinement of the most met
+heroes (above); (2) the main window (PySide6, ~150–200 MB: confirm the dependency with the user first), overlay later.
+
 ## Golden rules
 - **Never invent game numbers** (multipliers, set bonuses, base stats, formulas, AI behaviour). Every datum carries
   `source` + `status` (`verified` / `community` / `assumed` / `unknown`). Unverifiable → `assumed`, lower confidence,
