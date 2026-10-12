@@ -1,10 +1,12 @@
 """Visual signal of `e7 roster watch` (M9a, SPEC D55): a small always-on-top badge at the top of the game window.
 
 It says when to hold still, when the screen was captured (move on to the next hero: reading happens in the
-background) and how the last reading ended. The badge never touches the game: it is our own window, excluded from
-screen capture (`SetWindowDisplayAffinity`, Windows 10 2004+) so it never appears in the pictures that are read, and
-click-through. Without that exclusion it is placed outside the game window, or not shown. Needs Windows and tkinter
-(bundled with the Python the launcher installs); otherwise the console is the only signal.
+background) and how each reading ended. Both lines change together: on a capture the result line of the previous
+hero gives way to "Reading..." at once, so it never looks as if only the previous hero was stored (user,
+2026-10-12). The badge never touches the game: it is our own window, excluded from screen capture
+(`SetWindowDisplayAffinity`, Windows 10 2004+) so it never appears in the pictures that are read, and click-through.
+Without that exclusion it is placed outside the game window, or not shown. Needs Windows and tkinter (bundled with
+the Python the launcher installs); otherwise the console is the only signal.
 """
 
 from __future__ import annotations
@@ -18,12 +20,14 @@ from e7ac.vision.window import Rect
 
 WIDTH: Final = 300
 HEIGHT: Final = 58
-GREY, AMBER, GREEN, RED = "#5a5a5a", "#e0a020", "#2fa84f", "#d04040"
+GREY, AMBER, GREEN, RED, LIGHT = "#5a5a5a", "#e0a020", "#2fa84f", "#d04040", "#bbbbbb"
 BACKGROUND: Final = "#1e1e1e"
-RESULTS: Final = {
+RESULTS: Final = {  # outcome -> text, colour (outcomes without a hero name: "not_hero", "incomplete")
     "stored": ("stored", GREEN),
     "doubtful": ("stored, but check the console", AMBER),
     "failed": ("not stored - see the console", RED),
+    "not_hero": ("not a hero screen", LIGHT),
+    "incomplete": ("incomplete screen, ignored", LIGHT),
 }
 
 
@@ -31,7 +35,7 @@ class WatchSignal(Protocol):
     def place(self, area: Rect) -> None: ...
     def settling(self) -> None: ...
     def captured(self, waiting: int) -> None: ...
-    def result(self, name: str, outcome: str) -> None: ...
+    def result(self, name: str, outcome: str, waiting: int) -> None: ...
     def close(self) -> None: ...
 
 
@@ -41,7 +45,7 @@ class NoSignal:
     def place(self, area: Rect) -> None: ...
     def settling(self) -> None: ...
     def captured(self, waiting: int) -> None: ...
-    def result(self, name: str, outcome: str) -> None: ...
+    def result(self, name: str, outcome: str, waiting: int) -> None: ...
     def close(self) -> None: ...
 
 
@@ -77,14 +81,15 @@ class TkBadge:
         self._messages.put(("top", ("Hold still...", AMBER)))
 
     def captured(self, waiting: int) -> None:
-        more = f" ({waiting} being read)" if waiting > 1 else ""
-        self._messages.put(("top", (f"Captured - next hero{more}", GREEN)))
+        """`waiting`: captured screens not read yet, this one included."""
+        self._messages.put(("lines", (("Captured - next hero", GREEN), (reading_line(waiting), LIGHT))))
         self._sound(ok=True)
 
-    def result(self, name: str, outcome: str) -> None:
-        """`outcome`: "stored", "doubtful" (stored, a check failed) or "failed" (`cli.roster.ScreenOutcome`)."""
-        text, colour = RESULTS.get(outcome, RESULTS["failed"])
-        self._messages.put(("bottom", (f"{name}: {text}", colour)))
+    def result(self, name: str, outcome: str, waiting: int) -> None:
+        """`outcome`: "stored", "doubtful" (stored, a check failed) or "failed" (`cli.roster.ScreenOutcome`), or
+        "not_hero" / "incomplete" for a screen that was ignored (no name); `waiting`: captured screens still to read
+        after this one."""
+        self._messages.put(("bottom", result_line(name, outcome, waiting)))
         if outcome == "failed":
             self._sound(ok=False)
 
@@ -136,6 +141,9 @@ class TkBadge:
             elif kind == "bottom":
                 text, colour = value
                 bottom.config(text=text, fg=colour)
+            elif kind == "lines":  # both in one update: they never disagree on screen
+                apply("top", value[0])
+                apply("bottom", value[1])
             return True
 
         def poll() -> None:
@@ -151,6 +159,18 @@ class TkBadge:
         root.after(50, poll)
         self.ready.set()
         root.mainloop()
+
+
+def reading_line(waiting: int) -> str:
+    return "Reading..." if waiting <= 1 else f"Reading... ({waiting} waiting)"
+
+
+def result_line(name: str, outcome: str, waiting: int) -> tuple[str, str]:
+    """The result line: text and colour. While other captures wait, it says so: this result is not the last hero's."""
+    text, colour = RESULTS.get(outcome, RESULTS["failed"])
+    more = f" - {waiting} more being read" if waiting else ""
+    head = f"{name}: {text}" if name else text[:1].upper() + text[1:]
+    return f"{head}{more}", colour
 
 
 def _spot(area: Rect, excluded: bool, screen_height: int) -> tuple[int, int] | None:

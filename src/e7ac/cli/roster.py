@@ -718,6 +718,16 @@ def watch(
         typer.echo(f"note: {why}", err=True)
     pending: queue.Queue[tuple[Any, Frame] | None] = queue.Queue()
     counts = {"read": 0, "stored": 0, "doubtful": 0, "ignored": 0}
+    unread = [0]  # captured screens not read yet (the badge says how many)
+    unread_lock = threading.Lock()
+
+    def finished(name: str = "", outcome: str = "") -> None:
+        with unread_lock:
+            unread[0] -= 1
+            waiting = unread[0]
+        if badge is not None:
+            badge.result(name, outcome, waiting)
+
     doubtful_dir = default_paths().captures_dir / "watch"
 
     def read_screens() -> None:  # the background reader: one screen at a time, in capture order
@@ -728,8 +738,10 @@ def watch(
                 lines = reader.read(image)
                 reading = parse_hero_screen(lines, settings.game_language)
             except ScreenError:
-                continue  # not a hero screen
+                finished(outcome="not_hero")
+                continue
             if reading.name is None or reading.level is None or reading.cp is None:
+                finished(outcome="incomplete")
                 counts["ignored"] += 1  # a popup or a screen caught mid-change: never a half-read hero
                 continue
             counts["read"] += 1
@@ -745,8 +757,7 @@ def watch(
                     name = capture_name(when.astimezone(), reading.name, lambda n: (doubtful_dir / n).exists())
                     path = save_png(frame, doubtful_dir / name)
                     typer.echo(f"  capture kept: {path}")
-            if badge is not None:
-                badge.result(reading.name, outcome.value)
+            finished(reading.name, outcome.value)
 
     worker = threading.Thread(target=read_screens, name="e7-watch-reader", daemon=True)
     worker.start()
@@ -771,9 +782,12 @@ def watch(
             if badge is not None:
                 badge.place(frame.window.client)
             if watcher.feed(thumbnail(image), watch_clock()):
+                with unread_lock:
+                    unread[0] += 1
+                    waiting = unread[0]
                 pending.put((image, frame))
                 if badge is not None:
-                    badge.captured(pending.qsize())
+                    badge.captured(waiting)
                 if pending.qsize() > WATCH_BACKLOG and not behind:
                     typer.echo(f"  reading is behind ({pending.qsize()} screens waiting): nothing is skipped", err=True)
                 behind = pending.qsize() > WATCH_BACKLOG
@@ -853,7 +867,7 @@ def _store_screen(
             language=context.language,
         )
     with session_scope(engine) as session:
-        owned, current = _scan_target(session, reading.name, context.heroes, owned_id)
+        owned, current = _scan_target(session, reading, context.heroes, owned_id)
         result = build_from_screen(
             reading, context.heroes, captured_at=when, existing=current, images=seen, catalog=context.catalog
         )
@@ -1171,22 +1185,26 @@ def _screen_catalog(session: Session) -> tuple[ScreenCatalog, dict[str, str]]:
 
 
 def _scan_target(
-    session: Session, name: str | None, heroes: dict[str, ResolvedEntity], owned_id: int | None
+    session: Session, reading: HeroScreenReading, heroes: dict[str, ResolvedEntity], owned_id: int | None
 ) -> tuple[Any, HeroBuild | None]:
     """(owned hero or None for a new one, its current build). Several copies of one hero need --id."""
     if owned_id is not None:
         owned = _owned_or_exit(session, owned_id)
     else:
-        code, _ = resolve_hero_code(name, heroes)  # same resolution as the import: never a second copy by mistake
+        # same resolution as the import: never a second copy by mistake
+        code, _ = resolve_hero_code(reading.name, heroes, reading.title)
         copies = [o for o, _ in list_owned(session) if code is not None and o.hero_code == code]
         if len(copies) > 1:
             listed = ", ".join(f"#{o.id}" for o in copies)
-            _fail(f"you own several copies of {name} ({listed}): scan them one at a time with --id")
+            _fail(f"you own several copies of {reading.name} ({listed}): scan them one at a time with --id")
         owned = copies[0] if copies else None
     if owned is None:
         return None, None
     row = current_snapshot(session, owned.id)
     return owned, build_from_row(session, row) if row is not None else None
+
+
+_CHECK_MARKS: Final = {"ok": " ok", "unchecked": " unchecked", "mismatch": " CHECK"}
 
 
 def _print_scan(result: ScreenBuild, kind: str) -> None:
@@ -1204,7 +1222,7 @@ def _print_scan(result: ScreenBuild, kind: str) -> None:
             value = getattr(stats, name) if stats is not None else None
             shown = "-" if value is None else (f"{value:g}" if stat in _FLAT_SCAN else f"{value * 100:.1f}%")
             check = checks.get(stat)
-            mark = "" if check is None else (" ok" if check.ok else " CHECK")
+            mark = "" if check is None else _CHECK_MARKS[check.verdict]
             parts.append(f"{stat.value} {shown}{mark}")
         typer.echo("  " + "  ".join(parts))
         if build.imprint is not None:
@@ -1212,8 +1230,9 @@ def _print_scan(result: ScreenBuild, kind: str) -> None:
             mode = build.imprint.mode.value if build.imprint.mode else "self/team unknown"
             typer.echo(f"  imprint {build.imprint.stat.value} {build.imprint.value:g} (grade {grade}, {mode})")
         if result.base_checks:
-            good = sum(c.ok for c in result.base_checks)
-            typer.echo(f"  base-stat check vs catalog: {good}/{len(result.base_checks)} agree")
+            verdicts = Counter(c.verdict for c in result.base_checks)
+            unchecked = f", {verdicts['unchecked']} unchecked (bonus not read)" if verdicts["unchecked"] else ""
+            typer.echo(f"  base-stat check vs catalog: {verdicts['ok']}/{len(result.base_checks)} agree{unchecked}")
         if kind == "Hero Info":
             _print_gear(build)
         report = result.composition

@@ -24,7 +24,10 @@ from e7ac.vision.ocr import Box, TextLine, Word
 
 FLAT_STATS: Final = frozenset({Stat.ATK, Stat.DEF, Stat.HP, Stat.SPEED})
 _NUMBER: Final = re.compile(r"\d[\d,]*(?:\.\d+)?%?")
+_FRAGMENT: Final = re.compile(r"[\d.,]+%?|%")
 _CP: Final = re.compile(r"^\d{1,3}(?:,\d{3})+$|^\d{4,7}$")
+_CP_ICON: Final = re.compile(r"^(?:[^\w\s]|[xX])\s*(?=\d)")
+"""The crossed-swords icon before the CP, sometimes read as a symbol or an "x" glued to it (user's capture)."""
 _LEVEL: Final = re.compile(r"(max|\d{1,2})\s*/\s*(\d{2})", re.IGNORECASE)
 _IMPRINT: Final = re.compile(r"^(?P<label>[^\d+]+?)\s*\+\s*(?P<value>\d+(?:\.\d+)?)\s*(?P<pct>%?)$")
 _PERCENT_VERSION: Final = {Stat.ATK: Stat.ATK_PERCENT, Stat.DEF: Stat.DEF_PERCENT, Stat.HP: Stat.HP_PERCENT}
@@ -68,7 +71,10 @@ class ScreenAnchors:
 class HeroScreenReading:
     kind: ScreenKind
     name: str | None = None
+    """The big name above the level line."""
     name_confidence: float = 0.0
+    title: str | None = None
+    """The top bar text: the hero name again on the Equipment tab (on a plain background), "Hero Info" on Hero Info."""
     level: int | None = None
     level_cap: int | None = None
     imprint_stat: Stat | None = None
@@ -176,12 +182,8 @@ def _stat_column(lines: Sequence[TextLine], labels: Mapping[str, Stat]) -> _Colu
     return _Column(rows=rows, x0=x0, row_height=row_height, words=_all_words(lines))
 
 
-def _parse_number(text: str, stat: Stat) -> tuple[float | None, float]:
-    """(value, confidence): rates must look like '36.0%', flat stats like '13517' (no % ever)."""
-    match = _NUMBER.search(text.replace(" ", ""))
-    if match is None:
-        return None, 0.0
-    token = match.group(0)
+def _parse_number(token: str, stat: Stat) -> tuple[float | None, float]:
+    """(value, confidence) of one number token: rates must look like '36.0%', flat stats like '13517' (no % ever)."""
     if stat in FLAT_STATS:
         if token.endswith("%") or "." in token:
             return None, 0.0
@@ -196,6 +198,11 @@ def _parse_number(text: str, stat: Stat) -> tuple[float | None, float]:
 ROW_TOLERANCE: Final = 0.4
 """A value belongs to a stat row when its vertical centre is within this many label heights of the label's centre
 (rows are one label height apart, so neighbouring rows never qualify)."""
+GLUE_GAP: Final = 0.25
+"""Two digit fragments closer than this many label heights are one number. RapidOCR returns one box per character
+for a line it takes for Chinese (the "▲" read as a CJK glyph): "229▲108" came back as "2", "2", "9", ... and was read
+as speed 2 (user's watch run, 2026-10-11). Digits of one number touch; the bonus starts about one label height after
+the final value (user's captures)."""
 
 
 def _stat_values(stat: Stat, label: TextLine, column: _Column) -> StatReading:
@@ -206,16 +213,37 @@ def _stat_values(stat: Stat, label: TextLine, column: _Column) -> StatReading:
         for w in column.words
         if abs(w.box.cy - label.box.cy) <= tolerance and label.box.x1 < w.box.x0 < column.right and w not in label.words
     ]
-    words = sorted([*own, *others], key=lambda w: w.box.x0)
-    # numbers in reading order: final value, then the "▲" bonus; other glyphs (the "▲" itself) are skipped
-    numbers = [(word, *_parse_number(word.text, stat)) for word in words if _NUMBER.search(word.text)][:2]
-    raw = " ".join(w.text for w, _, _ in numbers)
-    if not numbers:
+    words = _glued(sorted([*own, *others], key=lambda w: w.box.x0), label.box.height)
+    # numbers in reading order: final value, then the "▲" bonus; other glyphs (the "▲" itself, sometimes read as a
+    # "-" glued to the numbers: "13517-8218") only separate them
+    tokens = [(word, token) for word in words for token in _NUMBER.findall(word.text.replace(" ", ""))][:2]
+    raw = " ".join(dict.fromkeys(word.text for word, _ in tokens))
+    if not tokens:
         return StatReading(stat, None, None, raw, 0.0)
-    first_word, final, final_conf = numbers[0]
-    bonus = numbers[1][1] if len(numbers) > 1 else None
+    (first_word, first_token), *rest = tokens
+    final, final_conf = _parse_number(first_token, stat)
+    bonus = _parse_number(rest[0][1], stat)[0] if rest else None
     confidence = min(final_conf, first_word.score, label.score)
     return StatReading(stat, final, bonus, raw, round(confidence, 3))
+
+
+def _glued(words: Sequence[Word], height: float) -> list[Word]:
+    """Words left to right, with touching digit fragments joined back into one number (see GLUE_GAP)."""
+    out: list[Word] = []
+    for word in words:
+        prev = out[-1] if out else None
+        if (
+            prev is not None
+            and _FRAGMENT.fullmatch(prev.text)
+            and _FRAGMENT.fullmatch(word.text)
+            and not prev.text.endswith("%")
+            and word.box.x0 - prev.box.x1 < GLUE_GAP * height
+        ):
+            box = Box(prev.box.x0, min(prev.box.y0, word.box.y0), word.box.x1, max(prev.box.y1, word.box.y1))
+            out[-1] = Word(prev.text + word.text, min(prev.score, word.score), box)
+        else:
+            out.append(word)
+    return out
 
 
 def _read_level(
@@ -247,13 +275,13 @@ def _read_cp(reading: HeroScreenReading, panel: list[TextLine], upper: float, co
         if upper <= ln.box.y0
         and ln.box.y1 <= column.top
         and ln.box.x0 < column.x0 + 4 * column.row_height
-        and _CP.match(ln.text.strip())
+        and _CP.match(_CP_ICON.sub("", ln.text.strip()))
     ]
     if not candidates:
         reading.warnings.append("CP not found")
         return
     best = max(candidates, key=lambda ln: ln.box.y0)  # the CP sits right above the stat rows
-    reading.cp = int(best.text.strip().replace(",", ""))
+    reading.cp = int(_CP_ICON.sub("", best.text.strip()).replace(",", ""))
     reading.anchors.cp = best.box
 
 
@@ -334,11 +362,17 @@ def _read_name(reading: HeroScreenReading, panel: list[TextLine], level_line: Te
         reading.warnings.append("hero name not found")
         return
     best = max(candidates, key=lambda ln: ln.box.height)
-    # star icons next to the name are sometimes read as symbols: keep letters, digits, spaces and ' & . -
-    cleaned = re.sub(r"[^\w\s'&.-]", " ", best.text)
-    reading.name = re.sub(r"\s+", " ", cleaned).strip()
+    reading.name = _clean_name(best.text)
     reading.anchors.name = best.box
     reading.name_confidence = round(best.score, 3)
+    above = [ln for ln in candidates if ln.box.y1 <= best.box.y0]  # the top bar, then the element/class/zodiac line
+    if above:
+        reading.title = _clean_name(min(above, key=lambda ln: ln.box.y0).text)
+
+
+def _clean_name(text: str) -> str:
+    """Star icons next to the name are sometimes read as symbols: keep letters, digits, spaces and ' & . -"""
+    return re.sub(r"\s+", " ", re.sub(r"[^\w\s'&.-]", " ", text)).strip()
 
 
 def _read_sets(reading: HeroScreenReading, panel: list[TextLine], bottom: float, language: GameLanguage) -> None:

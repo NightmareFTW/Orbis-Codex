@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -83,6 +83,35 @@ def equipment_screen(
         y += ROW
     lines += [line("Penetration Set", 216, 1000), line("Speed Set", 216, 1036), line("No set effect", 214, 1072)]
     return lines
+
+
+def chars(text: str, x0: float, y0: float, *, char: float = 14.0) -> TextLine:
+    """A line RapidOCR split into one word per character (a line it took for Chinese): characters touch."""
+    words = tuple(
+        Word(c, 0.99, Box(x0 + i * char, y0, x0 + (i + 1) * char, y0 + ROW)) for i, c in enumerate(text) if c != " "
+    )
+    return TextLine(text, 0.99, Box(x0, y0, x0 + len(text) * char, y0 + ROW), words)
+
+
+def with_values(lines: list[TextLine], label: str, make: Callable[[float], TextLine]) -> list[TextLine]:
+    """The screen with the values of one stat row replaced by `make(y0)`, a line on that row."""
+    y = next(ln.box.y0 for ln in lines if ln.text == label)
+    row = [ln for ln in lines if abs(ln.box.y0 - y) < ROW / 2 and 400 < ln.box.x0 < 1000]
+    return [ln for ln in lines if ln not in row] + [make(y + 2)]
+
+
+def test_digits_split_one_per_character_are_glued_back() -> None:
+    lines = with_values(equipment_screen(), "Speed", lambda y: chars("230个108", 445, y))  # "▲" read as CJK
+    lines = with_values(lines, "Critical Hit Chance", lambda y: chars("36.0% 9.0%", 445, y))
+    stats = {s: (r.final, r.bonus) for s, r in parse_hero_screen(lines).stats.items()}
+    assert stats[Stat.SPEED] == (230, 108)  # not speed 2 with a bonus of 3 (user's watch run, 2026-10-11)
+    assert stats[Stat.CRIT_CHANCE] == (0.36, 0.09)
+
+
+def test_a_bonus_glued_to_the_final_by_a_dash_is_still_read() -> None:
+    lines = with_values(equipment_screen(), "Health", lambda y: line("13517-8218", 445, y))  # "▲" read as "-"
+    row = parse_hero_screen(lines).stats[Stat.HP]
+    assert (row.final, row.bonus) == (13517, 8218)
 
 
 def test_equipment_tab_is_read_completely() -> None:
@@ -228,11 +257,33 @@ def test_equipment_screen_build_is_cross_checked_with_the_catalog() -> None:
     assert not result.doubtful
 
 
+def _with_row(label: str, final: str, bonus: str | None) -> list[tuple[str, str, str | None]]:
+    return [(label, final, bonus) if row[0] == label else row for row in STAT_ROWS]
+
+
 def test_a_failed_base_check_makes_the_reading_doubtful() -> None:
-    rows = [(label, final, None if label == "Health" else bonus) for label, final, bonus in STAT_ROWS]  # ▲ unread
-    result = build_from_screen(parse_hero_screen(equipment_screen(rows=rows)), {"c1193": RENOA}, captured_at=NOW)
+    misread = _with_row("Health", "13517", "8213")  # one digit of the bonus misread
+    result = build_from_screen(parse_hero_screen(equipment_screen(rows=misread)), {"c1193": RENOA}, captured_at=NOW)
     assert result.build is not None and result.doubtful
-    assert [check.stat for check in result.base_checks if not check.ok] == [Stat.HP]
+    assert [(c.stat, c.verdict) for c in result.base_checks if not c.ok] == [(Stat.HP, "mismatch")]
+    assert result.build.confidence["final_stats.hp"] == 0.5
+
+
+def test_an_unread_bonus_leaves_the_value_unchecked_not_doubtful() -> None:
+    unread = _with_row("Health", "13517", None)  # orange on a busy background: the OCR missed it (SPEC D57)
+    reading = parse_hero_screen(equipment_screen(rows=unread))
+    result = build_from_screen(reading, {"c1193": RENOA}, captured_at=NOW)
+    assert result.build is not None and not result.doubtful
+    assert [(c.stat, c.verdict) for c in result.base_checks if not c.ok] == [(Stat.HP, "unchecked")]
+    assert result.build.confidence["final_stats.hp"] == reading.stats[Stat.HP].confidence  # the OCR's own
+    assert any(n.startswith("bonus not read for max_hp: not checked") for n in result.notes)
+
+
+def test_a_final_below_the_base_is_a_misread_even_without_a_bonus() -> None:
+    split = _with_row("Speed", "2", None)  # "229▲108" split into single digits (SPEC D57)
+    result = build_from_screen(parse_hero_screen(equipment_screen(rows=split)), {"c1193": RENOA}, captured_at=NOW)
+    assert result.build is not None and result.doubtful
+    assert [(c.stat, c.verdict) for c in result.base_checks if not c.ok] == [(Stat.SPEED, "mismatch")]
 
 
 def test_the_base_check_is_not_run_below_level_60() -> None:
@@ -240,6 +291,32 @@ def test_the_base_check_is_not_run_below_level_60() -> None:
     result = build_from_screen(parse_hero_screen(lines), {"c1193": RENOA}, captured_at=NOW)
     assert result.build is not None and result.base_checks == [] and not result.doubtful
     assert "Lv. 5: the base-stat check is for Lv. 60 heroes only, not run" in result.notes
+
+
+def _with_big_name(text: str) -> list[TextLine]:
+    """Renoa's Equipment tab with the big name (on the hero art) read as `text`; the top bar still says "Renoa"."""
+    return [line(text, 158, 192, height=72) if ln.text == "Renoa ☆" else ln for ln in equipment_screen()]
+
+
+def test_the_top_bar_name_fixes_a_misread_big_name() -> None:
+    reading = parse_hero_screen(_with_big_name("Rena ☆"))  # user's capture, 2026-10-12
+    assert (reading.name, reading.title) == ("Rena", "Renoa")
+    result = build_from_screen(reading, {"c1193": RENOA}, captured_at=NOW)
+    assert result.hero_code == "c1193"
+    assert "name read as 'Rena', matched to 'Renoa' (as the top bar says)" in result.notes
+
+
+def test_two_different_hero_names_on_one_screen_are_refused() -> None:
+    rena = entity("c9999", **_renoa_fields(name="Rena"))
+    result = build_from_screen(
+        parse_hero_screen(_with_big_name("Rena ☆")), {"c1193": RENOA, "c9999": rena}, captured_at=NOW
+    )
+    assert result.hero_code is None and result.problems == ["the screen shows two hero names, 'Rena' and 'Renoa'"]
+
+
+def test_the_cp_icon_read_as_a_symbol_is_not_part_of_the_cp() -> None:
+    lines = [line("\u00d7123,120", 150, 598, height=52) if ln.text == "123,120" else ln for ln in equipment_screen()]
+    assert parse_hero_screen(lines).cp == 123120
 
 
 def test_the_imprint_mode_is_inferred_only_from_clear_catalog_evidence() -> None:
@@ -525,6 +602,44 @@ GOLDEN = {
         0.21,
         [5063, 863, 9321, 124, 1.0, 3.30, 0.23, 0.09, 0.03],
     ),
+    # live frames kept by `roster watch` on the user's 1920x1009 window (2026-10-12): the orange bonuses sit on bright
+    # art there, so only the finals are golden here (the bonuses: spikes/watch_ocr_eval.py, SPEC D57)
+    "screenshots/watch/renoa.webp": (
+        EQUIP,
+        "Renoa",
+        60,
+        123120,
+        Stat.EFFECTIVENESS,
+        0.15,
+        [1721, 1879, 13517, 230, 0.36, 1.85, 0.38, 0.69, 0.03],
+    ),
+    "screenshots/watch/estelle.webp": (
+        EQUIP,
+        "Estelle",
+        60,
+        117752,
+        Stat.HP_PERCENT,
+        0.07,
+        [1635, 1482, 28601, 143, 0.21, 1.62, 0.87, 0.23, 0.03],
+    ),
+    "screenshots/watch/fumyr.webp": (
+        EQUIP,
+        "Eye of the Abyss Fumyr",
+        60,
+        113914,
+        Stat.HP_PERCENT,
+        0.15,
+        [1951, 1120, 18117, 196, 0.39, 1.89, 1.25, 0.15, 0.03],
+    ),
+    "screenshots/watch/kawerik.webp": (
+        EQUIP,
+        "Kawerik",
+        60,
+        165358,
+        Stat.ATK_PERCENT,
+        0.07,
+        [3680, 1379, 10145, 229, 0.87, 2.61, 0.25, 0.0, 0.03],
+    ),
     "screenshots/heroinfo_charles.webp": (  # no gear, 5 stars, not awakened, "Lv. Max/50"
         INFO,
         "Closer Charles",
@@ -551,7 +666,8 @@ def test_real_capture(fixture: str, scale: float) -> None:
         interpolation = cv2.INTER_AREA if scale < 1 else cv2.INTER_CUBIC
         image = cv2.resize(image, None, fx=scale, fy=scale, interpolation=interpolation)
     reading = parse_hero_screen(RapidOcrReader().read(image))
-    assert (reading.kind, reading.name, reading.level, reading.cp) == (kind, name, level, cp)
+    assert (reading.kind, reading.level, reading.cp) == (kind, level, cp)
+    assert name in (reading.name, reading.title)  # the big name sits on the hero art; the top bar repeats it
     assert reading.warnings == []
     assert (reading.imprint_stat, reading.imprint_value) == (imprint_stat, imprint_value)
     assert [

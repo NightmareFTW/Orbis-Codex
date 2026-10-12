@@ -66,14 +66,24 @@ INFERRED_MODE: Final = 0.8
 class BaseCheck:
     stat: Stat
     observed: float
-    """final - ▲ bonus, read on the screen."""
+    """final - ▲ bonus, read on the screen (the final value when no bonus was read)."""
     expected: float
     """Catalog base stat."""
+    bonus_read: bool = True
 
     @property
     def ok(self) -> bool:
         tolerance = 0.5 if self.stat in _FLAT else 0.0005
         return abs(self.observed - self.expected) <= tolerance
+
+    @property
+    def verdict(self) -> str:
+        """ "ok": final - bonus = catalog base. "unchecked": no bonus was read but the final is above the base, so the
+        game shows one (orange on a busy background, the OCR can miss it, SPEC D57): nothing confirms the final, and
+        nothing contradicts it. "mismatch": a misread (or an outdated catalog); a final below the base is one too."""
+        if self.ok:
+            return "ok"
+        return "unchecked" if not self.bonus_read and self.observed > self.expected else "mismatch"
 
 
 @dataclass(slots=True)
@@ -92,7 +102,7 @@ class ScreenBuild:
     @property
     def doubtful(self) -> bool:
         """A build was made, but a check disagrees: a stat was probably misread (worth a look, or a new capture)."""
-        failed_base = any(not check.ok for check in self.base_checks)
+        failed_base = any(check.verdict == "mismatch" for check in self.base_checks)
         failed_composition = self.composition is not None and self.composition.applicable and self.composition.warnings
         return self.build is not None and (failed_base or bool(failed_composition))
 
@@ -164,19 +174,28 @@ def build_from_screen(
     return result
 
 
-def resolve_hero_code(name: str | None, heroes: Mapping[str, ResolvedEntity]) -> tuple[str | None, str]:
+def resolve_hero_code(
+    name: str | None, heroes: Mapping[str, ResolvedEntity], title: str | None = None
+) -> tuple[str | None, str]:
     """(catalog code, "") for the name read on a screen, or (None, problem). The code comes from an exact catalog
-    name, else from the margin rule (`match_label`), never a near-miss; a name shared by several heroes is refused."""
-    if not name:
+    name, else from the margin rule (`match_label`), never a near-miss; a name shared by several heroes is refused.
+    `title`: the top bar of the Equipment tab, which repeats the name on a plain background while the big name sits on
+    the hero art ("Renoa" read as "Rena", user's capture 2026-10-12): it counts only as an exact catalog name (on
+    Hero Info it reads "Hero Info"), and two different exact names are refused."""
+    if not name and not title:
         return None, "the hero name was not read"
     index = NameIndex()
     for hero_code, entity in heroes.items():
         index.add(entity.name, hero_code)
-    if index.is_ambiguous(name):
+    if name and index.is_ambiguous(name):
         return None, f"several catalog heroes are called {name!r}: use --id to choose the hero"
-    found = index.lookup(name)
-    if found is not None:
-        return found, ""
+    exact = {found for text in (name, title) if text and (found := index.lookup(text)) is not None}
+    if len(exact) > 1:
+        return None, f"the screen shows two hero names, {name!r} and {title!r}"
+    if exact:
+        return exact.pop(), ""
+    if not name:
+        return None, f"no catalog hero is called {title!r} (OCR error, or run: e7 catalog sync)"
     names = {entity.name: c for c, entity in heroes.items() if not index.is_ambiguous(entity.name)}
     near = match_label(name, names)
     if near is None:
@@ -185,12 +204,14 @@ def resolve_hero_code(name: str | None, heroes: Mapping[str, ResolvedEntity]) ->
 
 
 def _hero_code(reading: HeroScreenReading, heroes: Mapping[str, ResolvedEntity], result: ScreenBuild) -> str | None:
-    code, problem = resolve_hero_code(reading.name, heroes)
+    code, problem = resolve_hero_code(reading.name, heroes, reading.title)
     if code is None:
         result.problems.append(problem)
         return None
-    if reading.name is not None and normalise_name(heroes[code].name) != normalise_name(reading.name):
-        result.notes.append(f"name read as {reading.name!r}, matched to {heroes[code].name!r} (clear best match)")
+    name = normalise_name(heroes[code].name)
+    if reading.name is not None and name != normalise_name(reading.name):
+        how = "as the top bar says" if reading.title and name == normalise_name(reading.title) else "clear best match"
+        result.notes.append(f"name read as {reading.name!r}, matched to {heroes[code].name!r} ({how})")
     return code
 
 
@@ -211,21 +232,30 @@ def _final_stats(reading: HeroScreenReading, result: ScreenBuild) -> FinalStats 
 def _base_checks(
     reading: HeroScreenReading, hero: ResolvedEntity, result: ScreenBuild, confidence: dict[str, float]
 ) -> None:
+    unchecked = []
     for stat, stat_reading in reading.stats.items():
         expected = hero.value(BASE_FIELDS[stat])
         if stat_reading.final is None or not isinstance(expected, (int, float)) or isinstance(expected, bool):
             continue
-        check = BaseCheck(stat, round(stat_reading.final - (stat_reading.bonus or 0.0), 6), float(expected))
+        observed = round(stat_reading.final - (stat_reading.bonus or 0.0), 6)
+        check = BaseCheck(stat, observed, float(expected), bonus_read=stat_reading.bonus is not None)
         result.base_checks.append(check)
         key = f"final_stats.{FINAL_FIELDS[stat]}"
-        if check.ok:
+        if check.verdict == "ok":
             confidence[key] = 1.0  # two independent sources agree
+        elif check.verdict == "unchecked":
+            unchecked.append(stat.value)  # the OCR's own confidence stays
         else:
             confidence[key] = min(confidence.get(key, 1.0), 0.5)
             result.notes.append(
                 f"{stat.value}: the screen implies base {check.observed:g} but the catalog says {check.expected:g} "
                 "(OCR error, or the catalog is out of date)"
             )
+    if unchecked:
+        result.notes.append(
+            f"bonus not read for {', '.join(unchecked)}: not checked against the catalog base (the values are "
+            "probably right; a new capture can check them)"
+        )
 
 
 def _level_and_stars(

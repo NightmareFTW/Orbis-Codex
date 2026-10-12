@@ -117,8 +117,9 @@ Key data facts (details in docs/DATA_SOURCES.md):
   fixtures (`fixtures/saves/{fribbels.json,gear.txt}`), never committed.
 - **M9a Passive watch — done** (SPEC D54): `vision/watch.py` (settled/new screen detection), `e7 roster watch` (shares `_store_screen` with `roster scan`; background reader; settle time) and its badge `ui/watch_signal.py` (D55: hold still / captured / result; excluded from capture). Threshold and settle time to tune on the user's PC.
   Doubtful readings (D56): stored, amber on the badge, capture kept in `captures/watch/`; base check only at Lv. 60.
-  Open: live frames misread some stats (missing ▲ bonus, mostly Health; Speed read as one digit) — waiting for the
-  user's kept captures to find the cause.
+  Live frames (D57): unread bonus = "unchecked" (not doubtful); split digits glued back ("speed 2"); top-bar name
+  cross-check; CP icon stripped; badge lines change together. Harness `spikes/watch_ocr_eval.py` (truth and captures
+  local in `fixtures/screenshots/watch/`). Open: re-reading the orange bonuses (approaches being compared).
 - Next: user's choice — M8 roster UI, or Phase 2/3 (opponent builds, Arena predictions). The M4.1 gear.txt multi-agent review was interrupted and skipped to save tokens (checked by tests + real data).
 - Game client language: English, sometimes Portuguese → `game_language` setting (D39). Windows version shown by doctor.
 - Roster import paths (D45), picked by the user: A = Fribbels save file (M4, done), B = passive screen

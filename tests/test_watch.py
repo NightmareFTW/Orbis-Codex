@@ -71,10 +71,10 @@ class RecordingSignal:
         self.events.append(("settling",))
 
     def captured(self, waiting: int) -> None:
-        self.events.append(("captured",))
+        self.events.append(("captured", waiting))
 
-    def result(self, name: str, outcome: str) -> None:
-        self.events.append(("result", name, outcome))
+    def result(self, name: str, outcome: str, waiting: int) -> None:
+        self.events.append(("result", name, outcome, waiting))
 
     def close(self) -> None:
         self.events.append(("close",))
@@ -139,14 +139,15 @@ def test_watch_reads_and_stores_each_new_hero_screen(
     assert kinds == ["settling", "captured", "settling", "captured", "result", "result", "close"] or (
         kinds.count("captured") == 2 and kinds[-1] == "close"  # results may arrive while the next screen settles
     )
-    assert ("result", "Blood Blade Karin", "stored") in SIGNALS.events
+    assert ("result", "Blood Blade Karin", "stored") in [e[:3] for e in SIGNALS.events]
+    assert next(e for e in SIGNALS.events if e[0] == "captured") == ("captured", 1)  # nothing else waiting
     assert "Stopped. 2 hero screen(s) read, 2 stored or unchanged, 0 incomplete screen(s) ignored." in result.stdout
 
 
 def test_a_doubtful_reading_is_stored_flagged_and_its_capture_kept(
     watching: dict[str, int], monkeypatch: pytest.MonkeyPatch, synthetic_catalog: list[str]
 ) -> None:
-    rows = [(label, final, None if label == "Health" else bonus) for label, final, bonus in BBK_ROWS]  # ▲ unread
+    rows = [(label, final, "6943" if label == "Health" else bonus) for label, final, bonus in BBK_ROWS]  # misread
     monkeypatch.setattr(
         roster_cli, "reader_factory", lambda: FakeReader(equipment_screen(rows=rows, name="Blood Blade Karin"))
     )
@@ -154,7 +155,7 @@ def test_a_doubtful_reading_is_stored_flagged_and_its_capture_kept(
     result = runner.invoke(app, ["roster", "watch"])
     assert result.exit_code == 0, result.output
     assert "Saved as new roster hero #1" in result.stdout
-    assert ("result", "Blood Blade Karin", "doubtful") in SIGNALS.events
+    assert ("result", "Blood Blade Karin", "doubtful", 0) in SIGNALS.events
     kept = list((default_paths().captures_dir / "watch").glob("*-Blood_Blade_Karin.png"))
     assert len(kept) == 1 and f"capture kept: {kept[0]}" in result.stdout
     assert "1 screen(s) not stored or with a failed check: their captures are in" in result.stdout
@@ -181,6 +182,7 @@ def test_watch_ignores_screens_that_are_not_hero_screens(
     monkeypatch.setattr(capture_cli, "backend_factory", lambda: FrameQueue([10] * 6))
     result = runner.invoke(app, ["roster", "watch"])
     assert result.exit_code == 0 and "0 hero screen(s) read" in result.stdout
+    assert ("result", "", "not_hero", 0) in SIGNALS.events  # the "Reading..." line never stays up
 
 
 def test_watch_ignores_incomplete_hero_screens(
@@ -194,6 +196,7 @@ def test_watch_ignores_incomplete_hero_screens(
     result = runner.invoke(app, ["roster", "watch"])
     assert result.exit_code == 0, result.output
     assert "Speed Set" not in result.stdout and "1 incomplete screen(s) ignored" in result.stdout
+    assert ("result", "", "incomplete", 0) in SIGNALS.events
 
 
 def test_watch_needs_a_catalog(watching: dict[str, int]) -> None:
@@ -235,6 +238,15 @@ def test_the_badge_never_covers_what_is_read(area: Rect, excluded: bool, spot: t
     assert _spot(area, excluded, screen_height=1080) == spot
 
 
+def test_the_badge_lines_say_which_hero_a_result_is_for() -> None:
+    from e7ac.ui.watch_signal import AMBER, GREEN, LIGHT, reading_line, result_line
+
+    assert reading_line(1) == "Reading..." and reading_line(3) == "Reading... (3 waiting)"
+    assert result_line("Renoa", "stored", 0) == ("Renoa: stored", GREEN)
+    assert result_line("Renoa", "doubtful", 1) == ("Renoa: stored, but check the console - 1 more being read", AMBER)
+    assert result_line("", "not_hero", 0) == ("Not a hero screen", LIGHT)
+
+
 @pytest.mark.windows
 def test_the_badge_starts_and_closes_on_windows() -> None:
     from e7ac.ui.watch_signal import open_signal
@@ -244,7 +256,8 @@ def test_the_badge_starts_and_closes_on_windows() -> None:
         pytest.skip(why)
     badge.place(Rect(100, 200, 1600, 900))
     badge.settling()
-    badge.captured(1)
-    badge.result("Blood Blade Karin", "stored")
-    badge.result("Blood Blade Karin", "doubtful")
+    badge.captured(2)
+    badge.result("Blood Blade Karin", "stored", 1)
+    badge.result("Blood Blade Karin", "doubtful", 0)
+    badge.result("", "not_hero", 0)
     badge.close()
