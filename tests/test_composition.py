@@ -36,7 +36,13 @@ from e7ac.domain.roster import (
     StatValue,
     Substat,
 )
-from e7ac.roster.composition import DISPLAYED_STATS, CompositionReport, StatCheck, check_final_stats
+from e7ac.roster.composition import (
+    DISPLAYED_STATS,
+    CompositionReport,
+    StatCheck,
+    check_final_stats,
+    compose_final_stats,
+)
 from e7ac.vision.hero_screen import HeroScreenReading
 from tests.markers import FIXTURES_DIR
 
@@ -342,6 +348,19 @@ def test_the_four_captured_builds_are_reproduced_exactly(name: str) -> None:
     assert verdicts(report, "capped") == capped and verdicts(report, "ok") == set(DISPLAYED_STATS) - capped
     assert all(c.suspects == () for c in report.checks if c.verdict == "ok")
     assert len(report.warnings) == len(capped)
+
+
+@pytest.mark.parametrize("name", sorted(CASES))
+def test_a_build_without_displayed_stats_is_composed_the_same(name: str) -> None:
+    """A Fribbels import has gear but no displayed stats: the same terms give the same totals (turn order needs it)."""
+    case = CASES[name]
+    composed = compose_final_stats(case.build(final_stats=None), case.hero, artifact=case.artifact, sets=SETS)
+    assert not isinstance(composed, str)
+    assert [composed.values[s] for s in DISPLAYED_STATS] == pytest.approx(case.expected, abs=1e-9)
+    no_boots = case.build(final_stats=None, gear={})
+    assert compose_final_stats(no_boots, case.hero, artifact=case.artifact, sets=SETS) == (
+        "gear missing: weapon, helmet, armor, necklace, ring, boots (all six pieces are needed)"
+    )
 
 
 def test_a_capped_crit_chance_names_what_it_cannot_verify() -> None:

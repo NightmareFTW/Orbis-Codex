@@ -6,12 +6,16 @@ from typing import Annotated
 
 import typer
 
+from e7ac.catalog.resolve import ResolvedEntity
 from e7ac.cli import catalog as catalog_cli
-from e7ac.cli.roster import _engine, _fail, _resolve_hero_code
+from e7ac.cli.roster import _catalog_heroes, _engine, _fail, _resolve_hero_code, _screen_catalog
 from e7ac.domain.codes import Stat
+from e7ac.domain.roster import HeroBuild
 from e7ac.domain.world import World
 from e7ac.paths import default_paths
 from e7ac.predict.turn_order import START_CR_MAX, Unit, first_turns
+from e7ac.roster.composition import compose_final_stats
+from e7ac.roster.screen_gear import ScreenCatalog
 from e7ac.roster.store import build_from_row, list_owned
 from e7ac.settings import SettingsError, load_settings
 from e7ac.sources.http import FetchError
@@ -42,18 +46,29 @@ def order(
     spreads: dict[str, str] = {}
     with session_scope(_engine()) as session:
         owned = list_owned(session)
+        heroes = _catalog_heroes(session) or {}
+        catalog, _ = _screen_catalog(session)
         for name in _split(team):
             code = _resolve_hero_code(session, name)
-            speeds = [
-                (build_from_row(session, row).final_stats, o.id) for o, row in owned if o.hero_code == code and row
-            ]
-            known = [(stats.speed, oid) for stats, oid in speeds if stats is not None]
+            builds = [(build_from_row(session, row), o.id) for o, row in owned if o.hero_code == code and row]
+            if not builds:
+                _fail(f"{name}: not in your roster (scan it, or import it first)")
+            known: list[tuple[float, int, str]] = []
+            reasons = []
+            for build, oid in builds:
+                speed, how = _speed(build, heroes.get(code), catalog)
+                if speed is None:
+                    reasons.append(f"#{oid}: {how}")
+                else:
+                    known.append((speed, oid, how))
             if not known:
-                _fail(f"{name}: not in your roster with its stats (scan it, or import it first)")
-            speed, oid = max(known)
-            if len(known) > 1:
-                typer.echo(f"note: {name}: you own {len(known)} copies, using the fastest (#{oid})", err=True)
-            units.append(Unit(name, "you", float(speed)))
+                _fail(f"{name}: no speed known ({'; '.join(reasons)}): scan its Hero Info or Equipment tab")
+            speed, oid, how = max(known)
+            if len(builds) > 1:
+                typer.echo(f"note: {name}: you own {len(builds)} copies, using the fastest (#{oid})", err=True)
+            if how:
+                typer.echo(f"note: {name}: speed {speed:g} {how}", err=True)
+            units.append(Unit(name, "you", speed))
         opponents = [(_resolve_hero_code(session, n.partition("=")[0].strip()), n) for n in _split(vs)]
     with catalog_cli.http_factory(paths, offline) as http:
         for code, entry in opponents:
@@ -88,6 +103,20 @@ def order(
             f"avg position {odds.mean_position:.1f}"
         )
     typer.echo(f"Your side takes the first turn: {result.your_side_first:.1%}")
+
+
+def _speed(build: HeroBuild, hero: ResolvedEntity | None, catalog: ScreenCatalog) -> tuple[float | None, str]:
+    """(speed, "" when read from the screen, else how it was obtained), or (None, why not)."""
+    if build.final_stats is not None:
+        return float(build.final_stats.speed), ""
+    if hero is None:
+        return None, "no catalog entry to compute it from gear (run: e7 catalog sync)"
+    artifact = catalog.artifacts.get(build.artifact.code) if build.artifact is not None else None
+    composed = compose_final_stats(build, hero, artifact=artifact, sets=catalog.sets)
+    if isinstance(composed, str):
+        return None, composed
+    approx = ", approximate" if Stat.SPEED in composed.uncertain else ""
+    return round(composed.values[Stat.SPEED], 1), f"computed from its gear (no stats read from the screen{approx})"
 
 
 def _split(text: str) -> list[str]:

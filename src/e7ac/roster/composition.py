@@ -221,6 +221,41 @@ def check_final_stats(
     return report
 
 
+@dataclass(frozen=True, slots=True)
+class ComposedStats:
+    values: dict[Stat, float]
+    """The stats the game would display (MECH-STAT-02), crit chance not capped; rates as fractions."""
+    uncertain: tuple[Stat, ...]
+    """Stats with a component of unknown amount, presence or target (approximate)."""
+    warnings: tuple[str, ...]
+
+
+def compose_final_stats(
+    build: HeroBuild,
+    hero: ResolvedEntity,
+    *,
+    artifact: ResolvedEntity | None,
+    sets: Mapping[str, ResolvedEntity],
+) -> ComposedStats | str:
+    """The displayed stats recomposed from base, gear, sets, artifact, imprint and EE, for a build whose displayed
+    stats were never read (a Fribbels import), or the reason it cannot be done. Same terms as `check_final_stats`."""
+    _check_arguments(build, hero, artifact, sets)
+    base, missing = _base_stats(hero)
+    reason = _not_composable(build, hero.entity_id, missing)
+    if reason is not None:
+        return reason
+    composition = _Composition()
+    _base_warnings(hero, composition)
+    _gear_terms(build, composition)
+    _set_terms(build, sets, composition)
+    _artifact_terms(build, artifact, composition)
+    _imprint_terms(build, hero, composition)
+    _ee_terms(build, hero, composition)
+    values = {stat: float(_compose(stat, base[stat], composition.terms)) for stat in DISPLAYED_STATS}
+    uncertain = tuple(s for s in DISPLAYED_STATS if composition.unknown.get(s) or composition.possible.get(s))
+    return ComposedStats(values, uncertain, tuple(composition.warnings))
+
+
 # ------------------------------------------------------------------------------------------------ applicability
 
 
@@ -254,6 +289,10 @@ def _base_stats(hero: ResolvedEntity) -> tuple[dict[Stat, Decimal], list[Stat]]:
 def _not_applicable(build: HeroBuild, code: str, missing_base: list[Stat]) -> str | None:
     if build.final_stats is None:
         return "the build has no displayed final stats"
+    return _not_composable(build, code, missing_base)
+
+
+def _not_composable(build: HeroBuild, code: str, missing_base: list[Stat]) -> str | None:
     if (build.level, build.stars, build.awakening) != (BASE_LEVEL, BASE_STARS, BASE_AWAKENING):
         return (
             f"the catalog base stats are Lv{BASE_LEVEL} {BASE_STARS}-star with awakening {BASE_AWAKENING} "
