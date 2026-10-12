@@ -142,7 +142,8 @@ Key data facts (details in docs/DATA_SOURCES.md):
 - **M17a slice 1 — done** (SPEC D64): `vision/arena_badges.py`, `arena/{identify,references}.py`, `e7 arena scan CAPTURE
   [--confirm/--no-confirm] [--win]`: Arena VS screen → badges (element, class) → candidates → asked once, then learned
   (`<home>/references/arena/`). Slice 2 (D65): `e7 arena watch` + double-click `Arena.cmd` (watches the game, reads
-  each VS screen once, asks only unknown heroes, runs predict win). Local fixtures `fixtures/screenshots/arena/`, `fixtures/stove/class_icons/` (never committed).
+  each VS screen once, asks only unknown heroes, runs predict win). Slice 3 (D66): `vision/arena_guide.py` recognises the
+  opponent from the Attack Guide faces (magnifier) against the Stove face icons; the badge says what to do and shows the odds. Local fixtures `fixtures/screenshots/arena/`, `fixtures/stove/class_icons/` (never committed).
 - Game client language: English, sometimes Portuguese → `game_language` setting (D39). Windows version shown by doctor.
 - Roster import paths (D45), picked by the user: A = Fribbels save file (M4, done), B = passive screen
   watch (M9a). Network import inside our app (M5c, D38): **not possible here** — blocked twice by Anthropic's safety

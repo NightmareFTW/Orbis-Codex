@@ -177,7 +177,7 @@ ATK 21→273, HP 32→416.
 ### Assets (local cache only, never committed)
 | Asset | URL pattern | Use |
 |---|---|---|
-| Hero portrait (112×112) | `{staticUrlGuide}/images/hero/{hero_code}_s.png` | Portrait recognition (Phase 5), UI |
+| Hero portrait (112×112) | `{staticUrlGuide}/images/hero/{hero_code}_s.png` (the game's own face icon; 391/391 catalog codes HTTP 200 on 2026-10-12) | Arena Attack Guide faces (D66): fetched once by `e7 arena watch`, cached under `<home>/cache/assets/hero_icons/`; UI |
 | Hero illustration (770×1163 RGBA) | `{staticUrlGuide}/images/hero/portrait/{hero_code}.png` (HTTP 200 for 80 codes checked 2026-10-12) | Candidate ranking on the Arena VS screen (later slice, D64), UI |
 | Class icon sprite (460×260 RGBA) | `https://static-pubcomm.onstove.com/live/epic7/brand/images/guide/icon_spr.png`; top row = the six class icons at the CSS offsets in `vision/arena_badges.py` (Stove HeroDetail CSS, 2026-10-12) | Arena VS badges (M17a): fetched on the first `e7 arena scan`, cached under `<home>/cache/assets/class_icons/` |
 | Set icon | `{staticUrlGuide}/wearingStatus/images/sets/{set_code}.png` (the file name is the full catalog code, e.g. `set_cri_dmg.png`; HTTP 200 for all 24 codes on 2026-10-04; 113×119 RGBA) | Hero Info set badges (M7): fetched by `e7 catalog sync` (polite, PNG validated, refreshed every 30 days), cached under `<home>/cache/assets/set_icons/`, read offline by `roster scan` |

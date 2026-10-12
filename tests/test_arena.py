@@ -230,40 +230,126 @@ def test_scan_asks_learns_and_prints_the_predict_command(
     assert "Blood Blade Karin (c2011) [only candidate]" in first.output
     assert 'Run: e7 predict win --team "c2011" --vs "c9001"' in first.output
     root = default_paths().home / "references" / "arena"
-    assert len(list((root / "c2011").glob("*.png"))) == 1 and ReferenceStore(root).last_team() == ["c2011"]
+    assert len(list((root / "c2011").glob("*.png"))) == 1 and ReferenceStore(root).last_team() == []  # not 4 heroes
     quiet = runner.invoke(app, ["arena", "scan", "vs.png", "--no-confirm"])
     assert quiet.exit_code == 0 and len(list((root / "c2011").glob("*.png"))) == 1  # nothing stored without asking
 
 
-def test_watch_reads_each_vs_screen_once_and_predicts(
-    synthetic_catalog: list[str], monkeypatch: pytest.MonkeyPatch
-) -> None:
+def _face_icon(seed: int) -> bytes:
+    """A synthetic RGBA face icon (the real ones are game art, never committed)."""
+    rgba = np.zeros((112, 112, 4), np.uint8)
+    rgba[:, :, :3] = cv2.resize(_textured(seed), (112, 112), interpolation=cv2.INTER_NEAREST)
+    alpha = np.zeros((112, 112), np.uint8)
+    cv2.circle(alpha, (56, 56), 50, 255, -1)
+    rgba[:, :, 3] = alpha
+    return cv2.imencode(".png", rgba)[1].tobytes()
+
+
+def _guide(icons: list[bytes]) -> np.ndarray[Any, np.dtype[np.uint8]]:
+    """An Attack Guide: a row of round face icons in gold frames on a dark panel."""
+    image = np.full((832, 1151, 3), (40, 25, 10), np.uint8)
+    r = 58
+    for i, data in enumerate(icons):
+        cx, cy = 324 + 170 * i, 282
+        decoded = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_UNCHANGED)
+        assert decoded is not None
+        icon = cv2.resize(decoded, (2 * r, 2 * r), interpolation=cv2.INTER_AREA).astype(np.float32)
+        alpha = icon[:, :, 3:] / 255
+        face = icon[:, :, :3] * alpha + np.array([110, 60, 20], np.float32) * (1 - alpha)
+        disc = np.zeros((2 * r, 2 * r), np.uint8)
+        cv2.circle(disc, (r, r), r - 4, 1, -1)
+        region = image[cy - r : cy + r, cx - r : cx + r]
+        region[disc > 0] = face.astype(np.uint8)[disc > 0]
+        cv2.circle(image, (cx, cy), r, (60, 170, 210), 6)
+    return image
+
+
+def test_attack_guide_faces_are_recognised_and_unknown_ones_never_guessed() -> None:
+    from e7ac.vision.arena_guide import FaceMatcher
+
+    icons = {f"c100{i}": _face_icon(10 + i) for i in range(1, 4)}
+    matcher = FaceMatcher.from_png(icons)
+    faces = matcher.read(_guide([*icons.values(), _face_icon(99)]))
+    assert [f.code for f in faces] == ["c1001", "c1002", "c1003", None]
+    with pytest.raises(ArenaScreenError):
+        matcher.read(np.full((832, 1151, 3), 30, np.uint8))
+
+
+TEAMS = cast(
+    dict[str, ResolvedEntity],
+    {
+        "c1001": _Hero("Ally One", "dark", "assassin"),
+        "c1002": _Hero("Ally Two", "fire", "warrior"),
+        "c1003": _Hero("Ally Three", "wind", "ranger"),
+        "c1004": _Hero("Ally Four", "ice", "mage"),
+        "c1005": _Hero("Foe One", "light", "manauser"),
+        "c1006": _Hero("Foe Two", "dark", "knight"),
+        "c1007": _Hero("Foe Three", "fire", "mage"),
+        "c1008": _Hero("Foe Four", "wind", "warrior"),
+        **{
+            f"c20{i}": _Hero(f"Lookalike {i}", e, r)
+            for i, (e, r) in enumerate(
+                [("light", "manauser"), ("dark", "knight"), ("fire", "mage"), ("wind", "warrior")], 10
+            )
+        },  # the VS screen alone cannot tell the opponents from these
+    },
+)
+
+
+def test_watch_reads_your_team_then_the_attack_guide_and_shows_the_odds(monkeypatch: pytest.MonkeyPatch) -> None:
     from e7ac.cli import arena as arena_cli
     from e7ac.cli import predict as predict_cli
     from e7ac.cli.app import app
+    from e7ac.predict.battle import BattleOdds
+    from e7ac.vision.arena_guide import FaceMatcher
 
-    vs = np.full((740, 1326, 3), 7, np.uint8)
-    blank = np.zeros((740, 1326, 3), np.uint8)
-    badges = [Badge("you", 100 + 40 * i, 100, 33, 29, Element.DARK, 1.0, HeroClass.THIEF, 1.0) for i in range(4)] + [
-        Badge("them", 900 + 40 * i, 100, 33, 29, Element.FIRE, 1.0, HeroClass.WARRIOR, 1.0) for i in range(4)
-    ]
+    def badge_of(side: str, x: int, code: str) -> Badge:
+        hero = TEAMS[code]
+        element, role = Element(str(hero.value("element"))), HeroClass(str(hero.value("role")))
+        return Badge(cast(Any, side), x, 150, 33, 29, element, 1.0, role, 1.0)
+
+    badges = [badge_of("you", 100 + 120 * i, f"c100{i + 1}") for i in range(4)]
+    badges += [badge_of("them", 760 + 120 * i, f"c100{i + 5}") for i in range(4)]
+    vs = np.asarray(cv2.resize(_textured(3), (1326, 740)), np.uint8)
+    vs[0, 0] = 7
+    foes = {f"c100{i}": _face_icon(20 + i) for i in range(5, 9)}
+    guide = _guide(list(foes.values()))
+    said: list[tuple[str, str]] = []
+
+    class FakeBadge:
+        def place(self, area: object) -> None: ...
+        def say(self, top: str, bottom: str, colour: str) -> None:
+            said.append((top, bottom))
+
+        def close(self) -> None: ...
 
     def frames(client: object, hwnd: int | None) -> Any:
-        yield from [None, blank, vs, vs, vs, blank, vs, vs]
+        yield from [(vs, None), (vs, None), None, (guide, None), (guide, None)]
         raise KeyboardInterrupt
 
     def read(image: Any, templates: object) -> list[Badge]:
-        if image[0, 0, 0] != 7:
+        if image.shape[1] != 1326 or image[0, 0, 0] != 7:
             raise ArenaScreenError("not VS")
         return badges
 
-    calls: list[tuple[str, str]] = []
+    predicted: list[tuple[str, str]] = []
+
+    def odds(team: str, theirs: str, world: object, offline: bool) -> BattleOdds:
+        predicted.append((team, theirs))
+        return BattleOdds(0.7, 0.3, 0.0, 30, 100)
+
+    owned = {f"c100{i}" for i in range(1, 5)}
     monkeypatch.setattr(arena_cli, "game_frames", frames)
     monkeypatch.setattr(arena_cli, "_templates", lambda paths, offline: {})
+    monkeypatch.setattr(arena_cli, "_context", lambda: (TEAMS, owned))
+    monkeypatch.setattr(arena_cli, "_faces", lambda paths, heroes, offline: FaceMatcher.from_png(foes))
     monkeypatch.setattr(arena_cli, "read_badges", read)
-    monkeypatch.setattr(predict_cli, "win", lambda team, vs, world, offline: calls.append((team, vs)))
-    result = CliRunner().invoke(app, ["arena", "watch"], input="\n" * 30)
+    monkeypatch.setattr(arena_cli, "signal_factory", lambda: (FakeBadge(), ""))
+    monkeypatch.setattr(predict_cli, "win_odds", odds)
+    result = CliRunner().invoke(app, ["arena", "watch"])
     assert result.exit_code == 0, result.output
-    # the same hero 4 times on a side is never accepted: asked (skipped here), so no prediction yet
-    assert "Not identified" in result.output and calls == []
-    assert len(list((default_paths().captures_dir / "arena").glob("*.png"))) == 2  # one per VS screen shown
+    assert predicted == [("c1001, c1002, c1003, c1004", "c1005, c1006, c1007, c1008")]  # once, no question asked
+    assert ("Tap the magnifier", "to read the opponent's team") in said
+    assert said[-1] == ("Win chance 70%", "vs Foe One, Foe Two, Foe Three, Foe Four")
+    learned = ReferenceStore(default_paths().home / "references" / "arena").codes()
+    assert learned == set(foes)  # the VS models of the opponent, named by their faces
