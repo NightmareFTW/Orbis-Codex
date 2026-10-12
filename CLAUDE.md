@@ -41,7 +41,7 @@ Brazilian. Until then every user-facing text stays in English only.
 ## Commands
 ```bash
 uv sync                      # install (dev group included)
-uv run e7 --help             # CLI: --version, doctor, paths, config, catalog, roster, opponent, capture
+uv run e7 --help             # CLI: --version, doctor, paths, config, catalog, roster, opponent, predict, capture
 uv run pytest                # tests (fixture tests skip if fixtures are missing; network tests need E7AC_NETWORK_TESTS=1)
 uv run ruff check . && uv run ruff format --check .
 uv run mypy                  # strict, src + tests
@@ -126,7 +126,9 @@ Key data facts (details in docs/DATA_SOURCES.md):
   (roster + predictions + overlay) at the end. Token budget is tight: no multi-agent reviews unless the user asks,
   small slices, the user's game tests as the check.
 - **M10 slice 1 — done** (SPEC D58): `sources/stove_usage.py` (hero-detail fetch, weekly refresh), `opponents/
-  {histogram,assumed}.py`, `e7 opponent show HERO --profile typical|strong|top`. Next: turn order from speed (M11 part).
+  {histogram,assumed}.py`, `e7 opponent show HERO --profile typical|strong|top`.
+- **M11 slice 1 — done** (SPEC D59): `predict/turn_order.py`, `e7 predict order --team … --vs …` (first-turn odds,
+  opponent speed drawn from Stove). Next: time-to-kill estimates (damage formula from e7calc, MECH-DMG).
 - Game client language: English, sometimes Portuguese → `game_language` setting (D39). Windows version shown by doctor.
 - Roster import paths (D45), picked by the user: A = Fribbels save file (M4, done), B = passive screen
   watch (M9a). Network import inside our app (M5c, D38): **not possible here** — blocked twice by Anthropic's safety

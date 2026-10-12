@@ -9,7 +9,8 @@ one that falls in an open end bin is flagged (its true value may lie beyond the 
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+import random
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Final
 
@@ -66,6 +67,22 @@ class StatHistogram:
                 return Percentile(round(value, 6), index in (0, BINS - 1))
             below += count
         raise AssertionError("unreachable: the counts add up to the total")
+
+    def sampler(self) -> Callable[[random.Random], float]:
+        """Draws values with the histogram's shape: a bin by its count, then a uniform value inside it (the end bins
+        are bounded at the label bounds: the open tails are not modelled, see `Percentile.open_end`)."""
+        if self.total == 0:
+            raise ValueError(f"{self.stat.value}: empty histogram")
+        low, high = LABEL_BOUNDS[self.stat]
+        width = (high - low) / BINS
+        bins = list(range(BINS))
+        weights = list(self.counts)
+
+        def draw(rng: random.Random) -> float:
+            index = rng.choices(bins, weights)[0]
+            return low + (index + rng.random()) * width
+
+        return draw
 
 
 def parse_counts(stat: Stat, text: str) -> StatHistogram:

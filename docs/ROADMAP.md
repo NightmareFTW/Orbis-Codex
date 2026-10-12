@@ -119,7 +119,7 @@ Checkboxes: `[x]` done · `[ ]` pending. Milestones are small vertical slices; o
   - Acceptance: deterministic profile tests on synthetic histograms; sampler reproduces marginals (property test); calibration recovers a known percentile on synthetic data.
 
 ## Phase 3 — Predictor v1 + overlay
-- [ ] **M11 Heuristic predictor** — features (turn order, TTK both ways, debuff landing, mechanic tags), logistic score with documented weights, CI, confidence, top-3 factors, warnings; `e7 predict --team … --vs …`.
+- [ ] **M11 Heuristic predictor** — *slice 1 done 2026-10-12 (SPEC D59): first-turn odds, `e7 predict order --team "Kawerik, Estelle" --vs "Blood Blade Karin, Riolet=231"`. How to try: the same with your own heroes. Still to do: TTK, debuff landing, mechanic tags, the logistic score.* — features (turn order, TTK both ways, debuff landing, mechanic tags), logistic score with documented weights, CI, confidence, top-3 factors, warnings; `e7 predict --team … --vs …`.
   - Acceptance: explainable output for 3 manual opponent teams; reproducible with seed; each weight documented.
 - [ ] **M12 Overlay predictions** — extends the M9 overlay shell: results panel, click-through toggle, position memory, DPI-aware, global hotkey (RegisterHotKey), colour-coded results, fuzzy autocomplete entry.
   - Acceptance: user checklist on Windows (windowed + borderless).
