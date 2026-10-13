@@ -2,12 +2,15 @@
 
 Each battle: start CR 0-5% at random (MECH-CR-02), CR fills with speed and the first to 100% acts (MECH-CR-01); an
 opponent's speed is drawn from Stove each battle. A unit uses S3 whenever its cooldown allows (epic7db; available
-again N of the unit's own turns later, MECH-CD-01 `assumed`), else S1; without a known cooldown, S3 on its first
+again N of the unit's own turns later, MECH-CD-01 `assumed`), else an active S2 whose cooldown allows, else S1
+(MECH-AI-01 `assumed`; a skill that only resurrects waits for a dead ally); without a known cooldown, S3 on its first
 action only (`assumed`); it attacks the living enemy it needs the fewest hits to defeat (focus fire,
 `assumed`: the game's targeting is not known); a skill with more than one target hits every living enemy. Each hit
 is critical with the attacker's crit chance (MECH-DMG-05). Skill effects from epic7db (SPEC D63, `predict/effects`):
 attack/defense/speed changes, stun/sleep, combat readiness, extra turns, immortality, immunity, revives; debuffs land
-by MECH-EFF-01. Not modelled: heals, barriers, counters, DoTs, artifacts, combat set effects: low confidence.
+by MECH-EFF-01. Survival (SPEC D68): heals (never above max Health), barriers (absorb damage before Health, the
+stronger kept, MECH-BAR-01 `assumed`), resurrection, cleanse, dispel, invincibility; passive heals and barriers act at
+the start of each of the caster's turns. Not modelled: counters, DoTs, artifacts, combat set effects: low confidence.
 """
 
 from __future__ import annotations
@@ -84,12 +87,11 @@ def _battle(
     cr = [rng.uniform(0, START_CR_MAX) for _ in units]
     hp = [u.stats[Stat.HP] for u in units]
     acted = [False] * n
-    waiting = [0] * n  # own turns until S3 is ready again
+    waiting: list[dict[int, int]] = [{} for _ in units]  # skill slot -> own turns until ready again
     state = [_State() for _ in units]
     for i, unit in enumerate(units):
         for effect in unit.kit.at_start:
-            for r in _allies(units, hp, i) if effect.all_allies else [i]:
-                state[r].apply(effect)
+            _use(effect, i, [], units, hp, cr, state, rng)
     for actions in range(1, MAX_ACTIONS + 1):
         alive = [i for i in range(n) if hp[i] > 0]
         speed = [speeds[i] * state[i].factor("spd") for i in range(n)]
@@ -99,15 +101,17 @@ def _battle(
             cr[i] += elapsed * speed[i]
         cr[actor] = 0.0
         unit, me = units[actor], state[actor]
+        for effect in unit.kit.on_turn:  # passive heals / barriers at the start of the turn
+            _use(effect, actor, [], units, hp, cr, state, rng)
         if me.timers.get("stun", 0) > 0:
             me.tick()
             continue
-        waiting[actor] = max(0, waiting[actor] - 1)
-        cooldown = unit.cooldowns.get(3)
-        ready = (waiting[actor] == 0) if cooldown is not None else not acted[actor]
-        slot = 3 if ready and 3 in unit.skills else 1
-        if slot == 3 and cooldown:
-            waiting[actor] = cooldown  # counts down at the start of each own turn: ready N turns later (MECH-CD-01)
+        for ready in waiting[actor]:
+            waiting[actor][ready] = max(0, waiting[actor][ready] - 1)
+        dead_ally = any(hp[j] <= 0 and units[j].side == unit.side for j in range(n))
+        slot = _choose(unit, waiting[actor], acted[actor], dead_ally)
+        if slot != 1 and unit.cooldowns.get(slot):
+            waiting[actor][slot] = unit.cooldowns[slot]  # counts down at the start of each own turn (MECH-CD-01)
         acted[actor] = True
         enemies = [j for j in alive if units[j].side != unit.side]
         skill = unit.skills.get(slot)
@@ -119,7 +123,7 @@ def _battle(
             attack = {**unit.stats, Stat.ATK: unit.stats[Stat.ATK] * me.factor("atk")}
             for j in targets:
                 guard = {**units[j].stats, Stat.DEF: units[j].stats[Stat.DEF] * state[j].factor("def")}
-                hp[j] -= base_hit(attack, skill, guard) * factor
+                state[j].hurt(hp, j, base_hit(attack, skill, guard) * factor)
                 if hp[j] <= 0:
                     _lethal(units, hp, cr, state, j)
         for effect in unit.kit.on_use.get(slot, []):
@@ -131,14 +135,34 @@ def _battle(
     return None, MAX_ACTIONS
 
 
+def _choose(unit: Combatant, waiting: Mapping[int, int], acted: bool, dead_ally: bool) -> int:
+    """S3, else an active S2, when ready (MECH-AI-01 `assumed`); else S1."""
+    for slot in (3, 2):
+        effects = unit.kit.on_use.get(slot, [])
+        if slot not in unit.skills and not effects:
+            continue
+        cooldown = unit.cooldowns.get(slot)
+        if slot == 2 and not cooldown:
+            continue  # a passive S2, or not known to be active
+        if not (waiting.get(slot, 0) == 0 if cooldown is not None else not acted):
+            continue
+        if slot not in unit.skills and all(e.kind == "resurrect" for e in effects) and not dead_ally:
+            continue  # nobody to bring back yet
+        return slot
+    return 1
+
+
 @dataclass(slots=True)
 class _State:
-    """Active effects of one unit: stat changes (kind -> (value, turns)) and timers (stun, immortal, immunity)."""
+    """Active effects of one unit: stat changes (kind -> (value, turns)), timers (stun, immortal, immunity,
+    invincible) and a barrier."""
 
     buffs: dict[str, tuple[float, int]] = field(default_factory=dict)
     debuffs: dict[str, tuple[float, int]] = field(default_factory=dict)
     timers: dict[str, int] = field(default_factory=dict)
     revived: bool = False
+    barrier: float = 0.0
+    barrier_turns: int = 0
 
     def factor(self, kind: str) -> float:
         return max(0.0, 1 + self.buffs.get(kind, (0.0, 0))[0] + self.debuffs.get(kind, (0.0, 0))[0])
@@ -148,8 +172,42 @@ class _State:
             table = self.debuffs if effect.debuff else self.buffs
             old = table.get(effect.kind, (0.0, 0))
             table[effect.kind] = (effect.value if abs(effect.value) >= abs(old[0]) else old[0], effect.turns)
-        elif effect.kind in ("stun", "immortal", "immunity"):
+        elif effect.kind in _TIMERS:
             self.timers[effect.kind] = max(self.timers.get(effect.kind, 0), effect.turns)
+
+    def hurt(self, hp: list[float], j: int, damage: float) -> None:
+        """Invincibility blocks the damage; a barrier absorbs it before Health (MECH-BAR-01)."""
+        if self.timers.get("invincible", 0) > 0:
+            return
+        absorbed = min(self.barrier, damage)
+        self.barrier -= absorbed
+        hp[j] -= damage - absorbed
+
+    def remove(self, debuffs: bool, count: int) -> None:
+        """Cleanse (debuffs) or dispel (buffs): all when `count` is 0."""
+        kinds = (
+            [("timer", "stun")] + [("debuff", k) for k in self.debuffs]
+            if debuffs
+            else [("timer", k) for k in ("immortal", "invincible", "immunity")]
+            + [("barrier", "")]
+            + [("buff", k) for k in self.buffs]
+        )
+        removed = 0
+        for table, kind in kinds:
+            if count and removed >= count:
+                return
+            removed += self._drop(table, kind)
+
+    def _drop(self, table: str, kind: str) -> bool:
+        if table == "timer":
+            return self.timers.pop(kind, 0) > 0
+        if table == "debuff":
+            return self.debuffs.pop(kind, None) is not None
+        if table == "buff":
+            return self.buffs.pop(kind, None) is not None
+        had = self.barrier > 0
+        self.barrier, self.barrier_turns = 0.0, 0
+        return had
 
     def tick(self) -> None:
         """End of the unit's own turn: every duration goes down by one."""
@@ -163,6 +221,13 @@ class _State:
             self.timers[kind] -= 1
             if self.timers[kind] <= 0:
                 del self.timers[kind]
+        if self.barrier_turns:
+            self.barrier_turns -= 1
+            if self.barrier_turns <= 0:
+                self.barrier = 0.0
+
+
+_TIMERS: Final = ("stun", "immortal", "immunity", "invincible")
 
 
 def _allies(units: Sequence[Combatant], hp: Sequence[float], i: int) -> list[int]:
@@ -184,27 +249,56 @@ def _lethal(units: Sequence[Combatant], hp: list[float], cr: list[float], state:
                 state[j].apply(effect)
 
 
+def _receivers(effect: Effect, actor: int, units: Sequence[Combatant], hp: Sequence[float]) -> list[int]:
+    allies = _allies(units, hp, actor)
+    if effect.receivers == "all" or (not effect.receivers and effect.all_allies):
+        return allies
+    if effect.receivers.startswith("lowest:"):
+        count = int(effect.receivers.split(":")[1])
+        return sorted(allies, key=lambda j: hp[j] / units[j].stats[Stat.HP])[:count]
+    return [actor]
+
+
 def _use(
     effect: Effect,
     actor: int,
     targets: Sequence[int],
     units: Sequence[Combatant],
-    hp: Sequence[float],
+    hp: list[float],
     cr: list[float],
     state: list[_State],
     rng: random.Random,
 ) -> None:
+    if hp[actor] <= 0:
+        return
+    caster = units[actor].stats
+    amount = (
+        effect.scaling[0] * caster[Stat.HP]
+        + effect.scaling[1] * caster[Stat.ATK]
+        + effect.scaling[2] * caster[Stat.DEF]
+    )
+    if effect.kind == "resurrect":
+        dead = [j for j in range(len(units)) if units[j].side == units[actor].side and hp[j] <= 0]
+        for j in dead if effect.receivers == "all" else dead[:1]:
+            revived = state[j].revived
+            hp[j], cr[j], state[j] = units[j].stats[Stat.HP] * effect.value, 0.0, _State(revived=revived)
+        return
     if not effect.debuff:
-        receivers = _allies(units, hp, actor) if effect.all_allies else [actor]
-        for r in receivers:
+        for r in _receivers(effect, actor, units, hp):
             if effect.kind == "extra_turn":
                 cr[r] = 1.0
             elif effect.kind == "cr":
                 cr[r] = min(1.0, cr[r] + effect.value)
+            elif effect.kind == "heal":
+                hp[r] = min(units[r].stats[Stat.HP], hp[r] + amount)
+            elif effect.kind == "barrier":
+                state[r].barrier, state[r].barrier_turns = max(state[r].barrier, amount), effect.turns
+            elif effect.kind == "cleanse":
+                state[r].remove(debuffs=True, count=effect.count)
             else:
                 state[r].apply(effect)
         return
-    effectiveness = units[actor].stats.get(Stat.EFFECTIVENESS, 0.0)
+    effectiveness = caster.get(Stat.EFFECTIVENESS, 0.0)
     for j in targets:
         if hp[j] <= 0 or state[j].timers.get("immunity", 0) > 0:
             continue
@@ -214,6 +308,8 @@ def _use(
             continue
         if effect.kind == "cr":
             cr[j] = max(0.0, cr[j] + effect.value)
+        elif effect.kind == "dispel":
+            state[j].remove(debuffs=False, count=effect.count)
         else:
             state[j].apply(effect)
 

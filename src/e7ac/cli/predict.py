@@ -18,8 +18,8 @@ from e7ac.domain.world import World
 from e7ac.opponents.assumed import Profile, assumed_build
 from e7ac.paths import default_paths
 from e7ac.predict.battle import BattleOdds, Combatant, confidence_interval, simulate
-from e7ac.predict.damage import SkillPower, hits_to_defeat, skill_power
-from e7ac.predict.effects import Kit, kit_from
+from e7ac.predict.damage import SkillPower, hits_to_defeat, skill_power, support_amounts
+from e7ac.predict.effects import Kit, Scaling, kit_from
 from e7ac.predict.turn_order import START_CR_MAX, Unit, first_turns
 from e7ac.roster.composition import compose_final_stats
 from e7ac.roster.screen_gear import ScreenCatalog
@@ -54,6 +54,8 @@ class _Fighter:
     """Catalog name (epic7db pages are found by it)."""
     cooldowns: dict[int, int] = field(default_factory=dict)
     kit: Kit = field(default_factory=Kit)
+    amounts: dict[int, dict[str, Scaling]] = field(default_factory=dict)
+    """Per skill slot: heal / barrier scaling from Fribbels (SPEC D68)."""
 
 
 @predict_app.command("order")
@@ -130,7 +132,7 @@ def win_odds(team: str, vs: str, world: World | None, offline: bool) -> BattleOd
     typer.echo(f"Win {odds.win:.1%} (+/-{margin:.1%})  loss {odds.loss:.1%}  draw {odds.draw:.1%}")
     typer.echo(
         f"  {odds.runs:,} simulated battles, {odds.mean_actions:.0f} actions on average; confidence: low "
-        "(skill effects read automatically; no heals, barriers, counters, artifacts or combat set effects yet)"
+        "(skill effects read automatically; no counters, DoTs, artifacts or combat set effects yet)"
     )
     for warning in odds.warnings:
         typer.echo(f"  warning: {warning}", err=True)
@@ -196,16 +198,18 @@ def _fighters(team: str, vs: str, world: World | None, offline: bool) -> list[_F
             if is_hero_code(fighter.label) and fighter.name:
                 fighter.label = fighter.name  # codes given (e7 arena scan): show names
             if snapshot is not None:
-                for slot in (1, 3):
+                for slot in (1, 2, 3):
                     entity = load_entity(session, snapshot.id, EntityType.SKILL, f"{fighter.code}:s{slot}")
                     power = skill_power(entity) if entity is not None else None
                     if power is not None:
                         fighter.skills[slot] = power
+                    if entity is not None:
+                        fighter.amounts[slot] = support_amounts(entity)
     with catalog_cli.http_factory(paths, offline) as http:
         for fighter in fighters:
             skills = fetch_kit(http, fighter.name) if fighter.name else {}
             fighter.cooldowns = {s: k.cooldown for s, k in skills.items() if k.cooldown is not None}
-            fighter.kit = kit_from(skills)
+            fighter.kit = kit_from(skills, fighter.amounts)
         for fighter in (f for f in fighters if f.side == "them"):
             try:
                 usage = fetch_hero_usage(http, region, fighter.code)

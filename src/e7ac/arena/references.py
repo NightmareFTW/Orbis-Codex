@@ -131,6 +131,16 @@ class ReferenceStore:
         self._cache.pop(code, None)
         return path
 
+    def crops(self) -> dict[str, list[BgrImage]]:
+        """Every stored crop, per hero code (damaged files left out)."""
+        found: dict[str, list[BgrImage]] = {}
+        for code in sorted(self.codes()):
+            for path in sorted((self.root / code).glob("*.png")):
+                image = cv2.imread(str(path), cv2.IMREAD_COLOR)
+                if image is not None:
+                    found.setdefault(code, []).append(np.asarray(image, np.uint8))
+        return found
+
     def last_team(self) -> list[str]:
         try:
             data: Any = json.loads((self.root / "last_team.json").read_text(encoding="utf-8"))

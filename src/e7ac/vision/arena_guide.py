@@ -6,6 +6,8 @@ matched directly against every hero of the catalog: no learning, no question. Me
 (2026-10-12, 391 heroes): the icon spans the frame's inner circle (scale 1.0), true faces scored 0.91-0.96 with the
 runner-up at least 0.32 lower; a face missing from the catalog (a newer hero or a skin) scored 0.56 with no margin.
 A face is accepted only with `MIN_SCORE` and `MIN_MARGIN` (`assumed` from that capture): never a near miss.
+Some in-game faces differ from the Stove icon (Sea Phantom Politis, 2026-10-13: 0.48): faces named once (by the user
+or by elimination against the VS screen) are learned and matched like the icons (SPEC D69).
 """
 
 from __future__ import annotations
@@ -43,27 +45,28 @@ class Face:
     score: float
     margin: float
     candidate: str
+    crop: npt.NDArray[np.uint8] | None = None
+    """The face as compared (SIZE x SIZE): kept so a face named later can be learned."""
 
 
 class FaceMatcher:
     def __init__(self, references: Mapping[str, list[npt.NDArray[np.float32]]]) -> None:
-        self._references = references
         mask = np.zeros((SIZE, SIZE), np.float32)
         cv2.circle(mask, (SIZE // 2, SIZE // 2), SIZE // 2 - 1, 1.0, -1)
         corner = round(0.38 * SIZE)
         mask[:corner, :corner] = 0  # the class icon overlaps this corner of the frame
         self._mask = np.dstack([mask] * 3)
         self._keep = self._mask.astype(bool)
-        self._codes = list(references)
-        centre = SCALES.index(1.0)
-        self._quick = (
-            np.stack([_vector(_centre(references[c][centre]), self._keep) for c in self._codes])
-            if self._codes
-            else np.zeros((0, 1), np.float32)
-        )
+        self._entries: list[tuple[str, list[npt.NDArray[np.float32]]]] = []
+        self._quick: list[npt.NDArray[np.float32]] = []
+        for code, variants in references.items():
+            self._add(code, variants)
 
     @classmethod
-    def from_png(cls, icons: Mapping[str, bytes]) -> FaceMatcher:
+    def from_png(
+        cls, icons: Mapping[str, bytes], learned: Mapping[str, list[npt.NDArray[np.uint8]]] | None = None
+    ) -> FaceMatcher:
+        """`learned`: faces named before (SIZE x SIZE crops), per hero code."""
         references: dict[str, list[npt.NDArray[np.float32]]] = {}
         for code, data in icons.items():
             icon = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_UNCHANGED)
@@ -71,11 +74,21 @@ class FaceMatcher:
                 continue  # not an RGBA icon: left out (the caller reports missing icons)
             rgba = np.asarray(icon, np.uint8)
             references[code] = [_composite(rgba, round(SIZE / INNER * k)) for k in SCALES]
-        return cls(references)
+        matcher = cls(references)
+        for code, crops in (learned or {}).items():
+            for crop in crops:
+                matcher.learn(code, crop)
+        return matcher
 
     @property
     def codes(self) -> frozenset[str]:
-        return frozenset(self._references)
+        return frozenset(code for code, _ in self._entries)
+
+    def learn(self, code: str, crop: npt.NDArray[np.uint8]) -> None:
+        """A face named once: matched like an icon from now on (small shifts searched)."""
+        face = cv2.resize(crop, (SIZE, SIZE), interpolation=cv2.INTER_AREA).astype(np.float32)
+        padded = np.asarray(cv2.copyMakeBorder(face, 4, 4, 4, 4, cv2.BORDER_REPLICATE), np.float32)
+        self._add(code, [padded] * len(SCALES))
 
     def read(self, image: BgrImage) -> list[Face]:
         """The faces of the defence team, left to right. Raises ArenaScreenError when there is no row of icons."""
@@ -86,28 +99,30 @@ class FaceMatcher:
             if x0 < 0 or y0 < 0 or x0 + side > image.shape[1] or y0 + side > image.shape[0]:
                 continue
             crop = cv2.resize(image[y0 : y0 + side, x0 : x0 + side], (SIZE, SIZE), interpolation=cv2.INTER_AREA)
-            faces.append(self._identify(np.asarray(crop, np.float32), x, y, r))
+            faces.append(self._identify(np.asarray(crop, np.uint8), x, y, r))
         return faces
 
-    def _identify(self, crop: npt.NDArray[np.float32], x: float, y: float, r: float) -> Face:
-        quick = self._quick @ _vector(crop, self._keep) if self._codes else np.zeros(0)
-        shortlist = [self._codes[i] for i in np.argsort(-quick)[:SHORTLIST]]
-        scores = {}
-        for code in shortlist:
-            variants = self._references[code]
-            best = -1.0
+    def _add(self, code: str, variants: list[npt.NDArray[np.float32]]) -> None:
+        self._entries.append((code, variants))
+        self._quick.append(_vector(_centre(variants[SCALES.index(1.0)]), self._keep))
+
+    def _identify(self, face: npt.NDArray[np.uint8], x: float, y: float, r: float) -> Face:
+        crop = face.astype(np.float32)
+        if not self._entries:
+            return Face(x, y, r, None, 0.0, 0.0, "", face)
+        quick = np.stack(self._quick) @ _vector(crop, self._keep)
+        scores: dict[str, float] = {}
+        for index in np.argsort(-quick)[:SHORTLIST]:
+            code, variants = self._entries[int(index)]
             for reference in variants:
                 result = cv2.matchTemplate(reference, crop, cv2.TM_CCOEFF_NORMED, mask=self._mask)
                 result[~np.isfinite(result)] = -1
-                best = max(best, float(result.max()))
-            scores[code] = best
+                scores[code] = max(scores.get(code, -1.0), float(result.max()))
         ranked = sorted(scores.items(), key=lambda kv: -kv[1])
-        if not ranked:
-            return Face(x, y, r, None, 0.0, 0.0, "")
         top, score = ranked[0]
         margin = score - (ranked[1][1] if len(ranked) > 1 else 0.0)
         accepted = score >= MIN_SCORE and margin >= MIN_MARGIN
-        return Face(x, y, r, top if accepted else None, round(score, 3), round(margin, 3), top)
+        return Face(x, y, r, top if accepted else None, round(score, 3), round(margin, 3), top, face)
 
 
 def find_row(image: BgrImage) -> list[tuple[float, float, float]]:

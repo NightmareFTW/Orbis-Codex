@@ -342,7 +342,7 @@ def test_watch_reads_your_team_then_the_attack_guide_and_shows_the_odds(monkeypa
     monkeypatch.setattr(arena_cli, "game_frames", frames)
     monkeypatch.setattr(arena_cli, "_templates", lambda paths, offline: {})
     monkeypatch.setattr(arena_cli, "_context", lambda: (TEAMS, owned))
-    monkeypatch.setattr(arena_cli, "_faces", lambda paths, heroes, offline: FaceMatcher.from_png(foes))
+    monkeypatch.setattr(arena_cli, "_faces", lambda paths, heroes, offline, store: FaceMatcher.from_png(foes))
     monkeypatch.setattr(arena_cli, "read_badges", read)
     monkeypatch.setattr(arena_cli, "signal_factory", lambda on_click: (FakeBadge(), ""))
     monkeypatch.setattr(predict_cli, "win_odds", odds)
@@ -423,7 +423,7 @@ def test_check_again_reads_another_opponent(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(arena_cli, "game_frames", frames)
     monkeypatch.setattr(arena_cli, "_templates", lambda paths, offline: {})
     monkeypatch.setattr(arena_cli, "_context", lambda: (TEAMS, owned))
-    monkeypatch.setattr(arena_cli, "_faces", lambda paths, heroes, offline: FaceMatcher.from_png(icons))
+    monkeypatch.setattr(arena_cli, "_faces", lambda paths, heroes, offline, store: FaceMatcher.from_png(icons))
     monkeypatch.setattr(arena_cli, "read_badges", read)
     monkeypatch.setattr(arena_cli, "signal_factory", factory)
     monkeypatch.setattr(predict_cli, "win_odds", odds)
@@ -433,3 +433,86 @@ def test_check_again_reads_another_opponent(monkeypatch: pytest.MonkeyPatch) -> 
     # classes, is never taken for the old one: the magnifier is asked for and its faces name it
     assert predicted == [", ".join(first_foes), ", ".join(first_foes), ", ".join(other_foes)], result.output
     assert said.count("Tap the magnifier") == 2
+
+
+def _watch_run(
+    monkeypatch: pytest.MonkeyPatch,
+    frames: list[Any],
+    icons: dict[str, bytes],
+    typed: list[str],
+    heroes: dict[str, ResolvedEntity] = TEAMS,
+) -> tuple[Any, list[str]]:
+    """Run `e7 arena watch` on these frames (VS screens: 1326 wide), with these known face icons and typed lines."""
+    from e7ac.cli import arena as arena_cli
+    from e7ac.cli import predict as predict_cli
+    from e7ac.cli.app import app
+    from e7ac.predict.battle import BattleOdds
+    from e7ac.vision.arena_guide import FaceMatcher
+
+    def badge_of(side: str, x: int, code: str) -> Badge:
+        hero = TEAMS[code]
+        element, role = Element(str(hero.value("element"))), HeroClass(str(hero.value("role")))
+        return Badge(cast(Any, side), x, 150, 33, 29, element, 1.0, role, 1.0)
+
+    badges = [badge_of("you", 100 + 120 * i, f"c100{i + 1}") for i in range(4)]
+    badges += [badge_of("them", 760 + 120 * i, f"c100{i + 5}") for i in range(4)]
+
+    def read(image: Any, templates: object) -> list[Badge]:
+        if image.shape[1] != 1326:
+            raise ArenaScreenError("not VS")
+        return badges
+
+    class FakeBadge:
+        def place(self, area: object) -> None: ...
+        def say(self, top: str, bottom: str, colour: str) -> None: ...
+        def close(self) -> None: ...
+
+    predicted: list[str] = []
+
+    def odds(team: str, vs_: str, world: object, offline: bool) -> BattleOdds:
+        predicted.append(vs_)
+        return BattleOdds(0.5, 0.5, 0.0, 30, 100)
+
+    def stream(client: object, hwnd: int | None) -> Any:
+        yield from [(f, None) for f in frames]
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(arena_cli, "game_frames", stream)
+    monkeypatch.setattr(arena_cli, "_templates", lambda paths, offline: {})
+    monkeypatch.setattr(arena_cli, "_context", lambda: (heroes, {f"c100{i}" for i in range(1, 5)}))
+    monkeypatch.setattr(
+        arena_cli, "_faces", lambda paths, heroes, offline, store: FaceMatcher.from_png(icons, store.crops())
+    )
+    monkeypatch.setattr(arena_cli, "read_badges", read)
+    monkeypatch.setattr(arena_cli, "signal_factory", lambda on_click: (FakeBadge(), ""))
+    monkeypatch.setattr(arena_cli, "listen", lambda answers: answers.put(typed.pop(0)) if typed else None)
+    monkeypatch.setattr(predict_cli, "win_odds", odds)
+    result = CliRunner().invoke(app, ["arena", "watch"])
+    assert result.exit_code == 0, result.output
+    return result, predicted
+
+
+def test_a_face_unlike_its_icon_is_named_by_elimination_and_learned(monkeypatch: pytest.MonkeyPatch) -> None:
+    foes = [f"c100{i}" for i in range(5, 9)]
+    icons = {code: _face_icon(40 + i) for i, code in enumerate(foes)}
+    shown = {**icons, "c1007": _face_icon(77)}  # in game, Foe Three's face is not its icon
+    vs = np.asarray(cv2.resize(_textured(6), (1326, 740)), np.uint8)
+    guide = _guide([shown[c] for c in foes])
+    unique = {code: hero for code, hero in TEAMS.items() if not code.startswith("c20")}  # the VS screen names them
+    result, predicted = _watch_run(monkeypatch, [vs, vs, guide, guide], icons, [], unique)
+    assert "is Foe Three (from the VS screen): learned" in result.output
+    assert predicted == [", ".join(foes), ", ".join(foes)]  # from the VS screen, then from the guide
+    again, _ = _watch_run(monkeypatch, [guide, guide], icons, [])  # learned: recognised directly, nothing asked
+    assert "Foe Three" in again.output and "not recognised" not in again.output
+
+
+def test_an_unknown_face_is_asked_without_stopping_the_watch(monkeypatch: pytest.MonkeyPatch) -> None:
+    foes = [f"c100{i}" for i in range(5, 9)]
+    icons = {code: _face_icon(50 + i) for i, code in enumerate(foes)}
+    shown = {**icons, "c1006": _face_icon(88)}
+    guide = _guide([shown[c] for c in foes])
+    blank = np.zeros((740, 1151, 3), np.uint8)
+    result, predicted = _watch_run(monkeypatch, [guide, guide, blank, blank], icons, ["Foe Two"])
+    assert "Opponent hero 2 not recognised" in result.output and "face 2 is Foe Two: learned" in result.output
+    # your team was never shown (no VS screen): the opponent is named, the prediction waits for your team
+    assert "Your team is not known yet" in result.output and predicted == []

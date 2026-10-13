@@ -59,6 +59,23 @@ def skill_power(entity: ResolvedEntity) -> SkillPower | None:
     )
 
 
+def support_amounts(entity: ResolvedEntity) -> dict[str, tuple[float, float, float]]:
+    """Heal / barrier amounts of a skill from its Fribbels options ("S2 heal", "S3 barrier"; soulburn ones left out):
+    shares of the caster's max Health, Attack and Defense (`community`, MECH-HEAL-01)."""
+    found: dict[str, tuple[float, float, float]] = {}
+    variants = entity.value("variants")
+    for option in variants if isinstance(variants, list) else []:
+        if not isinstance(option, dict):
+            continue
+        name = str(option.get("name", "")).lower()
+        kind = next((k for k in ("heal", "barrier") if name.endswith(k) and "soulburn" not in name), None)
+        if kind is not None and kind not in found:
+            scaling = tuple(_number(option.get(key)) for key in ("selfHpScaling", "selfAtkScaling", "selfDefScaling"))
+            if any(scaling):
+                found[kind] = (scaling[0], scaling[1], scaling[2])
+    return found
+
+
 def expected_hit(attacker: Mapping[Stat, float], skill: SkillPower, defender: Mapping[Stat, float]) -> float:
     offense = attacker[Stat.ATK] * skill.rate + attacker[Stat.HP] * skill.hp_scaling
     offense += attacker[Stat.DEF] * skill.def_scaling

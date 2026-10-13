@@ -138,13 +138,16 @@ Key data facts (details in docs/DATA_SOURCES.md):
   opponent speed drawn from Stove); slice 2 (D60): `predict/damage.py`, `e7 predict hits` (S1/S3 hits to defeat).
   Slice 3 (D61): `predict/battle.py`, `e7 predict win` (simulated battles, low confidence). Slice 4 (D62): S3
   cooldowns from epic7db (`sources/epic7db.py`). Slice 5 (D63): skill effects read automatically from epic7db icons
-  and text (`predict/effects.py`). User chose precision before UI. Next: hand refinement (week of 2026-10-19).
+  and text (`predict/effects.py`). Slice 6 (D68): survival effects (heals/barriers with Fribbels amounts,
+  resurrection, cleanse, dispel, invincibility, active S2); part 2 (DoTs, counter, provoke, silence) next if the user
+  approves the budget. User chose precision before UI. Next: hand refinement (week of 2026-10-19).
 - **M17a slice 1 — done** (SPEC D64): `vision/arena_badges.py`, `arena/{identify,references}.py`, `e7 arena scan CAPTURE
   [--confirm/--no-confirm] [--win]`: Arena VS screen → badges (element, class) → candidates → asked once, then learned
   (`<home>/references/arena/`). Slice 2 (D65): `e7 arena watch` + double-click `Arena.cmd` (watches the game, reads
   each VS screen once, asks only unknown heroes, runs predict win). Slice 3 (D66): `vision/arena_guide.py` recognises the
   opponent from the Attack Guide faces (magnifier) against the Stove face icons; the badge says what to do and shows the odds; D67: its "Check again" button re-reads both screens
-  (another opponent or team; the opponent is never carried over). Local fixtures `fixtures/screenshots/arena/`, `fixtures/stove/class_icons/` (never committed).
+  (another opponent or team; the opponent is never carried over). D69: unknown faces never block the watch (named
+  by elimination or typed while it goes on) and are learned. Local fixtures `fixtures/screenshots/arena/`, `fixtures/stove/class_icons/` (never committed).
 - Game client language: English, sometimes Portuguese → `game_language` setting (D39). Windows version shown by doctor.
 - Roster import paths (D45), picked by the user: A = Fribbels save file (M4, done), B = passive screen
   watch (M9a). Network import inside our app (M5c, D38): **not possible here** — blocked twice by Anthropic's safety

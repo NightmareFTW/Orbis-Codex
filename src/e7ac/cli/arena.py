@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import queue
 import sys
 import threading
 import time
@@ -64,8 +66,10 @@ def watch(
         _fail(str(exc))
     templates = _templates(paths, offline)
     heroes, owned = _context()
-    faces = _faces(paths, heroes, offline)
+    face_store = ReferenceStore(paths.home / "references" / "faces")
+    faces = _faces(paths, heroes, offline, face_store)
     store = ReferenceStore(paths.home / "references" / "arena")
+    answers: queue.Queue[str] = queue.Queue()  # names typed in the window, read in the background
     retry = threading.Event()  # the badge's "Check again" button
     badge, why = signal_factory(retry.set) if signal else (NoSignal(), "")
     if why:
@@ -81,7 +85,8 @@ def watch(
             if item is not None:
                 frame, area = item
                 badge.place(area)
-                _step(normalise(frame), match, templates, faces, heroes, owned, store, badge, offline, paths)
+                context = _Context(templates, faces, face_store, heroes, owned, store, badge, offline, paths, answers)
+                _step(normalise(frame), match, context)
     except (KeyboardInterrupt, typer.Abort):  # Ctrl+C, also while a question waits
         typer.echo("Stopped.")
     badge.close()
@@ -100,6 +105,25 @@ class _Match:
     """One reading per VS screen: re-armed once the screen has gone; the same for the Attack Guide."""
     seen_faces: tuple[str | None, ...] = ()
     guide_armed: bool = True
+    vs_theirs: list[str] = field(default_factory=list)
+    """The opponent as the last VS screen named it (all four, or nothing)."""
+    pending: list[Face] = field(default_factory=list)
+    """Attack Guide faces waiting for a name typed in the window."""
+    pending_codes: list[str | None] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class _Context:
+    templates: dict[HeroClass, Template]
+    faces: FaceMatcher
+    face_store: ReferenceStore
+    heroes: dict[str, ResolvedEntity]
+    owned: set[str]
+    store: ReferenceStore
+    badge: WatchSignal
+    offline: bool
+    paths: AppPaths
+    answers: queue.Queue[str]
 
 
 def _again(match: _Match, badge: WatchSignal) -> None:
@@ -111,20 +135,11 @@ def _again(match: _Match, badge: WatchSignal) -> None:
     typer.echo("Check again: reading the VS screen anew.")
 
 
-def _step(
-    image: BgrImage,
-    match: _Match,
-    templates: dict[HeroClass, Template],
-    faces: FaceMatcher,
-    heroes: dict[str, ResolvedEntity],
-    owned: set[str],
-    store: ReferenceStore,
-    badge: WatchSignal,
-    offline: bool,
-    paths: AppPaths,
-) -> None:
+def _step(image: BgrImage, match: _Match, c: _Context) -> None:
+    if match.pending and not c.answers.empty():
+        _answer(c.answers.get(), match, c)
     try:
-        badges = read_badges(image, templates)
+        badges = read_badges(image, c.templates)
     except ArenaScreenError:
         badges = []
     complete = sum(b.side == "you" for b in badges) == 4 and sum(b.side == "them" for b in badges) == 4
@@ -132,23 +147,24 @@ def _step(
         match.vs_armed = True
     elif match.vs_armed and complete and _same_layout(badges, match.previous):  # still for two frames
         match.vs_armed = False
-        kept = _keep_capture(paths.captures_dir / "arena", image)
+        kept = _keep_capture(c.paths.captures_dir / "arena", image)
         typer.echo(f"{datetime.now().astimezone():%H:%M:%S} Arena VS screen (capture kept: {kept})")
-        slots = _resolve(image, badges, heroes, owned, store, asking=True, always_ask=False, sides=("you",))
+        slots = _resolve(image, badges, c.heroes, c.owned, c.store, asking=True, always_ask=False, sides=("you",))
         match.vs = (image, badges)
         team = [s.code for s in slots if s.badge.side == "you" and s.code]
         theirs = [s.code for s in slots if s.badge.side == "them" and s.code]
+        match.vs_theirs = theirs if len(theirs) == 4 else []
         if len(team) == 4:
             match.team = team
         if len(team) == 4 and len(theirs) == 4:  # the opponent's VS models were learned before
-            _predict(match.team, theirs, heroes, badge, offline)
+            _predict(match.team, theirs, c)
         elif len(team) == 4:
-            badge.say("Tap the magnifier", "to read the opponent's team", AMBER)
+            c.badge.say("Tap the magnifier", "to read the opponent's team", AMBER)
         else:
-            badge.say("Your team is not known", "answer in the Arena window", RED)
+            c.badge.say("Your team is not known", "answer in the Arena window", RED)
     match.previous = badges if complete else []
     try:
-        read = faces.read(image)
+        read = c.faces.read(image)
     except ArenaScreenError:
         read = []
     codes = tuple(f.code for f in read)
@@ -160,51 +176,96 @@ def _step(
         return
     match.guide_armed = False
     typer.echo(
-        f"{datetime.now().astimezone():%H:%M:%S} Attack Guide: " + ", ".join(_face_line(f, heroes) for f in read)
+        f"{datetime.now().astimezone():%H:%M:%S} Attack Guide: " + ", ".join(_face_line(f, c.heroes) for f in read)
     )
-    theirs = [code for code in codes if code is not None]
-    if len(theirs) < len(codes):
-        _keep_capture(paths.captures_dir / "arena", image)
-        theirs = _ask_faces(read, heroes)
-    if match.vs is not None and len(theirs) == len(codes):
-        _learn(match.vs, theirs, heroes, store)
+    names: list[str | None] = list(codes)
+    unknown = [i for i, code in enumerate(names) if code is None]
+    left = [code for code in match.vs_theirs if code not in names]
+    if len(unknown) == 1 and len(left) == 1:  # by elimination: the VS screen named all four
+        names[unknown[0]] = left[0]
+        _learn_face(read[unknown[0]], left[0], c)
+        typer.echo(f"  face {unknown[0] + 1} is {_name(c.heroes, left[0])} (from the VS screen): learned")
+    if None in names:
+        _keep_capture(c.paths.captures_dir / "arena", image)
+        match.pending, match.pending_codes = read, names
+        c.badge.say("Opponent hero not recognised", "type its name in the Arena window", RED)
+        _ask_next(match, c)
+        return
+    _guide_done([n for n in names if n], match, c)
+
+
+def _ask_next(match: _Match, c: _Context) -> None:
+    number = match.pending_codes.index(None) + 1
+    typer.echo(
+        f"Opponent hero {number} not recognised: type its exact name (or code) and press Enter, or just Enter to skip. "
+        "The watch goes on meanwhile."
+    )
+    listen(c.answers)
+
+
+def _answer(line: str, match: _Match, c: _Context) -> None:
+    """A name typed for the first face not recognised: learned, then the next one is asked, or the check is done."""
+    index = match.pending_codes.index(None)
+    if not line:
+        match.pending, match.pending_codes = [], []
+        c.badge.say("Opponent not recognised", "skipped: no prediction", RED)
+        return
+    found = _hero_by_name(line, c.heroes)
+    if found is None:
+        typer.echo("  not one hero of the catalog (newer heroes: run e7 catalog sync)")
+        _ask_next(match, c)
+        return
+    match.pending_codes[index] = found
+    _learn_face(match.pending[index], found, c)
+    typer.echo(f"  face {index + 1} is {_name(c.heroes, found)}: learned")
+    if None in match.pending_codes:
+        _ask_next(match, c)
+        return
+    names = [n for n in match.pending_codes if n]
+    match.pending, match.pending_codes = [], []
+    _guide_done(names, match, c)
+
+
+def _guide_done(theirs: list[str], match: _Match, c: _Context) -> None:
+    if match.vs is not None:
+        _learn(match.vs, theirs, c.heroes, c.store)
     if len(match.team) != 4:
-        badge.say("Your team is not known", "open the VS screen again", RED)
+        c.badge.say("Your team is not known", "open the VS screen again", RED)
         typer.echo("Your team is not known yet: go back to the VS screen.", err=True)
-    elif len(theirs) == len(codes):
-        _predict(match.team, theirs, heroes, badge, offline)
     else:
-        badge.say("Opponent not recognised", "see the Arena window", RED)
+        _predict(match.team, theirs, c)
+
+
+def _learn_face(face: Face, code: str, c: _Context) -> None:
+    """A face named by the user or by elimination: kept (local only) and recognised directly from now on."""
+    if face.crop is not None:
+        c.faces.learn(code, face.crop)
+        c.face_store.add(code, face.crop, datetime.now(UTC))
+
+
+def _hero_by_name(answer: str, heroes: dict[str, ResolvedEntity]) -> str | None:
+    lowered = answer.strip().lower()
+    if lowered in heroes:
+        return lowered
+    found = [code for code, hero in heroes.items() if (hero.name or "").lower() == lowered]
+    return found[0] if len(found) == 1 else None
+
+
+def _listen(answers: queue.Queue[str]) -> None:
+    """One line typed in the window, read in the background so the watch goes on."""
+
+    def read() -> None:
+        with contextlib.suppress(OSError, ValueError):
+            answers.put(sys.stdin.readline().strip())
+
+    threading.Thread(target=read, name="e7-arena-answer", daemon=True).start()
+
+
+listen: Callable[[queue.Queue[str]], None] = _listen
 
 
 def _face_line(face: Face, heroes: dict[str, ResolvedEntity]) -> str:
     return _name(heroes, face.code) if face.code else f"? (closest {_name(heroes, face.candidate)} {face.score:.2f})"
-
-
-def _ask_faces(read: list[Face], heroes: dict[str, ResolvedEntity]) -> list[str]:
-    """Faces not recognised (a hero newer than the catalog, or a skin): asked by exact name or code."""
-    by_name: dict[str, list[str]] = {}
-    for code, hero in heroes.items():
-        by_name.setdefault((hero.name or code).lower(), []).append(code)
-    codes = []
-    for number, face in enumerate(read, 1):
-        if face.code is not None:
-            codes.append(face.code)
-            continue
-        while True:
-            answer = typer.prompt(
-                f"Opponent hero {number} not recognised: exact name or code (Enter = skip)",
-                default="",
-                show_default=False,
-            ).strip()
-            if not answer:
-                return [c for c in codes]
-            found = [answer.lower()] if answer.lower() in heroes else by_name.get(answer.lower(), [])
-            if len(found) == 1:
-                codes.append(found[0])
-                break
-            typer.echo("  not one hero of the catalog (run e7 catalog sync for newer heroes)")
-    return codes
 
 
 def _learn(
@@ -227,22 +288,23 @@ def _learn(
             store.add(fits[0], hero_crop(image, badge, badges), when)
 
 
-def _predict(
-    team: list[str], theirs: list[str], heroes: dict[str, ResolvedEntity], badge: WatchSignal, offline: bool
-) -> None:
-    names = ", ".join(_name(heroes, c) for c in theirs)
+def _predict(team: list[str], theirs: list[str], c: _Context) -> None:
+    names = ", ".join(_name(c.heroes, code) for code in theirs)
     try:
-        odds = predict_cli.win_odds(", ".join(team), ", ".join(theirs), None, offline)
+        odds = predict_cli.win_odds(", ".join(team), ", ".join(theirs), None, c.offline)
     except typer.Exit:
-        badge.say("No prediction", "see the Arena window", RED)
+        c.badge.say("No prediction", "see the Arena window", RED)
         return
     colour = GREEN if odds.win >= 0.6 else RED if odds.win <= 0.4 else AMBER
-    badge.say(f"Win chance {odds.win:.0%}", f"vs {names}"[:48], colour)
+    c.badge.say(f"Win chance {odds.win:.0%}", f"vs {names}"[:48], colour)
     typer.echo("Watching for the next Arena match... (Ctrl+C stops)")
 
 
-def _faces(paths: AppPaths, heroes: dict[str, ResolvedEntity], offline: bool) -> FaceMatcher:
-    """The face icons of every catalog hero: downloaded once (one per second), then read from the cache."""
+def _faces(
+    paths: AppPaths, heroes: dict[str, ResolvedEntity], offline: bool, face_store: ReferenceStore
+) -> FaceMatcher:
+    """The face icons of every catalog hero (downloaded once, one per second, then read from the cache), and the faces
+    learned before."""
     missing = set(heroes) - set(load_hero_icons(paths.cache_dir, heroes))
     if missing and not offline:
         typer.echo(f"Downloading {len(missing)} hero face icons, only once (about {len(missing) // 55 + 1} min)...")
@@ -252,7 +314,7 @@ def _faces(paths: AppPaths, heroes: dict[str, ResolvedEntity], offline: bool) ->
             )
         if failed:
             typer.echo(f"note: {len(failed)} face icons not available: those heroes are asked", err=True)
-    return FaceMatcher.from_png(load_hero_icons(paths.cache_dir, heroes))
+    return FaceMatcher.from_png(load_hero_icons(paths.cache_dir, heroes), face_store.crops())
 
 
 @arena_app.command("scan")
