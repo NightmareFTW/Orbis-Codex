@@ -546,3 +546,21 @@ def test_an_unclear_face_is_decided_among_the_heroes_its_vs_badge_allows(monkeyp
     result, predicted = _watch_run(monkeypatch, [vs, vs, guide, guide], icons, [])
     assert "face 2 is Foe Two (" in result.output and "not recognised" not in result.output
     assert predicted == [", ".join(foes)]
+
+
+def test_the_attack_guide_is_read_even_when_no_face_is_known(monkeypatch: pytest.MonkeyPatch) -> None:
+    foes = [f"c100{i}" for i in range(5, 9)]
+    icons = {code: _face_icon(70 + i) for i, code in enumerate(foes + [f"c20{i}" for i in range(10, 14)])}
+    other = cv2.imdecode(np.frombuffer(_face_icon(98), np.uint8), cv2.IMREAD_UNCHANGED)
+    assert other is not None
+    shown = {}
+    for code in foes:  # every face differs from its icon (~0.73): none is known among all heroes
+        face = cv2.imdecode(np.frombuffer(icons[code], np.uint8), cv2.IMREAD_UNCHANGED)
+        assert face is not None
+        face[:, :, :3] = (0.6 * face[:, :, :3] + 0.4 * other[:, :, :3]).astype(np.uint8)
+        shown[code] = cv2.imencode(".png", face)[1].tobytes()
+    vs = np.asarray(cv2.resize(_textured(8), (1326, 740)), np.uint8)
+    guide = _guide([shown[c] for c in foes])
+    result, predicted = _watch_run(monkeypatch, [vs, vs, guide, guide], icons, [])
+    assert "tap the magnifier" in result.output and "Attack Guide: ?" in result.output
+    assert predicted == [", ".join(foes)]  # all four decided among the heroes the VS badges allow

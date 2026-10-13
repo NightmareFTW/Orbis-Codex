@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import itertools
 import queue
 import sys
 import threading
@@ -160,6 +161,7 @@ def _step(image: BgrImage, match: _Match, c: _Context) -> None:
             _predict(match.team, theirs, c)
         elif len(team) == 4:
             c.badge.say("Tap the magnifier", "to read the opponent's team", AMBER)
+            typer.echo("  -> tap the magnifier (Attack Guide) in the game to read the opponent's team")
         else:
             c.badge.say("Your team is not known", "answer in the Arena window", RED)
     match.previous = badges if complete else []
@@ -168,7 +170,8 @@ def _step(image: BgrImage, match: _Match, c: _Context) -> None:
     except ArenaScreenError:
         read = []
     codes = tuple(f.code for f in read)
-    if sum(code is not None for code in codes) < 2:  # not the Attack Guide
+    known = sum(code is not None for code in codes)
+    if known < 2 and not (_four_in_a_row(read) and (known or match.vs is not None)):  # not the Attack Guide
         match.guide_armed, match.seen_faces = True, ()
         return
     if not match.guide_armed or codes != match.seen_faces:  # read twice the same: fully shown
@@ -194,6 +197,15 @@ def _step(image: BgrImage, match: _Match, c: _Context) -> None:
         _ask_next(match, c)
         return
     _guide_done([n for n in names if n], match, c)
+
+
+def _four_in_a_row(read: list[Face]) -> bool:
+    """Four round icons of one size, evenly spaced: the Attack Guide's defence team, even with no face known yet."""
+    if len(read) != 4:
+        return False
+    gaps = [b.x - a.x for a, b in itertools.pairwise(read)]
+    mean = sum(gaps) / len(gaps)
+    return all(abs(g - mean) <= 0.15 * mean for g in gaps) and max(f.r for f in read) <= 1.2 * min(f.r for f in read)
 
 
 def _by_badges(names: list[str | None], read: list[Face], badges: list[Badge], c: _Context) -> None:
