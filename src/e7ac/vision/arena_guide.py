@@ -33,8 +33,9 @@ GROUP_MIN_SCORE: Final = 0.60
 GROUP_MIN_MARGIN: Final = 0.10
 """A face not recognised among all heroes may still be clear among the few the VS screen allows (its badge's element
 and class, SPEC D70): accepted there with these (`assumed`; Briar Witch Iseria scored 0.73 against its own icon)."""
-SHORTLIST: Final = 12
-"""Heroes compared in full after a quick whole-face comparison of all of them (the true face ranked 1st there)."""
+SHORTLIST: Final = 40
+"""Heroes compared in full after a quick whole-face comparison of all of them (12 missed Rinak on the user's
+capture, 2026-10-13; 40: found, ~0.5 s per Attack Guide)."""
 _BACKDROP: Final = np.array([110, 60, 20], np.float32)
 """Where a reference icon is transparent, the game shows a blue backdrop (BGR, approximate)."""
 

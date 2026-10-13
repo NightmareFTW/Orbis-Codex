@@ -71,8 +71,9 @@ def watch(
     faces = _faces(paths, heroes, offline, face_store)
     store = ReferenceStore(paths.home / "references" / "arena")
     answers: queue.Queue[str] = queue.Queue()  # names typed in the window, read in the background
-    retry = threading.Event()  # the badge's "Check again" button
-    badge, why = signal_factory(retry.set) if signal else (NoSignal(), "")
+    last: list[tuple[str, str, str]] = [("", "", "")]  # the last prediction shown
+    retry, share = threading.Event(), threading.Event()  # the badge's "Check again" and "Save picture" buttons
+    badge, why = signal_factory(retry.set, share.set) if signal else (NoSignal(), "")
     if why:
         typer.echo(f"note: {why}", err=True)
     match = _Match(team=store.last_team())
@@ -83,10 +84,16 @@ def watch(
             if retry.is_set():
                 retry.clear()
                 _again(match, badge)
+            if share.is_set():
+                share.clear()
+                _share(match.frame, last[0], paths, badge)
             if item is not None:
                 frame, area = item
+                match.frame = frame
                 badge.place(area)
-                context = _Context(templates, faces, face_store, heroes, owned, store, badge, offline, paths, answers)
+                context = _Context(
+                    templates, faces, face_store, heroes, owned, store, badge, offline, paths, answers, last
+                )
                 _step(normalise(frame), match, context)
     except (KeyboardInterrupt, typer.Abort):  # Ctrl+C, also while a question waits
         typer.echo("Stopped.")
@@ -111,6 +118,8 @@ class _Match:
     pending: list[Face] = field(default_factory=list)
     """Attack Guide faces waiting for a name typed in the window."""
     pending_codes: list[str | None] = field(default_factory=list)
+    frame: BgrImage | None = None
+    """The last game picture (full size), for "Save picture"."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,6 +134,45 @@ class _Context:
     offline: bool
     paths: AppPaths
     answers: queue.Queue[str]
+    last: list[tuple[str, str, str]]
+    """The last prediction as the badge shows it (two lines and their colour), for "Save picture"."""
+
+
+def _share(frame: BgrImage | None, result: tuple[str, str, str], paths: AppPaths, badge: WatchSignal) -> None:
+    """ "Save picture": the game as it is now with the last result written on it, to show to friends (the badge itself
+    is hidden from every screen capture, so that it never disturbs the reading)."""
+    if frame is None or not result[0]:
+        badge.say("Nothing to save yet", "a result first", LIGHT)
+        return
+    picture = frame.copy()
+    width = picture.shape[1]
+    scale = max(0.6, width / 1400)
+    band = int(70 * scale)
+    shade = picture[:band].astype(np.float32) * 0.35
+    picture[:band] = shade.astype(np.uint8)
+    bgr = tuple(int(result[2][i : i + 2], 16) for i in (5, 3, 1))  # "#rrggbb" -> BGR
+    cv2.putText(picture, result[0], (int(16 * scale), int(32 * scale)), cv2.FONT_HERSHEY_DUPLEX, 1.0 * scale, bgr, 2)
+    cv2.putText(
+        picture,
+        result[1],
+        (int(16 * scale), int(58 * scale)),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.6 * scale,
+        (230, 230, 230),
+        1,
+    )
+    cv2.putText(
+        picture,
+        "Orbis Codex",
+        (width - int(150 * scale), int(32 * scale)),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.6 * scale,
+        (200, 200, 200),
+        1,
+    )
+    path = _keep_capture(paths.captures_dir / "arena" / "shared", picture, "result")
+    badge.say("Picture saved", path.name, GREEN)
+    typer.echo(f"Picture saved: {path}")
 
 
 def _again(match: _Match, badge: WatchSignal) -> None:
@@ -337,6 +385,7 @@ def _predict(team: list[str], theirs: list[str], c: _Context) -> None:
         return
     colour = GREEN if odds.win >= 0.6 else RED if odds.win <= 0.4 else AMBER
     c.badge.say(f"Win chance {odds.win:.0%}", f"vs {names}"[:48], colour)
+    c.last[0] = (f"Win chance {odds.win:.0%}", f"vs {names}", colour)
     typer.echo("Watching for the next Arena match... (Ctrl+C stops)")
 
 
@@ -443,8 +492,8 @@ INTERVAL: Final = 0.5
 game_frames: Callable[[Any, int | None], Iterator[tuple[BgrImage, Rect] | None]] = _game_frames
 
 
-def _open_badge(on_click: Callable[[], None]) -> tuple[WatchSignal, str]:
-    return open_signal(False, ("Check\nagain", on_click))
+def _open_badge(on_retry: Callable[[], None], on_share: Callable[[], None]) -> tuple[WatchSignal, str]:
+    return open_signal(False, [("Check again", on_retry), ("Save picture", on_share)])
 
 
 def _shape(codes: list[str], heroes: dict[str, ResolvedEntity]) -> list[tuple[str, str]]:
@@ -452,7 +501,7 @@ def _shape(codes: list[str], heroes: dict[str, ResolvedEntity]) -> list[tuple[st
     return sorted((str(heroes[c].value("element")), str(heroes[c].value("role"))) for c in codes if c in heroes)
 
 
-signal_factory: Callable[[Callable[[], None]], tuple[WatchSignal, str]] = _open_badge
+signal_factory: Callable[[Callable[[], None], Callable[[], None]], tuple[WatchSignal, str]] = _open_badge
 arena_sleep: Callable[[float], None] = time.sleep
 
 
@@ -521,11 +570,11 @@ def _same_layout(badges: list[Badge], previous: list[Badge]) -> bool:
     )
 
 
-def _keep_capture(folder: Path, image: BgrImage) -> Path:
+def _keep_capture(folder: Path, image: BgrImage, label: str = "vs") -> Path:
     from e7ac.vision.capture import capture_name
 
     folder.mkdir(parents=True, exist_ok=True)
-    path = folder / capture_name(datetime.now().astimezone(), "vs", lambda n: (folder / n).exists())
+    path = folder / capture_name(datetime.now().astimezone(), label, lambda n: (folder / n).exists())
     cv2.imwrite(str(path), image)
     return path
 

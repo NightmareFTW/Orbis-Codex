@@ -344,7 +344,7 @@ def test_watch_reads_your_team_then_the_attack_guide_and_shows_the_odds(monkeypa
     monkeypatch.setattr(arena_cli, "_context", lambda: (TEAMS, owned))
     monkeypatch.setattr(arena_cli, "_faces", lambda paths, heroes, offline, store: FaceMatcher.from_png(foes))
     monkeypatch.setattr(arena_cli, "read_badges", read)
-    monkeypatch.setattr(arena_cli, "signal_factory", lambda on_click: (FakeBadge(), ""))
+    monkeypatch.setattr(arena_cli, "signal_factory", lambda on_retry, on_share: (FakeBadge(), ""))
     monkeypatch.setattr(predict_cli, "win_odds", odds)
     result = CliRunner().invoke(app, ["arena", "watch"])
     assert result.exit_code == 0, result.output
@@ -409,7 +409,7 @@ def test_check_again_reads_another_opponent(monkeypatch: pytest.MonkeyPatch) -> 
 
         def close(self) -> None: ...
 
-    def factory(on_click: Any) -> tuple[FakeBadge, str]:
+    def factory(on_click: Any, on_share: Any) -> tuple[FakeBadge, str]:
         clicks.append(on_click)
         return FakeBadge(), ""
 
@@ -484,7 +484,7 @@ def _watch_run(
         arena_cli, "_faces", lambda paths, heroes, offline, store: FaceMatcher.from_png(icons, store.crops())
     )
     monkeypatch.setattr(arena_cli, "read_badges", read)
-    monkeypatch.setattr(arena_cli, "signal_factory", lambda on_click: (FakeBadge(), ""))
+    monkeypatch.setattr(arena_cli, "signal_factory", lambda on_retry, on_share: (FakeBadge(), ""))
     monkeypatch.setattr(arena_cli, "listen", lambda answers: answers.put(typed.pop(0)) if typed else None)
     monkeypatch.setattr(predict_cli, "win_odds", odds)
     result = CliRunner().invoke(app, ["arena", "watch"])
@@ -564,3 +564,25 @@ def test_the_attack_guide_is_read_even_when_no_face_is_known(monkeypatch: pytest
     result, predicted = _watch_run(monkeypatch, [vs, vs, guide, guide], icons, [])
     assert "tap the magnifier" in result.output and "Attack Guide: ?" in result.output
     assert predicted == [", ".join(foes)]  # all four decided among the heroes the VS badges allow
+
+
+def test_save_picture_writes_the_last_result_on_the_game(monkeypatch: pytest.MonkeyPatch) -> None:
+    from e7ac.cli import arena as arena_cli
+
+    said: list[str] = []
+
+    class FakeBadge:
+        def place(self, area: object) -> None: ...
+        def say(self, top: str, bottom: str, colour: str) -> None:
+            said.append(top)
+
+        def close(self) -> None: ...
+
+    paths = default_paths()
+    game = np.asarray(cv2.resize(_textured(9), (1600, 900)), np.uint8)
+    arena_cli._share(None, ("", "", ""), paths, cast(Any, FakeBadge()))
+    arena_cli._share(game, ("Win chance 62%", "vs Foe One, Foe Two", "#2fa84f"), paths, cast(Any, FakeBadge()))
+    saved = list((paths.captures_dir / "arena" / "shared").glob("*.png"))
+    assert said == ["Nothing to save yet", "Picture saved"] and len(saved) == 1
+    picture = cv2.imread(str(saved[0]))
+    assert picture is not None and picture.shape == game.shape and not np.array_equal(picture[:60], game[:60])

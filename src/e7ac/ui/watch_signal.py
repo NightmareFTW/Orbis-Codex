@@ -52,15 +52,15 @@ class NoSignal:
     def close(self) -> None: ...
 
 
-def open_signal(beep: bool, button: tuple[str, Callable[[], None]] | None = None) -> tuple[WatchSignal, str]:
-    """The badge, or the console only with the reason. `button`: a label and what a click on it does (the badge then
+def open_signal(beep: bool, buttons: list[tuple[str, Callable[[], None]]] | None = None) -> tuple[WatchSignal, str]:
+    """The badge, or the console only with the reason. `buttons`: labels and what a click on each does (the badge then
     takes clicks, on its own area only; it still never takes the focus from the game)."""
     if sys.platform == "win32":
         try:
             import tkinter  # noqa: F401
         except ImportError:
             return NoSignal(), "tkinter is missing from this Python: console only"
-        badge = TkBadge(beep, button)
+        badge = TkBadge(beep, buttons or [])
         if not badge.ready.wait(5):
             return NoSignal(), "the visual signal did not start: console only"
         return badge, ""
@@ -71,9 +71,9 @@ def open_signal(beep: bool, button: tuple[str, Callable[[], None]] | None = None
 class TkBadge:
     """The badge, run by its own thread (tkinter calls stay on that thread; the others only post messages)."""
 
-    def __init__(self, beep: bool, button: tuple[str, Callable[[], None]] | None = None) -> None:
+    def __init__(self, beep: bool, buttons: list[tuple[str, Callable[[], None]]] | None = None) -> None:
         self.beep = beep
-        self.button = button
+        self.buttons = buttons or []
         self.ready = threading.Event()
         self.excluded = False
         self._messages: queue.Queue[tuple[str, Any]] = queue.Queue()
@@ -122,18 +122,20 @@ class TkBadge:
         box.pack(fill="both", expand=True)
         top = tk.Label(box, text="Watching the game...", fg="white", bg=BACKGROUND, font=("Segoe UI", 12, "bold"))
         bottom = tk.Label(box, text="", fg="#bbbbbb", bg=BACKGROUND, font=("Segoe UI", 10))
-        if self.button is not None:
-            label, action = self.button
-            press = tk.Label(box, text=label, fg="white", bg=GREY, font=("Segoe UI", 9, "bold"), padx=6, cursor="hand2")
-            press.pack(side="right", fill="y", padx=(0, 6), pady=6)
-            press.bind("<Button-1>", lambda _event: action())
+        if self.buttons:
+            column = tk.Frame(box, bg=BACKGROUND)
+            column.pack(side="right", fill="y", padx=(0, 4), pady=3)
+            for label, action in self.buttons:
+                press = tk.Label(column, text=label, fg="white", bg=GREY, font=("Segoe UI", 8, "bold"), cursor="hand2")
+                press.pack(fill="both", expand=True, pady=1)
+                press.bind("<Button-1>", _on_click(action))
         top.pack(fill="x", padx=8, pady=(4, 0))
         bottom.pack(fill="x", padx=8)
         root.withdraw()
         root.update_idletasks()
         hwnd = int(root.wm_frame(), 16)
         self.excluded = _exclude_from_capture(hwnd)
-        _click_through(hwnd, clickable=self.button is not None)
+        _click_through(hwnd, clickable=bool(self.buttons))
         placed: list[Rect] = []
 
         def apply(kind: str, value: Any) -> bool:
@@ -173,6 +175,13 @@ class TkBadge:
         root.after(50, poll)
         self.ready.set()
         root.mainloop()
+
+
+def _on_click(action: Callable[[], None]) -> Callable[[Any], None]:
+    def handler(_event: Any) -> None:
+        action()
+
+    return handler
 
 
 def reading_line(waiting: int) -> str:
