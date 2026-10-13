@@ -566,23 +566,43 @@ def test_the_attack_guide_is_read_even_when_no_face_is_known(monkeypatch: pytest
     assert predicted == [", ".join(foes)]  # all four decided among the heroes the VS badges allow
 
 
-def test_save_picture_writes_the_last_result_on_the_game(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_save_picture_shows_the_badge_on_the_game(monkeypatch: pytest.MonkeyPatch) -> None:
     from e7ac.cli import arena as arena_cli
 
     said: list[str] = []
 
     class FakeBadge:
+        def __init__(self, capturable: bool) -> None:
+            self.allowed = capturable
+            self.states: list[bool] = []
+
         def place(self, area: object) -> None: ...
         def say(self, top: str, bottom: str, colour: str) -> None:
             said.append(top)
 
+        def capturable(self, on: bool) -> bool:
+            self.states.append(on)
+            return self.allowed
+
         def close(self) -> None: ...
 
     paths = default_paths()
+    folder = paths.captures_dir / "arena" / "shared"
     game = np.asarray(cv2.resize(_textured(9), (1600, 900)), np.uint8)
-    arena_cli._share(None, ("", "", ""), paths, cast(Any, FakeBadge()))
-    arena_cli._share(game, ("Win chance 62%", "vs Foe One, Foe Two", "#2fa84f"), paths, cast(Any, FakeBadge()))
-    saved = list((paths.captures_dir / "arena" / "shared").glob("*.png"))
-    assert said == ["Nothing to save yet", "Picture saved"] and len(saved) == 1
-    picture = cv2.imread(str(saved[0]))
-    assert picture is not None and picture.shape == game.shape and not np.array_equal(picture[:60], game[:60])
+    with_badge = game.copy()
+    with_badge[:80] = 255  # what the screen shows with the badge visible to the capture
+    monkeypatch.setattr(arena_cli, "grab_frame", lambda client, hwnd: (with_badge, None))
+    monkeypatch.setattr(arena_cli, "arena_sleep", lambda seconds: None)
+    result = ("Win chance 62%", "vs Foe One, Foe Two", "#2fa84f")
+    arena_cli._share(game, ("", "", ""), paths, cast(Any, FakeBadge(True)))
+    shown = FakeBadge(True)
+    arena_cli._share(game, result, paths, cast(Any, shown))
+    assert shown.states == [True, False]  # visible for the picture only, hidden again
+    first = cv2.imread(str(next(folder.glob("*.png"))))
+    assert first is not None and np.array_equal(first, with_badge)
+    for old in folder.glob("*.png"):
+        old.unlink()
+    arena_cli._share(game, result, paths, cast(Any, FakeBadge(False)))  # older Windows: a copy is drawn
+    drawn = cv2.imread(str(next(folder.glob("*.png"))))
+    assert drawn is not None and not np.array_equal(drawn[8:66, 650:950], game[8:66, 650:950])
+    assert np.array_equal(drawn[200:], game[200:]) and said[0] == "Nothing to save yet"

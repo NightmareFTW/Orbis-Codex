@@ -86,7 +86,7 @@ def watch(
                 _again(match, badge)
             if share.is_set():
                 share.clear()
-                _share(match.frame, last[0], paths, badge)
+                _share(match.frame, last[0], paths, badge, client, hwnd)
             if item is not None:
                 frame, area = item
                 match.frame = frame
@@ -138,41 +138,50 @@ class _Context:
     """The last prediction as the badge shows it (two lines and their colour), for "Save picture"."""
 
 
-def _share(frame: BgrImage | None, result: tuple[str, str, str], paths: AppPaths, badge: WatchSignal) -> None:
-    """ "Save picture": the game as it is now with the last result written on it, to show to friends (the badge itself
-    is hidden from every screen capture, so that it never disturbs the reading)."""
-    if frame is None or not result[0]:
+def _share(
+    frame: BgrImage | None,
+    result: tuple[str, str, str],
+    paths: AppPaths,
+    badge: WatchSignal,
+    client: Any = None,
+    hwnd: int | None = None,
+) -> None:
+    """ "Save picture": the game with the badge on it, to show to friends. The badge is hidden from every screen
+    capture so that it never disturbs the reading: for this picture only it is shown to the capture for a moment;
+    where Windows does not allow it, a copy of the badge is drawn on the last game picture instead."""
+    if not result[0]:
         badge.say("Nothing to save yet", "a result first", LIGHT)
         return
-    picture = frame.copy()
-    width = picture.shape[1]
-    scale = max(0.6, width / 1400)
-    band = int(70 * scale)
-    shade = picture[:band].astype(np.float32) * 0.35
-    picture[:band] = shade.astype(np.uint8)
-    bgr = tuple(int(result[2][i : i + 2], 16) for i in (5, 3, 1))  # "#rrggbb" -> BGR
-    cv2.putText(picture, result[0], (int(16 * scale), int(32 * scale)), cv2.FONT_HERSHEY_DUPLEX, 1.0 * scale, bgr, 2)
-    cv2.putText(
-        picture,
-        result[1],
-        (int(16 * scale), int(58 * scale)),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.6 * scale,
-        (230, 230, 230),
-        1,
-    )
-    cv2.putText(
-        picture,
-        "Orbis Codex",
-        (width - int(150 * scale), int(32 * scale)),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.6 * scale,
-        (200, 200, 200),
-        1,
-    )
+    picture: BgrImage | None = None
+    if badge.capturable(True):
+        try:
+            arena_sleep(0.3)  # the screen is redrawn with the badge
+            grabbed = grab_frame(client, hwnd)
+            picture = grabbed[0] if grabbed is not None else None
+        finally:
+            badge.capturable(False)
+    if picture is None:
+        if frame is None:
+            badge.say("Nothing to save yet", "the game is not visible", LIGHT)
+            return
+        picture = _with_badge(frame, result)
     path = _keep_capture(paths.captures_dir / "arena" / "shared", picture, "result")
-    badge.say("Picture saved", path.name, GREEN)
+    badge.say(result[0], f"picture saved: {path.name}", result[2])
     typer.echo(f"Picture saved: {path}")
+
+
+def _with_badge(frame: BgrImage, result: tuple[str, str, str]) -> BgrImage:
+    """A copy of the badge drawn where it stands on the game (top centre)."""
+    picture = frame.copy()
+    width, height = 300, 58
+    x0, y0 = max(0, (picture.shape[1] - width) // 2), 8
+    colour = tuple(int(result[2][i : i + 2], 16) for i in (5, 3, 1))  # "#rrggbb" -> BGR
+    cv2.rectangle(picture, (x0, y0), (x0 + width, y0 + height), (30, 30, 30), -1)
+    cv2.rectangle(picture, (x0, y0), (x0 + width, y0 + height), colour, 3)
+    cv2.putText(picture, result[0], (x0 + 12, y0 + 24), cv2.FONT_HERSHEY_DUPLEX, 0.6, colour, 1, cv2.LINE_AA)
+    line = result[1] if len(result[1]) <= 44 else result[1][:43] + "..."
+    cv2.putText(picture, line, (x0 + 12, y0 + 46), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (187, 187, 187), 1, cv2.LINE_AA)
+    return np.asarray(picture, np.uint8)
 
 
 def _again(match: _Match, badge: WatchSignal) -> None:
@@ -463,6 +472,21 @@ def scan(
         predict_cli.win(team=you, vs=them, world=None, offline=offline)
 
 
+def _grab(client: Any, hwnd: int | None) -> tuple[BgrImage, Rect] | None:
+    """One capture of the game window now (None when it cannot be captured)."""
+    from e7ac.cli import capture as capture_cli
+    from e7ac.cli.roster import _frame_image
+    from e7ac.vision.capture import CaptureError
+    from e7ac.vision.window import PROFILES, WindowError, select_game_window
+
+    try:
+        window = select_game_window(capture_cli.window_lister(), PROFILES[client], hwnd)
+        frame = capture_cli.backend_factory().grab(window)
+    except (WindowError, CaptureError):
+        return None
+    return np.asarray(_frame_image(frame), np.uint8), frame.window.client
+
+
 def _game_frames(client: Any, hwnd: int | None) -> Iterator[tuple[BgrImage, Rect] | None]:
     """Endless captures of the game window, one every `INTERVAL` seconds (None while it cannot be captured)."""
     from e7ac.cli import capture as capture_cli
@@ -490,6 +514,7 @@ def _game_frames(client: Any, hwnd: int | None) -> Iterator[tuple[BgrImage, Rect
 
 INTERVAL: Final = 0.5
 game_frames: Callable[[Any, int | None], Iterator[tuple[BgrImage, Rect] | None]] = _game_frames
+grab_frame: Callable[[Any, int | None], tuple[BgrImage, Rect] | None] = _grab
 
 
 def _open_badge(on_retry: Callable[[], None], on_share: Callable[[], None]) -> tuple[WatchSignal, str]:

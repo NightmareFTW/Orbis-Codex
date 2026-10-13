@@ -38,6 +38,7 @@ class WatchSignal(Protocol):
     def captured(self, waiting: int) -> None: ...
     def result(self, name: str, outcome: str, waiting: int) -> None: ...
     def say(self, top: str, bottom: str, colour: str) -> None: ...
+    def capturable(self, on: bool) -> bool: ...
     def close(self) -> None: ...
 
 
@@ -49,6 +50,9 @@ class NoSignal:
     def captured(self, waiting: int) -> None: ...
     def result(self, name: str, outcome: str, waiting: int) -> None: ...
     def say(self, top: str, bottom: str, colour: str) -> None: ...
+    def capturable(self, on: bool) -> bool:
+        return False
+
     def close(self) -> None: ...
 
 
@@ -74,6 +78,7 @@ class TkBadge:
     def __init__(self, beep: bool, buttons: list[tuple[str, Callable[[], None]]] | None = None) -> None:
         self.beep = beep
         self.buttons = buttons or []
+        self._affinity = threading.Event()
         self.ready = threading.Event()
         self.excluded = False
         self._messages: queue.Queue[tuple[str, Any]] = queue.Queue()
@@ -101,6 +106,15 @@ class TkBadge:
     def say(self, top: str, bottom: str, colour: str) -> None:
         """Any two lines (`e7 arena watch`: what to do next, then the result)."""
         self._messages.put(("lines", ((top, colour), (bottom, LIGHT))))
+
+    def capturable(self, on: bool) -> bool:
+        """Let screen captures see the badge (on) or hide it again (off), e.g. for a picture to share; True once
+        applied. Only for a badge that is hidden from capture in the first place."""
+        if not self.excluded:
+            return False
+        self._affinity.clear()
+        self._messages.put(("affinity", on))
+        return self._affinity.wait(1.0)
 
     def close(self) -> None:
         self._messages.put(("close", None))
@@ -157,6 +171,10 @@ class TkBadge:
             elif kind == "bottom":
                 text, colour = value
                 bottom.config(text=text, fg=colour)
+            elif kind == "affinity":
+                _set_affinity(hwnd, excluded=not value)
+                root.update_idletasks()
+                self._affinity.set()
             elif kind == "lines":  # both in one update: they never disagree on screen
                 apply("top", value[0])
                 apply("bottom", value[1])
@@ -216,6 +234,11 @@ def _exclude_from_capture(hwnd: int) -> bool:
         return False
 
 
+def _set_affinity(hwnd: int, excluded: bool) -> None:
+    if sys.platform == "win32":
+        _affinity_win32(hwnd, 0x11 if excluded else 0x0)
+
+
 def _click_through(hwnd: int, clickable: bool = False) -> None:
     """Clicks go through our badge to whatever is under it (unless it has a button); it never takes the focus."""
     if sys.platform == "win32":
@@ -232,6 +255,15 @@ if sys.platform == "win32":
         user32.SetWindowDisplayAffinity.argtypes = [wintypes.HWND, wintypes.DWORD]
         user32.SetWindowDisplayAffinity.restype = wintypes.BOOL
         return bool(user32.SetWindowDisplayAffinity(hwnd, 0x11))
+
+    def _affinity_win32(hwnd: int, affinity: int) -> None:
+        import ctypes
+        from ctypes import wintypes
+
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        user32.SetWindowDisplayAffinity.argtypes = [wintypes.HWND, wintypes.DWORD]
+        user32.SetWindowDisplayAffinity.restype = wintypes.BOOL
+        user32.SetWindowDisplayAffinity(hwnd, affinity)
 
     def _click_through_win32(hwnd: int, clickable: bool) -> None:
         import ctypes
