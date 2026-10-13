@@ -147,7 +147,8 @@ Key data facts (details in docs/DATA_SOURCES.md):
   each VS screen once, asks only unknown heroes, runs predict win). Slice 3 (D66): `vision/arena_guide.py` recognises the
   opponent from the Attack Guide faces (magnifier) against the Stove face icons; the badge says what to do and shows the odds; D67: its "Check again" button re-reads both screens
   (another opponent or team; the opponent is never carried over). D69: unknown faces never block the watch (named
-  by elimination or typed while it goes on) and are learned; `e7 arena forget HERO` undoes a wrong name. Local fixtures `fixtures/screenshots/arena/`, `fixtures/stove/class_icons/` (never committed).
+  by elimination or typed while it goes on) and are learned; `e7 arena forget HERO` undoes a wrong name. D70: an unclear face is decided among the heroes the
+  VS badges allow. Local fixtures `fixtures/screenshots/arena/`, `fixtures/stove/class_icons/` (never committed).
 - Game client language: English, sometimes Portuguese → `game_language` setting (D39). Windows version shown by doctor.
 - Roster import paths (D45), picked by the user: A = Fribbels save file (M4, done), B = passive screen
   watch (M9a). Network import inside our app (M5c, D38): **not possible here** — blocked twice by Anthropic's safety

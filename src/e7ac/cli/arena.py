@@ -185,6 +185,8 @@ def _step(image: BgrImage, match: _Match, c: _Context) -> None:
         names[unknown[0]] = left[0]
         _learn_face(read[unknown[0]], left[0], c)
         typer.echo(f"  face {unknown[0] + 1} is {_name(c.heroes, left[0])} (from the VS screen): learned")
+    if None in names and match.vs is not None:
+        _by_badges(names, read, match.vs[1], c)
     if None in names:
         _keep_capture(c.paths.captures_dir / "arena", image)
         match.pending, match.pending_codes = read, names
@@ -192,6 +194,32 @@ def _step(image: BgrImage, match: _Match, c: _Context) -> None:
         _ask_next(match, c)
         return
     _guide_done([n for n in names if n], match, c)
+
+
+def _by_badges(names: list[str | None], read: list[Face], badges: list[Badge], c: _Context) -> None:
+    """Faces not recognised, compared again only with the heroes of the VS badges left over (their element and class,
+    SPEC D70), when the VS screen shows this opponent (the recognised faces fit its badges)."""
+    left = [(b.element.value, b.hero_class.value) for b in badges if b.side == "them"]
+    for code in names:
+        shape = _shape([code], c.heroes) if code else []
+        if shape and shape[0] in left:
+            left.remove(shape[0])
+        elif code:
+            return  # a recognised face the VS screen does not show: another opponent's VS screen
+    for index, face in enumerate(read):
+        if names[index] is not None:
+            continue
+        group = [code for code in c.heroes if _shape([code], c.heroes)[0] in left]
+        code, score, margin = c.faces.among(face, group)
+        if code is None:
+            continue
+        names[index] = code
+        left.remove(_shape([code], c.heroes)[0])
+        _learn_face(face, code, c)
+        typer.echo(
+            f"  face {index + 1} is {_name(c.heroes, code)} ({score:.2f}, {margin:.2f} ahead among the {len(group)} "
+            f"heroes the VS badges allow): learned"
+        )
 
 
 def _ask_next(match: _Match, c: _Context) -> None:

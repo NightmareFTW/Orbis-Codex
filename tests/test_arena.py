@@ -531,3 +531,18 @@ def test_forget_removes_what_was_learned_for_a_hero(synthetic_catalog: list[str]
     assert result.exit_code == 0 and "2 learned picture(s) forgotten" in result.output
     assert ReferenceStore(home / "arena").codes() == {"c9001"} and ReferenceStore(home / "faces").codes() == set()
     assert ReferenceStore(home / "arena").last_team() == ["c9001"]
+
+
+def test_an_unclear_face_is_decided_among_the_heroes_its_vs_badge_allows(monkeypatch: pytest.MonkeyPatch) -> None:
+    foes = [f"c100{i}" for i in range(5, 9)]
+    icons = {code: _face_icon(60 + i) for i, code in enumerate(foes + [f"c20{i}" for i in range(10, 14)])}
+    own = cv2.imdecode(np.frombuffer(icons["c1006"], np.uint8), cv2.IMREAD_UNCHANGED)
+    other = cv2.imdecode(np.frombuffer(_face_icon(99), np.uint8), cv2.IMREAD_UNCHANGED)
+    assert own is not None and other is not None
+    own[:, :, :3] = (0.6 * own[:, :, :3] + 0.4 * other[:, :, :3]).astype(np.uint8)  # ~0.73: below the global rule
+    shown = {**icons, "c1006": cv2.imencode(".png", own)[1].tobytes()}
+    vs = np.asarray(cv2.resize(_textured(7), (1326, 740)), np.uint8)
+    guide = _guide([shown[c] for c in foes])
+    result, predicted = _watch_run(monkeypatch, [vs, vs, guide, guide], icons, [])
+    assert "face 2 is Foe Two (" in result.output and "not recognised" not in result.output
+    assert predicted == [", ".join(foes)]

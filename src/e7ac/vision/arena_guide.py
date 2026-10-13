@@ -12,7 +12,7 @@ or by elimination against the VS screen) are learned and matched like the icons 
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Final
 
@@ -29,6 +29,10 @@ INNER: Final = 0.86
 SCALES: Final = (0.95, 1.0, 1.05)
 MIN_SCORE: Final = 0.80
 MIN_MARGIN: Final = 0.15
+GROUP_MIN_SCORE: Final = 0.60
+GROUP_MIN_MARGIN: Final = 0.10
+"""A face not recognised among all heroes may still be clear among the few the VS screen allows (its badge's element
+and class, SPEC D70): accepted there with these (`assumed`; Briar Witch Iseria scored 0.73 against its own icon)."""
 SHORTLIST: Final = 12
 """Heroes compared in full after a quick whole-face comparison of all of them (the true face ranked 1st there)."""
 _BACKDROP: Final = np.array([110, 60, 20], np.float32)
@@ -101,6 +105,27 @@ class FaceMatcher:
             crop = cv2.resize(image[y0 : y0 + side, x0 : x0 + side], (SIZE, SIZE), interpolation=cv2.INTER_AREA)
             faces.append(self._identify(np.asarray(crop, np.uint8), x, y, r))
         return faces
+
+    def among(self, face: Face, codes: Iterable[str]) -> tuple[str | None, float, float]:
+        """The best of `codes` for this face: (its code when clear by the group rule, score, margin)."""
+        if face.crop is None:
+            return None, 0.0, 0.0
+        crop = face.crop.astype(np.float32)
+        wanted = set(codes)
+        scores: dict[str, float] = {}
+        for code, variants in self._entries:
+            if code in wanted:
+                for reference in variants:
+                    result = cv2.matchTemplate(reference, crop, cv2.TM_CCOEFF_NORMED, mask=self._mask)
+                    result[~np.isfinite(result)] = -1
+                    scores[code] = max(scores.get(code, -1.0), float(result.max()))
+        ranked = sorted(scores.items(), key=lambda kv: -kv[1])
+        if not ranked:
+            return None, 0.0, 0.0
+        top, score = ranked[0]
+        margin = score - (ranked[1][1] if len(ranked) > 1 else 0.0)
+        clear = score >= GROUP_MIN_SCORE and margin >= GROUP_MIN_MARGIN
+        return (top if clear else None), round(score, 3), round(margin, 3)
 
     def _add(self, code: str, variants: list[npt.NDArray[np.float32]]) -> None:
         self._entries.append((code, variants))
