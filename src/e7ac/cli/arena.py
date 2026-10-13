@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import threading
 import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
@@ -54,7 +55,8 @@ def watch(
 ) -> None:
     """The simple way: leave this running and play. On the Arena VS screen your team is read; tap the magnifier
     (Attack Guide) and the opponent's team is recognised from its face icons; the chance to win is then shown here
-    and on the badge. Read-only: it only copies screen pixels, never a key or click to the game. Ctrl+C stops."""
+    and on the badge. To try another opponent (or another team): change it in the game, then click "Check again" on
+    the badge. Read-only: it only copies screen pixels, never a key or click to the game. Ctrl+C stops."""
     paths = default_paths()
     try:
         client = load_settings(paths.settings_file).client
@@ -64,7 +66,8 @@ def watch(
     heroes, owned = _context()
     faces = _faces(paths, heroes, offline)
     store = ReferenceStore(paths.home / "references" / "arena")
-    badge, why = signal_factory() if signal else (NoSignal(), "")
+    retry = threading.Event()  # the badge's "Check again" button
+    badge, why = signal_factory(retry.set) if signal else (NoSignal(), "")
     if why:
         typer.echo(f"note: {why}", err=True)
     match = _Match(team=store.last_team())
@@ -72,6 +75,9 @@ def watch(
     typer.echo("Watching the game for the Arena VS screen and the Attack Guide (magnifier). Ctrl+C stops.")
     try:
         for item in game_frames(client, hwnd):
+            if retry.is_set():
+                retry.clear()
+                _again(match, badge)
             if item is not None:
                 frame, area = item
                 badge.place(area)
@@ -94,6 +100,15 @@ class _Match:
     """One reading per VS screen: re-armed once the screen has gone; the same for the Attack Guide."""
     seen_faces: tuple[str | None, ...] = ()
     guide_armed: bool = True
+
+
+def _again(match: _Match, badge: WatchSignal) -> None:
+    """The "Check again" button (another opponent, or another team of yours): read the VS screen and the Attack Guide
+    anew. The opponent is never carried over: only the Attack Guide or its learned VS models name it."""
+    match.vs_armed = match.guide_armed = True
+    match.previous, match.seen_faces = [], ()
+    badge.say("Checking again...", "VS screen, then the magnifier", AMBER)
+    typer.echo("Check again: reading the VS screen anew.")
 
 
 def _step(
@@ -125,7 +140,7 @@ def _step(
         theirs = [s.code for s in slots if s.badge.side == "them" and s.code]
         if len(team) == 4:
             match.team = team
-        if len(team) == 4 and len(theirs) == 4:  # the opponent's heroes were learned before
+        if len(team) == 4 and len(theirs) == 4:  # the opponent's VS models were learned before
             _predict(match.team, theirs, heroes, badge, offline)
         elif len(team) == 4:
             badge.say("Tap the magnifier", "to read the opponent's team", AMBER)
@@ -199,8 +214,7 @@ def _learn(
     class point to exactly one of the named heroes (so the VS screen alone recognises them next time)."""
     image, badges = vs
     shown = sorted((b.element.value, b.hero_class.value) for b in badges if b.side == "them")
-    named = sorted((str(heroes[c].value("element")), str(heroes[c].value("role"))) for c in theirs)
-    if shown != named:  # the VS screen read was of another opponent: nothing learned
+    if shown != _shape(theirs, heroes):  # the VS screen read was of another opponent: nothing learned
         return
     when = datetime.now(UTC)
     for badge in (b for b in badges if b.side == "them"):
@@ -305,11 +319,16 @@ INTERVAL: Final = 0.5
 game_frames: Callable[[Any, int | None], Iterator[tuple[BgrImage, Rect] | None]] = _game_frames
 
 
-def _open_badge() -> tuple[WatchSignal, str]:
-    return open_signal(False)
+def _open_badge(on_click: Callable[[], None]) -> tuple[WatchSignal, str]:
+    return open_signal(False, ("Check\nagain", on_click))
 
 
-signal_factory: Callable[[], tuple[WatchSignal, str]] = _open_badge
+def _shape(codes: list[str], heroes: dict[str, ResolvedEntity]) -> list[tuple[str, str]]:
+    """Elements and classes of these heroes, sorted (what a VS screen shows of a team)."""
+    return sorted((str(heroes[c].value("element")), str(heroes[c].value("role"))) for c in codes if c in heroes)
+
+
+signal_factory: Callable[[Callable[[], None]], tuple[WatchSignal, str]] = _open_badge
 arena_sleep: Callable[[float], None] = time.sleep
 
 

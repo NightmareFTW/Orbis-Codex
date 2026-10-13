@@ -247,7 +247,7 @@ def _face_icon(seed: int) -> bytes:
 
 def _guide(icons: list[bytes]) -> np.ndarray[Any, np.dtype[np.uint8]]:
     """An Attack Guide: a row of round face icons in gold frames on a dark panel."""
-    image = np.full((832, 1151, 3), (40, 25, 10), np.uint8)
+    image = np.full((740, 1151, 3), (40, 25, 10), np.uint8)  # the size the watch reads at: no resampling
     r = 58
     for i, data in enumerate(icons):
         cx, cy = 324 + 170 * i, 282
@@ -344,7 +344,7 @@ def test_watch_reads_your_team_then_the_attack_guide_and_shows_the_odds(monkeypa
     monkeypatch.setattr(arena_cli, "_context", lambda: (TEAMS, owned))
     monkeypatch.setattr(arena_cli, "_faces", lambda paths, heroes, offline: FaceMatcher.from_png(foes))
     monkeypatch.setattr(arena_cli, "read_badges", read)
-    monkeypatch.setattr(arena_cli, "signal_factory", lambda: (FakeBadge(), ""))
+    monkeypatch.setattr(arena_cli, "signal_factory", lambda on_click: (FakeBadge(), ""))
     monkeypatch.setattr(predict_cli, "win_odds", odds)
     result = CliRunner().invoke(app, ["arena", "watch"])
     assert result.exit_code == 0, result.output
@@ -353,3 +353,83 @@ def test_watch_reads_your_team_then_the_attack_guide_and_shows_the_odds(monkeypa
     assert said[-1] == ("Win chance 70%", "vs Foe One, Foe Two, Foe Three, Foe Four")
     learned = ReferenceStore(default_paths().home / "references" / "arena").codes()
     assert learned == set(foes)  # the VS models of the opponent, named by their faces
+
+
+def test_a_swapped_out_hero_of_your_last_team_is_not_kept() -> None:
+    owned = {"c1001", "c1002", "c1003"}
+    known = {"c1001", "c1002"}
+    table = {(0, "c1001"): 12, (0, "c1002"): 15}  # neither stored hero matches: the remembered one was swapped out
+    (slot,) = identify([_badge("you")], HEROES, owned, ["c1001"], known, _scores(table))
+    assert slot.code is None
+    (kept,) = identify([_badge("you")], HEROES, owned, ["c1001"], known, _scores({(0, "c1001"): 50, (0, "c1002"): 30}))
+    assert (kept.code, kept.method) == ("c1001", "last team")
+
+
+def test_check_again_reads_another_opponent(monkeypatch: pytest.MonkeyPatch) -> None:
+    from e7ac.cli import arena as arena_cli
+    from e7ac.cli import predict as predict_cli
+    from e7ac.cli.app import app
+    from e7ac.predict.battle import BattleOdds
+    from e7ac.vision.arena_guide import FaceMatcher
+
+    def badge_of(side: str, x: int, code: str) -> Badge:
+        hero = TEAMS[code]
+        element, role = Element(str(hero.value("element"))), HeroClass(str(hero.value("role")))
+        return Badge(cast(Any, side), x, 150, 33, 29, element, 1.0, role, 1.0)
+
+    team = [badge_of("you", 100 + 120 * i, f"c100{i + 1}") for i in range(4)]
+    foes = [badge_of("them", 760 + 120 * i, f"c100{i + 5}") for i in range(4)]
+    first_foes = [f"c100{i}" for i in range(5, 9)]
+    other_foes = [f"c20{i}" for i in range(10, 14)]  # the same elements and classes: only their faces tell them apart
+    icons = {code: _face_icon(30 + i) for i, code in enumerate(first_foes + other_foes)}
+    first = np.asarray(cv2.resize(_textured(3), (1326, 740)), np.uint8)
+    other = np.asarray(cv2.resize(_textured(4), (1326, 740)), np.uint8)
+    first_guide, other_guide = _guide([icons[c] for c in first_foes]), _guide([icons[c] for c in other_foes])
+    clicks: list[Any] = []
+
+    def frames(client: object, hwnd: int | None) -> Any:
+        yield from [(first, None), (first, None), (first_guide, None), (first_guide, None)]
+        yield from [(first, None), (first, None)]  # back on the VS screen: its opponent models are now known
+        yield from [(other, None), (other, None)]  # another opponent; the VS screen never went away
+        clicks[0]()
+        yield from [(other, None), (other, None), (other_guide, None), (other_guide, None)]
+        raise KeyboardInterrupt
+
+    def read(image: Any, templates: object) -> list[Badge]:
+        if image.shape[1] != 1326:
+            raise ArenaScreenError("not VS")
+        return team + foes
+
+    said: list[str] = []
+
+    class FakeBadge:
+        def place(self, area: object) -> None: ...
+        def say(self, top: str, bottom: str, colour: str) -> None:
+            said.append(top)
+
+        def close(self) -> None: ...
+
+    def factory(on_click: Any) -> tuple[FakeBadge, str]:
+        clicks.append(on_click)
+        return FakeBadge(), ""
+
+    predicted: list[str] = []
+
+    def odds(team_: str, vs_: str, world: object, offline: bool) -> BattleOdds:
+        predicted.append(vs_)
+        return BattleOdds(0.5, 0.5, 0.0, 30, 100)
+
+    owned = {f"c100{i}" for i in range(1, 5)}
+    monkeypatch.setattr(arena_cli, "game_frames", frames)
+    monkeypatch.setattr(arena_cli, "_templates", lambda paths, offline: {})
+    monkeypatch.setattr(arena_cli, "_context", lambda: (TEAMS, owned))
+    monkeypatch.setattr(arena_cli, "_faces", lambda paths, heroes, offline: FaceMatcher.from_png(icons))
+    monkeypatch.setattr(arena_cli, "read_badges", read)
+    monkeypatch.setattr(arena_cli, "signal_factory", factory)
+    monkeypatch.setattr(predict_cli, "win_odds", odds)
+    result = CliRunner().invoke(app, ["arena", "watch"])
+    assert result.exit_code == 0, result.output
+    # the guide; the VS screen again (learned models); after the button the new opponent, with the same elements and
+    # classes, is never taken for the old one: the magnifier is asked for and its faces name it
+    assert predicted == [", ".join(first_foes), ", ".join(first_foes), ", ".join(other_foes)], result.output
+    assert said.count("Tap the magnifier") == 2

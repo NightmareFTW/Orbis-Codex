@@ -1,13 +1,13 @@
 """Which hero stands under each Arena VS badge (M17a, SPEC D64).
 
 Candidates are the catalog heroes with the badge's element and class (your side: only heroes you own, unless none
-fits). A slot is
-decided automatically only when:
+fits). A slot is decided automatically only when:
 - one candidate is left ("only candidate");
-- your side: exactly one hero of your last confirmed team fits ("last team");
 - a learned reference matches with at least `MIN_INLIERS` ORB inliers, `MARGIN` times the best other candidate, over
   at least `MIN_SPREAD` of the reference's height ("reference"; thresholds from the D64 study, `assumed` until
-  re-measured on more captures).
+  re-measured on more captures);
+- your side: exactly one hero of your last confirmed team fits, unless its own reference does not match ("last team":
+  a hero swapped out of the team is never kept).
 Anything else is left to the user ("review"); a near miss is never picked. The same hero twice on one side sends
 both slots to review.
 """
@@ -72,16 +72,23 @@ def identify(
         slot.scores = {code: m.inliers for code, m in matches.items()}
         slot.candidates.sort(key=lambda code: -slot.scores.get(code, -1))
         remembered = [code for code in slot.candidates if code in last_team]
-        if len(slot.candidates) == 1:
-            slot.code, slot.method = slot.candidates[0], "only candidate"
-        elif badge.side == "you" and len(remembered) == 1:
-            slot.code, slot.method = remembered[0], "last team"
-        elif matches:
+        decided = None
+        if matches:
             top = slot.candidates[0]
             runner_up = max((s for code, s in slot.scores.items() if code != top), default=0)
             m = matches[top]
             if m.inliers >= MIN_INLIERS and m.inliers >= MARGIN * runner_up and m.spread >= MIN_SPREAD:
-                slot.code, slot.method = top, "reference"
+                decided = top
+        if len(slot.candidates) == 1:
+            slot.code, slot.method = slot.candidates[0], "only candidate"
+        elif decided is not None:
+            slot.code, slot.method = decided, "reference"
+        elif (
+            badge.side == "you"
+            and len(remembered) == 1
+            and (remembered[0] not in matches or matches[remembered[0]].inliers >= MIN_INLIERS)
+        ):  # a remembered hero whose own reference does not match was swapped out: asked
+            slot.code, slot.method = remembered[0], "last team"
         slots.append(slot)
     for side in ("you", "them"):
         twice = Counter(s.code for s in slots if s.badge.side == side and s.code)

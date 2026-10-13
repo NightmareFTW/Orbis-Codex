@@ -14,6 +14,7 @@ from __future__ import annotations
 import queue
 import sys
 import threading
+from collections.abc import Callable
 from typing import Any, Final, Protocol
 
 from e7ac.vision.window import Rect
@@ -51,14 +52,15 @@ class NoSignal:
     def close(self) -> None: ...
 
 
-def open_signal(beep: bool) -> tuple[WatchSignal, str]:
-    """The badge, or the console only with the reason."""
+def open_signal(beep: bool, button: tuple[str, Callable[[], None]] | None = None) -> tuple[WatchSignal, str]:
+    """The badge, or the console only with the reason. `button`: a label and what a click on it does (the badge then
+    takes clicks, on its own area only; it still never takes the focus from the game)."""
     if sys.platform == "win32":
         try:
             import tkinter  # noqa: F401
         except ImportError:
             return NoSignal(), "tkinter is missing from this Python: console only"
-        badge = TkBadge(beep)
+        badge = TkBadge(beep, button)
         if not badge.ready.wait(5):
             return NoSignal(), "the visual signal did not start: console only"
         return badge, ""
@@ -69,8 +71,9 @@ def open_signal(beep: bool) -> tuple[WatchSignal, str]:
 class TkBadge:
     """The badge, run by its own thread (tkinter calls stay on that thread; the others only post messages)."""
 
-    def __init__(self, beep: bool) -> None:
+    def __init__(self, beep: bool, button: tuple[str, Callable[[], None]] | None = None) -> None:
         self.beep = beep
+        self.button = button
         self.ready = threading.Event()
         self.excluded = False
         self._messages: queue.Queue[tuple[str, Any]] = queue.Queue()
@@ -119,13 +122,18 @@ class TkBadge:
         box.pack(fill="both", expand=True)
         top = tk.Label(box, text="Watching the game...", fg="white", bg=BACKGROUND, font=("Segoe UI", 12, "bold"))
         bottom = tk.Label(box, text="", fg="#bbbbbb", bg=BACKGROUND, font=("Segoe UI", 10))
+        if self.button is not None:
+            label, action = self.button
+            press = tk.Label(box, text=label, fg="white", bg=GREY, font=("Segoe UI", 9, "bold"), padx=6, cursor="hand2")
+            press.pack(side="right", fill="y", padx=(0, 6), pady=6)
+            press.bind("<Button-1>", lambda _event: action())
         top.pack(fill="x", padx=8, pady=(4, 0))
         bottom.pack(fill="x", padx=8)
         root.withdraw()
         root.update_idletasks()
         hwnd = int(root.wm_frame(), 16)
         self.excluded = _exclude_from_capture(hwnd)
-        _click_through(hwnd)
+        _click_through(hwnd, clickable=self.button is not None)
         placed: list[Rect] = []
 
         def apply(kind: str, value: Any) -> bool:
@@ -199,10 +207,10 @@ def _exclude_from_capture(hwnd: int) -> bool:
         return False
 
 
-def _click_through(hwnd: int) -> None:
-    """Clicks go through our badge to whatever is under it; it never takes the focus."""
+def _click_through(hwnd: int, clickable: bool = False) -> None:
+    """Clicks go through our badge to whatever is under it (unless it has a button); it never takes the focus."""
     if sys.platform == "win32":
-        _click_through_win32(hwnd)
+        _click_through_win32(hwnd, clickable)
 
 
 if sys.platform == "win32":
@@ -216,7 +224,7 @@ if sys.platform == "win32":
         user32.SetWindowDisplayAffinity.restype = wintypes.BOOL
         return bool(user32.SetWindowDisplayAffinity(hwnd, 0x11))
 
-    def _click_through_win32(hwnd: int) -> None:
+    def _click_through_win32(hwnd: int, clickable: bool) -> None:
         import ctypes
         from ctypes import wintypes
 
@@ -226,5 +234,7 @@ if sys.platform == "win32":
         user32.SetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_long]
         user32.SetWindowLongW.restype = ctypes.c_long
         gwl_exstyle = -20
-        flags = 0x80000 | 0x20 | 0x80 | 0x08000000  # layered, transparent (click-through), tool window, no-activate
+        flags = 0x80000 | 0x80 | 0x08000000  # layered, tool window, no-activate
+        if not clickable:
+            flags |= 0x20  # transparent: clicks go through
         user32.SetWindowLongW(hwnd, gwl_exstyle, user32.GetWindowLongW(hwnd, gwl_exstyle) | flags)
