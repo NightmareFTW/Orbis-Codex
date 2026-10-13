@@ -22,7 +22,7 @@ from e7ac.arena.references import ReferenceStore
 from e7ac.catalog.resolve import ResolvedEntity
 from e7ac.cli import catalog as catalog_cli
 from e7ac.cli import predict as predict_cli
-from e7ac.cli.roster import _catalog_heroes, _engine, _fail
+from e7ac.cli.roster import _catalog_heroes, _engine, _fail, _resolve_hero_code
 from e7ac.domain.codes import HeroClass
 from e7ac.paths import AppPaths, default_paths
 from e7ac.roster.store import list_owned
@@ -315,6 +315,28 @@ def _faces(
         if failed:
             typer.echo(f"note: {len(failed)} face icons not available: those heroes are asked", err=True)
     return FaceMatcher.from_png(load_hero_icons(paths.cache_dir, heroes), face_store.crops())
+
+
+@arena_app.command("forget")
+def forget(
+    hero: Annotated[str, typer.Argument(help='The hero named wrongly: exact name or code, e.g. "Maid Chloe".')],
+) -> None:
+    """Forget what was learned for a hero (its Attack Guide faces and VS screen models), e.g. after typing a wrong
+    name: the next time that face or model appears it is asked again. Restart a running watch afterwards."""
+    paths = default_paths()
+    with session_scope(_engine()) as session:
+        code = _resolve_hero_code(session, hero)
+        heroes = _catalog_heroes(session) or {}
+    removed = 0
+    for kind in ("faces", "arena"):
+        for path in sorted((paths.home / "references" / kind / code).glob("*.png")):
+            path.unlink(missing_ok=True)
+            removed += 1
+    store = ReferenceStore(paths.home / "references" / "arena")
+    team = store.last_team()
+    if code in team:
+        store.save_last_team([c for c in team if c != code])
+    typer.echo(f"{_name(heroes, code)} ({code}): {removed} learned picture(s) forgotten.")
 
 
 @arena_app.command("scan")

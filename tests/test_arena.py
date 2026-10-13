@@ -516,3 +516,18 @@ def test_an_unknown_face_is_asked_without_stopping_the_watch(monkeypatch: pytest
     assert "Opponent hero 2 not recognised" in result.output and "face 2 is Foe Two: learned" in result.output
     # your team was never shown (no VS screen): the opponent is named, the prediction waits for your team
     assert "Your team is not known yet" in result.output and predicted == []
+
+
+def test_forget_removes_what_was_learned_for_a_hero(synthetic_catalog: list[str]) -> None:
+    from e7ac.cli.app import app
+
+    home = default_paths().home / "references"
+    when = datetime(2026, 10, 13, tzinfo=UTC)
+    ReferenceStore(home / "faces").add("c2011", _textured(1), when)
+    ReferenceStore(home / "arena").add("c2011", _textured(2), when)
+    ReferenceStore(home / "arena").add("c9001", _textured(3), when)
+    ReferenceStore(home / "arena").save_last_team(["c2011", "c9001"])
+    result = CliRunner().invoke(app, ["arena", "forget", "Blood Blade Karin"])
+    assert result.exit_code == 0 and "2 learned picture(s) forgotten" in result.output
+    assert ReferenceStore(home / "arena").codes() == {"c9001"} and ReferenceStore(home / "faces").codes() == set()
+    assert ReferenceStore(home / "arena").last_team() == ["c9001"]
