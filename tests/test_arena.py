@@ -606,3 +606,35 @@ def test_save_picture_shows_the_badge_on_the_game(monkeypatch: pytest.MonkeyPatc
     drawn = cv2.imread(str(next(folder.glob("*.png"))))
     assert drawn is not None and not np.array_equal(drawn[8:66, 650:950], game[8:66, 650:950])
     assert np.array_equal(drawn[200:], game[200:]) and said[0] == "Nothing to save yet"
+
+
+def test_the_opponents_list_is_read_row_by_row() -> None:
+    from e7ac.vision.arena_guide import FaceMatcher, list_rows
+
+    icons = {f"c100{i}": _face_icon(80 + i) for i in range(1, 9)}
+    image = np.full((740, 1000, 3), (40, 25, 10), np.uint8)
+    r = 44
+    for row, codes in enumerate([["c1001", "c1002", "c1003", "c1004"], ["c1005", "c1006", "c1007", "c1008"]]):
+        cy = 180 + 150 * row
+        cv2.circle(image, (130, cy), 38, (90, 90, 90), 4)  # the player's avatar: not part of the team
+        for i, code in enumerate(codes):
+            cx = 440 + 96 * i
+            decoded = cv2.imdecode(np.frombuffer(icons[code], np.uint8), cv2.IMREAD_UNCHANGED)
+            assert decoded is not None
+            icon = cv2.resize(decoded, (2 * r, 2 * r), interpolation=cv2.INTER_AREA).astype(np.float32)
+            alpha = icon[:, :, 3:] / 255
+            face = icon[:, :, :3] * alpha + np.array([110, 60, 20], np.float32) * (1 - alpha)
+            disc = np.zeros((2 * r, 2 * r), np.uint8)
+            cv2.circle(disc, (r, r), r - 1, 1, -1)
+            region = image[cy - r : cy + r, cx - r : cx + r]
+            region[disc > 0] = face.astype(np.uint8)[disc > 0]
+            cv2.circle(image, (cx, cy), r, (60, 170, 210), 2)
+    assert len(list_rows(image)) == 2
+    rows = FaceMatcher.from_png(icons).for_list().read_list(image)
+    truth = [["c1001", "c1002", "c1003", "c1004"], [f"c100{i}" for i in range(5, 9)]]
+    read = [[f.code for f in row] for row in rows]
+    pairs = [(code, true) for row, want in zip(read, truth, strict=True) for code, true in zip(row, want, strict=True)]
+    assert all(code in (None, true) for code, true in pairs)  # never a wrong hero
+    assert sum(code is not None for code, _ in pairs) >= 6  # most read (the real list: 11 of 12)
+    with pytest.raises(ArenaScreenError):
+        list_rows(_guide(list(icons.values())[:4]))  # one row: the Attack Guide, not the list

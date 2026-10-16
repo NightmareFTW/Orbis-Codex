@@ -12,6 +12,7 @@ or by elimination against the VS screen) are learned and matched like the icons 
 
 from __future__ import annotations
 
+import itertools
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Final
@@ -33,6 +34,11 @@ GROUP_MIN_SCORE: Final = 0.60
 GROUP_MIN_MARGIN: Final = 0.10
 """A face not recognised among all heroes may still be clear among the few the VS screen allows (its badge's element
 and class, SPEC D70): accepted there with these (`assumed`; Briar Witch Iseria scored 0.73 against its own icon)."""
+LIST_INNER: Final = 0.80
+LIST_CORNER: Final = 0.35
+LIST_BOTTOM: Final = 0.70
+"""The Opponents list frames the same icons smaller, with a class icon (top left), a level badge (top right) and
+stars (bottom) laid over them: those parts are left out (12/12 faces of the user's capture accepted, 2026-10-16)."""
 SHORTLIST: Final = 40
 """Heroes compared in full after a quick whole-face comparison of all of them (12 missed Rinak on the user's
 capture, 2026-10-13; 40: found, ~0.5 s per Attack Guide)."""
@@ -55,17 +61,32 @@ class Face:
 
 
 class FaceMatcher:
-    def __init__(self, references: Mapping[str, list[npt.NDArray[np.float32]]]) -> None:
+    def __init__(self, references: Mapping[str, list[npt.NDArray[np.float32]]], layout: str = "guide") -> None:
         mask = np.zeros((SIZE, SIZE), np.float32)
         cv2.circle(mask, (SIZE // 2, SIZE // 2), SIZE // 2 - 1, 1.0, -1)
-        corner = round(0.38 * SIZE)
+        corner = round((0.38 if layout == "guide" else LIST_CORNER) * SIZE)
         mask[:corner, :corner] = 0  # the class icon overlaps this corner of the frame
+        if layout == "list":  # the Opponents list also lays the level badge (top right) and the stars (bottom) on it
+            mask[:corner, SIZE - corner :] = 0
+            mask[round(LIST_BOTTOM * SIZE) :, :] = 0
+        self.inner = INNER if layout == "guide" else LIST_INNER
         self._mask = np.dstack([mask] * 3)
         self._keep = self._mask.astype(bool)
         self._entries: list[tuple[str, list[npt.NDArray[np.float32]]]] = []
         self._quick: list[npt.NDArray[np.float32]] = []
         for code, variants in references.items():
             self._add(code, variants)
+
+    def for_list(self) -> FaceMatcher:
+        """The same heroes for the faces of the Opponents list (another framing; references shared, not copied)."""
+        twin = FaceMatcher({}, layout="list")
+        for code, variants in self._entries:
+            twin._add(code, variants)
+        return twin
+
+    def read_list(self, image: BgrImage) -> list[list[Face]]:
+        """Each opponent's defence team on the Opponents list, top to bottom (rows of four faces)."""
+        return [[self._face(image, x, y, r) for x, y, r in row] for row in list_rows(image)]
 
     @classmethod
     def from_png(
@@ -99,13 +120,18 @@ class FaceMatcher:
         """The faces of the defence team, left to right. Raises ArenaScreenError when there is no row of icons."""
         faces = []
         for x, y, r in find_row(image):
-            side = round(2 * r * INNER)
+            side = round(2 * r * self.inner)
             x0, y0 = round(x - side / 2), round(y - side / 2)
             if x0 < 0 or y0 < 0 or x0 + side > image.shape[1] or y0 + side > image.shape[0]:
                 continue
-            crop = cv2.resize(image[y0 : y0 + side, x0 : x0 + side], (SIZE, SIZE), interpolation=cv2.INTER_AREA)
-            faces.append(self._identify(np.asarray(crop, np.uint8), x, y, r))
+            faces.append(self._face(image, x, y, r))
         return faces
+
+    def _face(self, image: BgrImage, x: float, y: float, r: float) -> Face:
+        side = round(2 * r * self.inner)
+        x0, y0 = max(0, round(x - side / 2)), max(0, round(y - side / 2))
+        crop = cv2.resize(image[y0 : y0 + side, x0 : x0 + side], (SIZE, SIZE), interpolation=cv2.INTER_AREA)
+        return self._identify(np.asarray(crop, np.uint8), x, y, r)
 
     def among(self, face: Face, codes: Iterable[str]) -> tuple[str | None, float, float]:
         """The best of `codes` for this face: (its code when clear by the group rule, score, margin)."""
@@ -149,6 +175,44 @@ class FaceMatcher:
         margin = score - (ranked[1][1] if len(ranked) > 1 else 0.0)
         accepted = score >= MIN_SCORE and margin >= MIN_MARGIN
         return Face(x, y, r, top if accepted else None, round(score, 3), round(margin, 3), top, face)
+
+
+def list_rows(image: BgrImage) -> list[list[tuple[float, float, float]]]:
+    """Rows of four round icons of one size, evenly spaced (the player's own round avatar on the left is not one of
+    them): two or more such rows are the Opponents list. Raises ArenaScreenError otherwise."""
+    height = image.shape[0]
+    grey = cv2.medianBlur(cv2.cvtColor(image, cv2.COLOR_BGR2GRAY), 5)
+    found = cv2.HoughCircles(
+        grey,
+        cv2.HOUGH_GRADIENT,
+        dp=1,
+        minDist=height * 0.08,
+        param1=120,
+        param2=30,
+        minRadius=int(height * 0.04),
+        maxRadius=int(height * 0.08),
+    )
+    circles = sorted(
+        ((float(c[0]), float(c[1]), float(c[2])) for c in np.asarray(found)[0]) if found is not None else []
+    )
+    rows: list[list[tuple[float, float, float]]] = []
+    for anchor in circles:
+        if any(anchor in row for row in rows):
+            continue
+        line = sorted(c for c in circles if abs(c[1] - anchor[1]) <= 0.3 * anchor[2])
+        for start in range(len(line) - 3):
+            four = line[start : start + 4]
+            radii = [c[2] for c in four]
+            gaps = [b[0] - a[0] for a, b in itertools.pairwise(four)]
+            mean = sum(gaps) / 3
+            if max(radii) <= 1.25 * min(radii) and all(abs(g - mean) <= 0.12 * mean for g in gaps):
+                if four not in rows:
+                    rows.append(four)
+                break
+    rows.sort(key=lambda row: row[0][1])
+    if len(rows) < 2:
+        raise ArenaScreenError("no rows of four hero icons: not the Opponents list")
+    return rows
 
 
 def find_row(image: BgrImage) -> list[tuple[float, float, float]]:

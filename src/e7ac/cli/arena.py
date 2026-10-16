@@ -41,7 +41,7 @@ from e7ac.vision.arena_badges import (
     normalise,
     read_badges,
 )
-from e7ac.vision.arena_guide import Face, FaceMatcher
+from e7ac.vision.arena_guide import Face, FaceMatcher, list_rows
 from e7ac.vision.image import ImageError, load_image
 from e7ac.vision.window import Rect
 
@@ -92,7 +92,18 @@ def watch(
                 match.frame = frame
                 badge.place(area)
                 context = _Context(
-                    templates, faces, face_store, heroes, owned, store, badge, offline, paths, answers, last
+                    templates,
+                    faces,
+                    faces.for_list(),
+                    face_store,
+                    heroes,
+                    owned,
+                    store,
+                    badge,
+                    offline,
+                    paths,
+                    answers,
+                    last,
                 )
                 _step(normalise(frame), match, context)
     except (KeyboardInterrupt, typer.Abort):  # Ctrl+C, also while a question waits
@@ -112,6 +123,8 @@ class _Match:
     vs_armed: bool = True
     """One reading per VS screen: re-armed once the screen has gone; the same for the Attack Guide."""
     seen_faces: tuple[str | None, ...] = ()
+    list_armed: bool = True
+    list_seen: tuple[tuple[int, int], ...] = ()
     guide_armed: bool = True
     vs_theirs: list[str] = field(default_factory=list)
     """The opponent as the last VS screen named it (all four, or nothing)."""
@@ -126,6 +139,7 @@ class _Match:
 class _Context:
     templates: dict[HeroClass, Template]
     faces: FaceMatcher
+    list_faces: FaceMatcher
     face_store: ReferenceStore
     heroes: dict[str, ResolvedEntity]
     owned: set[str]
@@ -196,6 +210,18 @@ def _again(match: _Match, badge: WatchSignal) -> None:
 def _step(image: BgrImage, match: _Match, c: _Context) -> None:
     if match.pending and not c.answers.empty():
         _answer(c.answers.get(), match, c)
+    try:
+        rows = list_rows(image)
+    except ArenaScreenError:
+        rows = []
+    if rows:  # the Opponents list: every opponent at once
+        layout = tuple((round(row[0][0]), round(row[0][1])) for row in rows)
+        if match.list_armed and layout == match.list_seen:  # still for two frames
+            match.list_armed = False
+            _opponents(image, match, c)
+        match.list_seen = layout
+        return
+    match.list_armed, match.list_seen = True, ()
     try:
         badges = read_badges(image, c.templates)
     except ArenaScreenError:
@@ -383,6 +409,39 @@ def _learn(
         ]
         if len(fits) == 1:
             store.add(fits[0], hero_crop(image, badge, badges), when)
+
+
+def _opponents(image: BgrImage, match: _Match, c: _Context) -> None:
+    """The Opponents list (SPEC D75): each opponent's defence read from its faces and checked against your team; the
+    badge names the best one."""
+    typer.echo(f"{datetime.now().astimezone():%H:%M:%S} Opponents list")
+    if len(match.team) != 4:
+        c.badge.say("Your team is not known", "open a VS screen once", RED)
+        typer.echo("  your team is not known yet: open the VS screen of any match once", err=True)
+        return
+    chances: list[str] = []
+    best: tuple[float, int] | None = None
+    for number, row in enumerate(c.list_faces.read_list(image), 1):
+        line = ", ".join(_face_line(f, c.heroes) for f in row)
+        typer.echo(f"  opponent {number}: {line}")
+        codes = [f.code for f in row]
+        if None in codes:
+            chances.append(f"{number}: ?")
+            continue
+        try:
+            odds = predict_cli.win_odds(", ".join(match.team), ", ".join(c for c in codes if c), None, c.offline)
+        except typer.Exit:
+            chances.append(f"{number}: -")
+            continue
+        chances.append(f"{number}: {odds.win:.0%}")
+        if best is None or odds.win > best[0]:
+            best = (odds.win, number)
+    if best is None:
+        c.badge.say("Opponents not recognised", "open the magnifier of one", RED)
+        return
+    colour = GREEN if best[0] >= 0.6 else RED if best[0] <= 0.4 else AMBER
+    c.badge.say(f"Best: opponent {best[1]} ({best[0]:.0%})", "  ".join(chances), colour)
+    c.last[0] = (f"Best: opponent {best[1]} ({best[0]:.0%})", "  ".join(chances), colour)
 
 
 def _predict(team: list[str], theirs: list[str], c: _Context) -> None:
