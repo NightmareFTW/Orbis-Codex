@@ -9,8 +9,9 @@ Survival (SPEC D68): heals and barriers take their amount from Fribbels' skill o
 the caster's max Health, Attack or Defense, `community`, MECH-HEAL-01) and their receivers from the text (all allies,
 the N allies with the lowest Health, the caster); a passive heal or barrier "at the start/end of the turn" acts on each
 of the caster's turns; "reviving all dead allies to N% Health" / "revives them with N% Health" resurrects; cleanse and
-dispel remove all, one, two or three debuffs / buffs; invincibility blocks all damage. Anything else is listed as not
-modelled.
+dispel remove all, one, two or three debuffs / buffs; invincibility blocks all damage. Part 2 (SPEC D74): burn, bleed,
+poison (MECH-DOT-01), provoke, silence, counterattack (a buff, or a passive "N% chance to counterattack"). Anything else
+is listed as not modelled.
 """
 
 from __future__ import annotations
@@ -50,7 +51,17 @@ _KINDS: Final = (  # effect name (epic7db) -> kind, debuff?
     ("resurrect", "resurrect", False),
     ("cleanse", "cleanse", False),
     ("dispel", "dispel", True),
+    ("burn", "burn", True),
+    ("bleed", "bleed", True),
+    ("poison", "poison", True),
+    ("provoke", "provoke", True),
+    ("silence", "silence", True),
+    ("counterattack", "counter", False),
 )
+DOT_ATK: Final = {"burn": 0.6, "bleed": 0.3}
+"""MECH-DOT-01 (`assumed`): burn / bleed damage per turn as a share of the caster's Attack, ignoring Defense."""
+POISON_MAX_HP: Final = 0.05
+"""MECH-DOT-01 (`community`): poison damage per turn as a share of the target's max Health."""
 _COUNTS: Final = {"all": 0, "one": 1, "two": 2, "three": 3}
 type Scaling = tuple[float, float, float]
 """Share of the caster's max Health, Attack and Defense (Fribbels skill options)."""
@@ -81,6 +92,8 @@ class Kit:
     on_use: dict[int, list[Effect]] = field(default_factory=dict)
     at_start: list[Effect] = field(default_factory=list)
     on_turn: list[Effect] = field(default_factory=list)
+    counter: float = 0.0
+    """Passive chance to counterattack with S1 when attacked ("N% chance to counterattack")."""
     """Passive heals / barriers acting on each of the caster's turns."""
     revive: float | None = None
     """HP fraction restored once on lethal damage."""
@@ -102,6 +115,10 @@ def kit_from(skills: dict[int, SkillInfo], amounts: Mapping[int, Mapping[str, Sc
         if slot == 2 and not info.cooldown:  # a passive
             revive = _revive(info.text)
             lowered = info.text.lower()
+            counter = re.search(r"(\d+)% chance to counterattack", lowered)
+            if counter is not None:
+                kit.counter = int(counter.group(1)) / 100
+                effects = [e for e in effects if e.kind != "counter"]
             if revive is not None:
                 kit.revive, kit.revive_effects = revive, [e for e in effects if not e.debuff]
             elif "start of the battle" in lowered:

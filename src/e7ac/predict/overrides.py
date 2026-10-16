@@ -15,7 +15,7 @@ One file per hero, named by its code (`c2049.toml`); every number carries where 
     when = "use"                  # use (when the skill is used) / start (battle start) / turn (start of each own
                                   # turn) / revive (once on lethal damage: `value` = Health fraction)
     kind = "resurrect"            # an `Effect` kind: atk def spd stun cr extra_turn immortal immunity invincible
-                                  # heal barrier resurrect cleanse dispel
+                                  # heal barrier resurrect cleanse dispel burn bleed poison provoke silence counter
     value = 0.2
     receivers = "all"             # heal / barrier / cleanse: self / all / lowest:N; resurrect: all / one
     note = "VIP Treatment"        # optional, free text
@@ -54,9 +54,15 @@ KINDS: Final = frozenset(
         "resurrect",
         "cleanse",
         "dispel",
+        "burn",
+        "bleed",
+        "poison",
+        "provoke",
+        "silence",
+        "counter",
     }
 )
-_DEBUFFS: Final = frozenset({"stun", "dispel"})
+_DEBUFFS: Final = frozenset({"stun", "dispel", "burn", "bleed", "poison", "provoke", "silence"})
 WHEN: Final = frozenset({"use", "start", "turn", "revive"})
 
 

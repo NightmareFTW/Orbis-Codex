@@ -116,3 +116,33 @@ def test_cleanse_and_dispel_remove_effects() -> None:
     state.apply(Effect("invincible", False, 0.0, 1, 1.0))
     state.hurt(hp, 0, 900)
     assert hp == [1000.0]
+
+
+def test_part_two_effects_are_read() -> None:
+    skills = {
+        1: SkillInfo(1, 0, {"Burn": None, "Provoke": None}, "Attacks, with a 50% chance to burn for 2 turns."),
+        2: SkillInfo(2, None, {"Counterattack": None}, "When attacked, has a 30% chance to counterattack."),
+        3: SkillInfo(3, 4, {"Silence": None, "Poison": None}, "Silences all enemies for 1 turn."),
+    }
+    kit = kit_from(skills)
+    assert [(e.kind, e.debuff, e.chance, e.turns) for e in kit.on_use[1]] == [
+        ("burn", True, 0.5, 2),
+        ("provoke", True, 0.5, 2),
+    ]
+    assert kit.counter == 0.3 and not kit.unmodelled
+    assert [e.kind for e in kit.on_use[3]] == ["silence", "poison"]
+
+
+def test_damage_over_time_counters_and_silence_change_battles() -> None:
+    plain = simulate([unit("a", "you"), unit("b", "them")], runs=400).win
+    burn = Kit(on_use={1: [Effect("burn", True, 0.0, 3, 1.0)]})
+    assert simulate([unit("a", "you", burn), unit("b", "them")], runs=400).win > plain
+    counter = Kit(counter=1.0)
+    assert simulate([unit("a", "you", counter), unit("b", "them")], runs=400).win > plain
+    from e7ac.predict.battle import _State
+
+    state = _State()
+    state.apply(Effect("silence", True, 0.0, 1, 1.0))
+    state.dots.append((100.0, 2))
+    state.remove(debuffs=True, count=0)
+    assert not state.timers and not state.dots  # cleanse takes silence and damage over time too

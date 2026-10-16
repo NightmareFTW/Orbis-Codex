@@ -10,7 +10,9 @@ is critical with the attacker's crit chance (MECH-DMG-05). Skill effects from ep
 attack/defense/speed changes, stun/sleep, combat readiness, extra turns, immortality, immunity, revives; debuffs land
 by MECH-EFF-01. Survival (SPEC D68): heals (never above max Health), barriers (absorb damage before Health, the
 stronger kept, MECH-BAR-01 `assumed`), resurrection, cleanse, dispel, invincibility; passive heals and barriers act at
-the start of each of the caster's turns. Not modelled: counters, DoTs, artifacts, combat set effects: low confidence.
+the start of each of the caster's turns. Part 2 (SPEC D74): burn / bleed / poison tick at the start of the holder's
+turn (MECH-DOT-01), provoke (S1 at the provoker) and silence (S1 only), counterattacks (S1 back, no chain). Not
+modelled: artifacts, combat set effects: low confidence.
 """
 
 from __future__ import annotations
@@ -23,7 +25,7 @@ from typing import Final
 
 from e7ac.domain.codes import Stat
 from e7ac.predict.damage import CD_CAP, SkillPower, base_hit
-from e7ac.predict.effects import Effect, Kit
+from e7ac.predict.effects import DOT_ATK, POISON_MAX_HP, Effect, Kit
 from e7ac.predict.turn_order import START_CR_MAX
 
 RUNS: Final = 10_000
@@ -103,13 +105,25 @@ def _battle(
         unit, me = units[actor], state[actor]
         for effect in unit.kit.on_turn:  # passive heals / barriers at the start of the turn
             _use(effect, actor, [], units, hp, cr, state, rng)
+        if me.dots:  # damage over time at the start of the turn (MECH-DOT-01)
+            for damage, _ in me.dots:
+                me.hurt(hp, actor, damage)
+            me.dots = [(damage, turns - 1) for damage, turns in me.dots if turns > 1]
+            if hp[actor] <= 0:
+                _lethal(units, hp, cr, state, actor)
+            if hp[actor] <= 0:
+                standing = {units[i].side for i in range(n) if hp[i] > 0}
+                if len(standing) == 1:
+                    return standing.pop(), actions
+                continue
         if me.timers.get("stun", 0) > 0:
             me.tick()
             continue
         for ready in waiting[actor]:
             waiting[actor][ready] = max(0, waiting[actor][ready] - 1)
         dead_ally = any(hp[j] <= 0 and units[j].side == unit.side for j in range(n))
-        slot = _choose(unit, waiting[actor], acted[actor], dead_ally)
+        held = me.timers.get("silence", 0) > 0 or me.timers.get("provoke", 0) > 0
+        slot = 1 if held else _choose(unit, waiting[actor], acted[actor], dead_ally)
         if slot != 1 and unit.cooldowns.get(slot):
             waiting[actor][slot] = unit.cooldowns[slot]  # counts down at the start of each own turn (MECH-CD-01)
         acted[actor] = True
@@ -118,6 +132,8 @@ def _battle(
         targets: list[int] = []
         if skill is not None and enemies:
             targets = enemies if skill.targets > 1 else [min(enemies, key=lambda j: hp[j] / hits[(actor, j, slot)])]
+            if me.timers.get("provoke", 0) > 0 and me.provoker in enemies:
+                targets = [me.provoker]  # provoked: attacks its provoker
             crit = skill.can_crit and rng.random() < min(unit.stats[Stat.CRIT_CHANCE], 1.0)
             factor = min(unit.stats[Stat.CRIT_DAMAGE], CD_CAP) if crit else 1.0
             attack = {**unit.stats, Stat.ATK: unit.stats[Stat.ATK] * me.factor("atk")}
@@ -126,6 +142,8 @@ def _battle(
                 state[j].hurt(hp, j, base_hit(attack, skill, guard) * factor)
                 if hp[j] <= 0:
                     _lethal(units, hp, cr, state, j)
+                elif _counters(units[j], state[j], rng):
+                    _counterattack(j, actor, units, hp, cr, state, hits, rng)
         for effect in unit.kit.on_use.get(slot, []):
             _use(effect, actor, targets, units, hp, cr, state, rng)
         me.tick()
@@ -163,6 +181,9 @@ class _State:
     revived: bool = False
     barrier: float = 0.0
     barrier_turns: int = 0
+    dots: list[tuple[float, int]] = field(default_factory=list)
+    """Damage over time: (damage per turn, turns left)."""
+    provoker: int = -1
 
     def factor(self, kind: str) -> float:
         return max(0.0, 1 + self.buffs.get(kind, (0.0, 0))[0] + self.debuffs.get(kind, (0.0, 0))[0])
@@ -186,9 +207,11 @@ class _State:
     def remove(self, debuffs: bool, count: int) -> None:
         """Cleanse (debuffs) or dispel (buffs): all when `count` is 0."""
         kinds = (
-            [("timer", "stun")] + [("debuff", k) for k in self.debuffs]
+            [("timer", k) for k in ("stun", "provoke", "silence")]
+            + [("dot", "")] * len(self.dots)
+            + [("debuff", k) for k in self.debuffs]
             if debuffs
-            else [("timer", k) for k in ("immortal", "invincible", "immunity")]
+            else [("timer", k) for k in ("immortal", "invincible", "immunity", "counter")]
             + [("barrier", "")]
             + [("buff", k) for k in self.buffs]
         )
@@ -205,6 +228,8 @@ class _State:
             return self.debuffs.pop(kind, None) is not None
         if table == "buff":
             return self.buffs.pop(kind, None) is not None
+        if table == "dot":
+            return bool(self.dots) and self.dots.pop(0) is not None
         had = self.barrier > 0
         self.barrier, self.barrier_turns = 0.0, 0
         return had
@@ -227,7 +252,7 @@ class _State:
                 self.barrier = 0.0
 
 
-_TIMERS: Final = ("stun", "immortal", "immunity", "invincible")
+_TIMERS: Final = ("stun", "immortal", "immunity", "invincible", "provoke", "silence", "counter")
 
 
 def _allies(units: Sequence[Combatant], hp: Sequence[float], i: int) -> list[int]:
@@ -310,8 +335,45 @@ def _use(
             cr[j] = max(0.0, cr[j] + effect.value)
         elif effect.kind == "dispel":
             state[j].remove(debuffs=False, count=effect.count)
+        elif effect.kind in DOT_ATK or effect.kind == "poison":
+            per_turn = (
+                POISON_MAX_HP * units[j].stats[Stat.HP]
+                if effect.kind == "poison"
+                else DOT_ATK[effect.kind] * caster[Stat.ATK]
+            )
+            state[j].dots.append((per_turn, effect.turns))
+        elif effect.kind == "provoke":
+            state[j].apply(effect)
+            state[j].provoker = actor
         else:
             state[j].apply(effect)
+
+
+def _counters(unit: Combatant, me: _State, rng: random.Random) -> bool:
+    """A counterattack (S1 back at the attacker): always with the counterattack buff, else the passive chance; never
+    while stunned (`assumed`)."""
+    if me.timers.get("stun", 0) > 0 or 1 not in unit.skills:
+        return False
+    chance = 1.0 if me.timers.get("counter", 0) > 0 else unit.kit.counter
+    return chance > 0 and rng.random() < chance
+
+
+def _counterattack(
+    j: int,
+    attacker: int,
+    units: Sequence[Combatant],
+    hp: list[float],
+    cr: list[float],
+    state: list[_State],
+    hits: Mapping[tuple[int, int, int], float],
+    rng: random.Random,
+) -> None:
+    unit, skill = units[j], units[j].skills[1]
+    crit = skill.can_crit and rng.random() < min(unit.stats[Stat.CRIT_CHANCE], 1.0)
+    factor = min(unit.stats[Stat.CRIT_DAMAGE], CD_CAP) if crit else 1.0
+    state[attacker].hurt(hp, attacker, hits[(j, attacker, 1)] * state[j].factor("atk") * factor)
+    if hp[attacker] <= 0:
+        _lethal(units, hp, cr, state, attacker)
 
 
 def confidence_interval(p: float, runs: int) -> float:

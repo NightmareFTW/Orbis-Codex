@@ -105,6 +105,7 @@ Last reviewed: 2026-10-03.
 | MECH-HEAL-01 | A heal or barrier amounts to the skill's shares of the caster's max Health, Attack and Defense (Fribbels skill options); a heal never goes above max Health. | Fribbels `herodata.json` skill options | `community` | Used by `predict/effects.py`, `predict/battle.py`. NV-35. |
 | MECH-BAR-01 | A barrier absorbs damage before Health and lasts its turns (ticking at the end of the holder's turn); a new barrier keeps the stronger of the two. | not documented | `assumed` | NV-35. |
 | MECH-AI-01 | A unit uses S3 when ready, else an active S2 when ready, else S1; a skill that only resurrects waits for a dead ally. | not documented (game AI) | `assumed` | NV-36. |
+| MECH-DOT-01 | Damage over time hits at the start of the holder's turn and ignores Defense: poison 5% of the target's max Health per turn; burn 60% and bleed 30% of the caster's Attack per turn; stacks add up. | poison: community; burn/bleed: not documented | poison `community`, burn/bleed `assumed` | `predict/effects.py` DOT_ATK / POISON_MAX_HP. NV-37. |
 
 ## 8. Extra actions
 
@@ -186,3 +187,4 @@ skills vs speed buffs (Speed Up = +30% speed per e7calc `spdUp 1.3`, `community`
 | NV-34 | Arena VS badges: fire (red) and ice (blue) level-square colours, ranger and warrior icons, other animation frames and skins (SPEC D64) | Hero identification | Arena VS captures with fire/ice heroes, a ranger and a warrior |
 | NV-35 | Heal/barrier amounts and barrier stacking (MECH-HEAL-01, MECH-BAR-01) | Win probability | A recorded battle with known stats: Health before/after a heal or barrier |
 | NV-36 | Skill choice of the game AI (MECH-AI-01) | Win probability | Recorded Arena battles: which skill each opponent used when several were ready |
+| NV-37 | DoT amounts and timing, counterattack rules (MECH-DOT-01, D74) | Win probability | A recorded battle: Health lost to one burn / bleed / poison tick, and a counterattack's skill |

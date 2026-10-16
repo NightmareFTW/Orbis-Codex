@@ -31,8 +31,8 @@ for the heroes the user meets most in Arena: ask the user for that list first, ~
 
 **Paused 2026-10-12** (user saving the weekly budget for other projects). On resume: (1) hand refinement of the most met
 heroes (above): ready since D73 — run `e7 kit todo` on the user's PC (they paste the output), then for each hero
-`e7 kit show HERO` and write `src/e7ac/predict/kits/<code>.toml` (format in `predict/overrides.py`); (2) effects part 2
-(DoTs, counter, provoke, silence; D68 follow-up); (3) the main window (PySide6, ~150–200 MB: confirm the dependency with
+`e7 kit show HERO` and write `src/e7ac/predict/kits/<code>.toml` (format in `predict/overrides.py`); (2) effects part 2 done
+(D74); next model gaps: artifacts, combat set effects; (3) the main window (PySide6, ~150–200 MB: confirm the dependency with
 the user first), overlay later.
 
 ## Golden rules
@@ -142,8 +142,7 @@ Key data facts (details in docs/DATA_SOURCES.md):
   Slice 3 (D61): `predict/battle.py`, `e7 predict win` (simulated battles, low confidence). Slice 4 (D62): S3
   cooldowns from epic7db (`sources/epic7db.py`). Slice 5 (D63): skill effects read automatically from epic7db icons
   and text (`predict/effects.py`). Slice 6 (D68): survival effects (heals/barriers with Fribbels amounts,
-  resurrection, cleanse, dispel, invincibility, active S2); part 2 (DoTs, counter, provoke, silence) next if the user
-  approves the budget. User chose precision before UI. Next: hand refinement (week of 2026-10-19).
+  resurrection, cleanse, dispel, invincibility, active S2); part 2 (D74): DoTs, counter, provoke, silence. User chose precision before UI. Next: hand refinement (week of 2026-10-19).
 - **M17a slice 1 — done** (SPEC D64): `vision/arena_badges.py`, `arena/{identify,references}.py`, `e7 arena scan CAPTURE
   [--confirm/--no-confirm] [--win]`: Arena VS screen → badges (element, class) → candidates → asked once, then learned
   (`<home>/references/arena/`). Slice 2 (D65): `e7 arena watch` + double-click `Arena.cmd` (watches the game, reads
