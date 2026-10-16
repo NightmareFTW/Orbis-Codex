@@ -30,7 +30,10 @@ Start the **manual refinement of hero kits** (skill effects read by hand, beyond
 for the heroes the user meets most in Arena: ask the user for that list first, ~0.5–1% of the weekly limit per hero.
 
 **Paused 2026-10-12** (user saving the weekly budget for other projects). On resume: (1) hand refinement of the most met
-heroes (above); (2) the main window (PySide6, ~150–200 MB: confirm the dependency with the user first), overlay later.
+heroes (above): ready since D73 — run `e7 kit todo` on the user's PC (they paste the output), then for each hero
+`e7 kit show HERO` and write `src/e7ac/predict/kits/<code>.toml` (format in `predict/overrides.py`); (2) effects part 2
+(DoTs, counter, provoke, silence; D68 follow-up); (3) the main window (PySide6, ~150–200 MB: confirm the dependency with
+the user first), overlay later.
 
 ## Golden rules
 - **Never invent game numbers** (multipliers, set bonuses, base stats, formulas, AI behaviour). Every datum carries
@@ -48,7 +51,7 @@ heroes (above); (2) the main window (PySide6, ~150–200 MB: confirm the depende
 ## Commands
 ```bash
 uv sync                      # install (dev group included)
-uv run e7 --help             # CLI: --version, doctor, paths, config, catalog, roster, opponent, predict, arena, capture
+uv run e7 --help             # CLI: --version, doctor, paths, config, catalog, roster, opponent, predict, arena, kit, capture
 uv run pytest                # tests (fixture tests skip if fixtures are missing; network tests need E7AC_NETWORK_TESTS=1)
 uv run ruff check . && uv run ruff format --check .
 uv run mypy                  # strict, src + tests
@@ -149,7 +152,7 @@ Key data facts (details in docs/DATA_SOURCES.md):
   (another opponent or team; the opponent is never carried over). D69: unknown faces never block the watch (named
   by elimination or typed while it goes on) and are learned; `e7 arena forget HERO` undoes a wrong name. D70: an unclear face is decided among the heroes the
   VS badges allow. D72: "Save picture" badge button (game + result, `captures/arena/shared/`); the Opponents-list
-  magnifier works too. Local fixtures `fixtures/screenshots/arena/`, `fixtures/stove/class_icons/` (never committed).
+  magnifier works too. D73: hand kits (`predict/kits/*.toml`, `e7 kit show|todo`). Local fixtures `fixtures/screenshots/arena/`, `fixtures/stove/class_icons/` (never committed).
 - Game client language: English, sometimes Portuguese → `game_language` setting (D39). Windows version shown by doctor.
 - Roster import paths (D45), picked by the user: A = Fribbels save file (M4, done), B = passive screen
   watch (M9a). Network import inside our app (M5c, D38): **not possible here** — blocked twice by Anthropic's safety

@@ -20,6 +20,7 @@ from e7ac.paths import default_paths
 from e7ac.predict.battle import BattleOdds, Combatant, confidence_interval, simulate
 from e7ac.predict.damage import SkillPower, hits_to_defeat, skill_power, support_amounts
 from e7ac.predict.effects import Kit, Scaling, kit_from
+from e7ac.predict.overrides import KitError, apply_override, load_overrides
 from e7ac.predict.turn_order import START_CR_MAX, Unit, first_turns
 from e7ac.roster.composition import compose_final_stats
 from e7ac.roster.screen_gear import ScreenCatalog
@@ -205,11 +206,19 @@ def _fighters(team: str, vs: str, world: World | None, offline: bool) -> list[_F
                         fighter.skills[slot] = power
                     if entity is not None:
                         fighter.amounts[slot] = support_amounts(entity)
+    try:
+        overrides = load_overrides()
+    except KitError as exc:
+        _fail(f"hand-written kit: {exc}")
     with catalog_cli.http_factory(paths, offline) as http:
         for fighter in fighters:
             skills = fetch_kit(http, fighter.name) if fighter.name else {}
             fighter.cooldowns = {s: k.cooldown for s, k in skills.items() if k.cooldown is not None}
             fighter.kit = kit_from(skills, fighter.amounts)
+            hand = overrides.get(fighter.code)
+            if hand is not None:
+                fighter.kit, fighter.cooldowns = apply_override(fighter.kit, fighter.cooldowns, hand)
+                typer.echo(f"note: {fighter.label}: kit refined by hand ({hand.status}, {hand.source})", err=True)
         for fighter in (f for f in fighters if f.side == "them"):
             try:
                 usage = fetch_hero_usage(http, region, fighter.code)
