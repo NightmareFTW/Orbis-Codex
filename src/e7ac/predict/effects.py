@@ -85,6 +85,8 @@ class Effect:
     resurrect: "all" or "one" (dead allies)."""
     count: int = 0
     """cleanse / dispel: how many debuffs / buffs (0 = all)."""
+    condition: str = ""
+    """"kill": only when the skill defeated an enemy (SPEC D76)."""
 
 
 @dataclass(slots=True)
@@ -94,6 +96,18 @@ class Kit:
     on_turn: list[Effect] = field(default_factory=list)
     counter: float = 0.0
     """Passive chance to counterattack with S1 when attacked ("N% chance to counterattack")."""
+    reflect: float = 0.0
+    """Share of the Health lost to a hit that the attacker takes back (MECH-REFL-01 `assumed`; hand kits)."""
+    speed_cap: float = 0.0
+    """Own speed fixed, every other hero's capped at this share of it while alive (Harsetti's Law of Skuggiheim)."""
+    no_counter: bool = False
+    """While alive, nobody else counterattacks (Mort)."""
+    immune: tuple[str, ...] = ()
+    """Debuff kinds that never land (e.g. "stun")."""
+    low_hp: float = 0.0
+    """Health share at or below which `low_hp_effects` trigger after a hit (every `low_hp_cooldown` own turns)."""
+    low_hp_cooldown: int = 0
+    low_hp_effects: list[Effect] = field(default_factory=list)
     """Passive heals / barriers acting on each of the caster's turns."""
     revive: float | None = None
     """HP fraction restored once on lethal damage."""

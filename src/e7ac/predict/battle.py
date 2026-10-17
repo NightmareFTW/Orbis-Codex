@@ -11,8 +11,10 @@ attack/defense/speed changes, stun/sleep, combat readiness, extra turns, immorta
 by MECH-EFF-01. Survival (SPEC D68): heals (never above max Health), barriers (absorb damage before Health, the
 stronger kept, MECH-BAR-01 `assumed`), resurrection, cleanse, dispel, invincibility; passive heals and barriers act at
 the start of each of the caster's turns. Part 2 (SPEC D74): burn / bleed / poison tick at the start of the holder's
-turn (MECH-DOT-01), provoke (S1 at the provoker) and silence (S1 only), counterattacks (S1 back, no chain). Not
-modelled: artifacts, combat set effects: low confidence.
+turn (MECH-DOT-01), provoke (S1 at the provoker) and silence (S1 only), counterattacks (S1 back, no chain). Hand kits
+(SPEC D76): effects only when an enemy was defeated, health sacrifice, reflect, speed cap, no counterattacks, immune
+debuffs, revive given to allies, effects when hit down to a Health share. Not modelled: artifacts, combat set effects:
+low confidence.
 """
 
 from __future__ import annotations
@@ -96,7 +98,10 @@ def _battle(
             _use(effect, i, [], units, hp, cr, state, rng)
     for actions in range(1, MAX_ACTIONS + 1):
         alive = [i for i in range(n) if hp[i] > 0]
-        speed = [speeds[i] * state[i].factor("spd") for i in range(n)]
+        speed = [speeds[i] * (1.0 if units[i].kit.speed_cap else state[i].factor("spd")) for i in range(n)]
+        for c in alive:  # a speed cap (Harsetti): every other hero at most this share of the caster's speed
+            if units[c].kit.speed_cap:
+                speed = [v if i == c else min(v, units[c].kit.speed_cap * speed[c]) for i, v in enumerate(speed)]
         actor = min(alive, key=lambda i: (1 - cr[i]) / speed[i])
         elapsed = max(0.0, (1 - cr[actor]) / speed[actor])
         for i in alive:
@@ -121,6 +126,7 @@ def _battle(
             continue
         for ready in waiting[actor]:
             waiting[actor][ready] = max(0, waiting[actor][ready] - 1)
+        me.low_wait = max(0, me.low_wait - 1)
         dead_ally = any(hp[j] <= 0 and units[j].side == unit.side for j in range(n))
         held = me.timers.get("silence", 0) > 0 or me.timers.get("provoke", 0) > 0
         slot = 1 if held else _choose(unit, waiting[actor], acted[actor], dead_ally)
@@ -130,6 +136,7 @@ def _battle(
         enemies = [j for j in alive if units[j].side != unit.side]
         skill = unit.skills.get(slot)
         targets: list[int] = []
+        killed = False
         if skill is not None and enemies:
             targets = enemies if skill.targets > 1 else [min(enemies, key=lambda j: hp[j] / hits[(actor, j, slot)])]
             if me.timers.get("provoke", 0) > 0 and me.provoker in enemies:
@@ -139,12 +146,16 @@ def _battle(
             attack = {**unit.stats, Stat.ATK: unit.stats[Stat.ATK] * me.factor("atk")}
             for j in targets:
                 guard = {**units[j].stats, Stat.DEF: units[j].stats[Stat.DEF] * state[j].factor("def")}
+                before = hp[j]
                 state[j].hurt(hp, j, base_hit(attack, skill, guard) * factor)
                 if hp[j] <= 0:
                     _lethal(units, hp, cr, state, j)
-                elif _counters(units[j], state[j], rng):
-                    _counterattack(j, actor, units, hp, cr, state, hits, rng)
+                    killed = killed or hp[j] <= 0
+                else:
+                    _after_hit(j, actor, before - hp[j], units, hp, cr, state, hits, rng)
         for effect in unit.kit.on_use.get(slot, []):
+            if effect.condition == "kill" and not killed:
+                continue
             _use(effect, actor, targets, units, hp, cr, state, rng)
         me.tick()
         standing = {units[i].side for i in range(n) if hp[i] > 0}
@@ -184,12 +195,19 @@ class _State:
     dots: list[tuple[float, int]] = field(default_factory=list)
     """Damage over time: (damage per turn, turns left)."""
     provoker: int = -1
+    revive_hp: float = 0.0
+    """Health share restored by a revive status (kind "revive_buff")."""
+    low_wait: int = 0
+    """Own turns until the low-Health trigger works again."""
 
     def factor(self, kind: str) -> float:
         return max(0.0, 1 + self.buffs.get(kind, (0.0, 0))[0] + self.debuffs.get(kind, (0.0, 0))[0])
 
     def apply(self, effect: Effect) -> None:
-        if effect.kind in ("atk", "def", "spd"):
+        if effect.kind == "revive_buff":
+            self.timers["revive_buff"] = max(self.timers.get("revive_buff", 0), effect.turns)
+            self.revive_hp = effect.value
+        elif effect.kind in ("atk", "def", "spd"):
             table = self.debuffs if effect.debuff else self.buffs
             old = table.get(effect.kind, (0.0, 0))
             table[effect.kind] = (effect.value if abs(effect.value) >= abs(old[0]) else old[0], effect.turns)
@@ -211,7 +229,7 @@ class _State:
             + [("dot", "")] * len(self.dots)
             + [("debuff", k) for k in self.debuffs]
             if debuffs
-            else [("timer", k) for k in ("immortal", "invincible", "immunity", "counter")]
+            else [("timer", k) for k in ("immortal", "invincible", "immunity", "counter", "revive_buff")]
             + [("barrier", "")]
             + [("buff", k) for k in self.buffs]
         )
@@ -252,7 +270,7 @@ class _State:
                 self.barrier = 0.0
 
 
-_TIMERS: Final = ("stun", "immortal", "immunity", "invincible", "provoke", "silence", "counter")
+_TIMERS: Final = ("stun", "immortal", "immunity", "invincible", "provoke", "silence", "counter", "revive_buff")
 
 
 def _allies(units: Sequence[Combatant], hp: Sequence[float], i: int) -> list[int]:
@@ -264,6 +282,8 @@ def _lethal(units: Sequence[Combatant], hp: list[float], cr: list[float], state:
     kit = units[j].kit
     if state[j].timers.get("immortal", 0) > 0:
         hp[j] = 1.0
+    elif state[j].timers.pop("revive_buff", 0) > 0:  # a revive status given to an ally (Maid Chloe)
+        hp[j] = units[j].stats[Stat.HP] * state[j].revive_hp
     elif kit.revive is not None and not state[j].revived:
         state[j].revived = True
         hp[j] = units[j].stats[Stat.HP] * kit.revive
@@ -297,6 +317,9 @@ def _use(
     if hp[actor] <= 0:
         return
     caster = units[actor].stats
+    if effect.kind == "sacrifice":  # health paid by the caster, never to death
+        hp[actor] = max(1.0, hp[actor] * (1 - effect.value))
+        return
     amount = (
         effect.scaling[0] * caster[Stat.HP]
         + effect.scaling[1] * caster[Stat.ATK]
@@ -325,7 +348,7 @@ def _use(
         return
     effectiveness = caster.get(Stat.EFFECTIVENESS, 0.0)
     for j in targets:
-        if hp[j] <= 0 or state[j].timers.get("immunity", 0) > 0:
+        if hp[j] <= 0 or state[j].timers.get("immunity", 0) > 0 or effect.kind in units[j].kit.immune:
             continue
         resistance = units[j].stats.get(Stat.EFFECT_RESISTANCE, 0.0)
         land = effect.chance * min(max(1 + effectiveness - resistance, 0.0), LAND_CAP)  # MECH-EFF-01
@@ -349,10 +372,41 @@ def _use(
             state[j].apply(effect)
 
 
-def _counters(unit: Combatant, me: _State, rng: random.Random) -> bool:
+def _after_hit(
+    j: int,
+    attacker: int,
+    lost: float,
+    units: Sequence[Combatant],
+    hp: list[float],
+    cr: list[float],
+    state: list[_State],
+    hits: Mapping[tuple[int, int, int], float],
+    rng: random.Random,
+) -> None:
+    """What a hero does after a hit it survives (SPEC D76): reflect part of the Health lost, trigger its low-Health
+    effects, counterattack."""
+    kit = units[j].kit
+    if kit.reflect and lost > 0:
+        state[attacker].hurt(hp, attacker, min(kit.reflect * lost, units[j].stats[Stat.HP]))
+        if hp[attacker] <= 0:
+            _lethal(units, hp, cr, state, attacker)
+    if kit.low_hp and hp[j] <= kit.low_hp * units[j].stats[Stat.HP] and state[j].low_wait == 0:
+        state[j].low_wait = kit.low_hp_cooldown
+        for effect in kit.low_hp_effects:
+            _use(effect, j, [], units, hp, cr, state, rng)
+    if hp[attacker] > 0 and _counters(units, hp, j, state, rng):
+        _counterattack(j, attacker, units, hp, cr, state, hits, rng)
+
+
+def _counters(
+    units: Sequence[Combatant], hp: Sequence[float], j: int, state: Sequence[_State], rng: random.Random
+) -> bool:
     """A counterattack (S1 back at the attacker): always with the counterattack buff, else the passive chance; never
-    while stunned (`assumed`)."""
+    while stunned, nor while another hero's "nobody else counterattacks" holds (`assumed`)."""
+    unit, me = units[j], state[j]
     if me.timers.get("stun", 0) > 0 or 1 not in unit.skills:
+        return False
+    if any(units[i].kit.no_counter and hp[i] > 0 and i != j for i in range(len(units))):
         return False
     chance = 1.0 if me.timers.get("counter", 0) > 0 else unit.kit.counter
     return chance > 0 and rng.random() < chance

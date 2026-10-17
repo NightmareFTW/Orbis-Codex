@@ -1,0 +1,25 @@
+# Young Senya
+hero = "c1162"
+source = "epic7db skill text (the in-game description) and Fribbels skill options, read by hand 2026-10-17"
+status = "community"
+unmodelled = ["S1 Dual Attack from a random ally", "S2 Fighting Spirit / Help! Help!", "S3 soulburn healing"]
+
+[[effect]]
+slot = 1
+kind = "cr"
+value = 0.15
+note = "S1: increases the caster's Combat Readiness by 15%"
+
+[[effect]]
+slot = 3
+kind = "cleanse"
+receivers = "all"
+count = 0
+note = "S3: dispels all debuffs from all allies"
+
+[[effect]]
+slot = 3
+kind = "cr"
+value = 0.40
+all_allies = true
+note = "S3: increases the Combat Readiness of all allies by 40%"

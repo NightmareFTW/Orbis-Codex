@@ -106,6 +106,8 @@ Last reviewed: 2026-10-03.
 | MECH-BAR-01 | A barrier absorbs damage before Health and lasts its turns (ticking at the end of the holder's turn); a new barrier keeps the stronger of the two. | not documented | `assumed` | NV-35. |
 | MECH-AI-01 | A unit uses S3 when ready, else an active S2 when ready, else S1; a skill that only resurrects waits for a dead ally. | not documented (game AI) | `assumed` | NV-36. |
 | MECH-DOT-01 | Damage over time hits at the start of the holder's turn and ignores Defense: poison 5% of the target's max Health per turn; burn 60% and bleed 30% of the caster's Attack per turn; stacks add up. | poison: community; burn/bleed: not documented | poison `community`, burn/bleed `assumed` | `predict/effects.py` DOT_ATK / POISON_MAX_HP. NV-37. |
+| MECH-REFL-01 | Reflect: the attacker takes back the stated share of the Health the hit cost the holder (after barriers), only on a hit the holder survives, at most the holder's max Health. | Yulha's skill text states 40% and the cap; the rest is not documented | text `community`, details `assumed` | `predict/battle.py` `_after_hit`. NV-40. |
+| MECH-CAP-01 | Harsetti's Law of Skuggiheim (PvP): her speed is fixed (no buffs or debuffs) and every other hero, allies and enemies, is capped at 90% of it while she lives. | epic7db skill text | `community` | `Kit.speed_cap`. NV-40. |
 
 ## 8. Extra actions
 
@@ -187,4 +189,7 @@ skills vs speed buffs (Speed Up = +30% speed per e7calc `spdUp 1.3`, `community`
 | NV-34 | Arena VS badges: fire (red) and ice (blue) level-square colours, ranger and warrior icons, other animation frames and skins (SPEC D64) | Hero identification | Arena VS captures with fire/ice heroes, a ranger and a warrior |
 | NV-35 | Heal/barrier amounts and barrier stacking (MECH-HEAL-01, MECH-BAR-01) | Win probability | A recorded battle with known stats: Health before/after a heal or barrier |
 | NV-36 | Skill choice of the game AI (MECH-AI-01) | Win probability | Recorded Arena battles: which skill each opponent used when several were ready |
-| NV-37 | DoT amounts and timing, counterattack rules (MECH-DOT-01, D74) | Win probability | A recorded battle: Health lost to one burn / bleed / poison tick, and a counterattack's skill |
+| NV-37 | DoT amounts and timing, counterattack rules, and what provoke and silence forbid (assumed: S1 only) (MECH-DOT-01, D74) | Win probability | A recorded battle: Health lost to one burn / bleed / poison tick, and a counterattack's skill |
+| NV-38 | Health share restored by the revive status Maid Chloe's S3 grants (assumed 30%; the text says nothing) | Win probability vs Maid Chloe | A recorded battle where a revived hero comes back |
+| NV-39 | Blood Blade Karin S3: epic7db's icon says "Extra Turn", its text says +50% Combat Readiness when an enemy is defeated (the text is used); the same for S1 (+35% on a defeat); S1's life steal amount unknown | Win probability with BBK | A recorded battle: what BBK's S3 does after a defeat |
+| NV-40 | Reflect and speed-cap details (MECH-REFL-01, MECH-CAP-01): reflect on lethal hits, on barrier-absorbed damage, on AoE; whether the cap also applies to allies | Win probability vs Yulha, with Harsetti | Recorded battles with each | 

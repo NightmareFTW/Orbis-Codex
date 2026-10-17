@@ -1,0 +1,40 @@
+# Blood Blade Karin
+hero = "c2011"
+source = "epic7db skill text (the in-game description) and Fribbels skill options, read by hand 2026-10-17"
+status = "community"
+replace = [1, 3]
+handles = ["Healing"]
+unmodelled = ["S1 healing proportional to damage dealt (amount unknown)", "S2 stats grow as Health falls"]
+# epic7db's icon says "Extra Turn" for S3; its text says +50% Combat Readiness when an enemy is defeated: the text is used.
+
+[[effect]]
+slot = 1
+kind = "cr"
+value = 0.15
+
+[[effect]]
+slot = 1
+kind = "cr"
+value = 0.35
+condition = "kill"
+note = "S1: an additional 35% when the enemy is defeated"
+
+[[effect]]
+slot = 3
+kind = "sacrifice"
+value = 0.20
+note = "S3: sacrifices 20% of the caster's current Health"
+
+[[effect]]
+slot = 3
+kind = "atk"
+value = 0.5
+turns = 2
+note = "S3: increases the caster's Attack for 2 turns (50%: the icon's value)"
+
+[[effect]]
+slot = 3
+kind = "cr"
+value = 0.50
+condition = "kill"
+note = "S3: +50% Combat Readiness when an enemy is defeated"

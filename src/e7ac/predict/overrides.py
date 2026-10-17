@@ -9,27 +9,40 @@ One file per hero, named by its code (`c2049.toml`); every number carries where 
     replace = [3]                 # slots whose automatic effects are dropped first (optional)
     handles = ["Revive"]          # effect names now modelled: removed from the "not simulated" list (optional)
     cooldowns = { 3 = 4 }         # skill slot -> turns (optional, replaces epic7db's)
+    unmodelled = ["S1 lifesteal"] # what this hero still has that is not simulated (optional, shown by `e7 kit`)
+
+    [passive]                     # optional: kit-level passives
+    reflect = 0.4                 # share of the Health lost to a hit that the attacker takes back
+    speed_cap = 0.9               # own speed fixed; every other hero capped at this share of it
+    no_counter = true             # nobody else counterattacks while this hero lives
+    immune = ["stun"]             # debuff kinds that never land
+    low_hp = 0.3                  # effects with when = "low_hp" trigger after a hit leaves this Health share or less
+    low_hp_cooldown = 5           # ... at most once every N own turns
 
     [[effect]]
     slot = 3                      # 1-3
     when = "use"                  # use (when the skill is used) / start (battle start) / turn (start of each own
-                                  # turn) / revive (once on lethal damage: `value` = Health fraction)
+                                  # turn) / low_hp (see [passive]) / revive (once on lethal damage: `value` = Health
+                                  # fraction)
     kind = "resurrect"            # an `Effect` kind: atk def spd stun cr extra_turn immortal immunity invincible
                                   # heal barrier resurrect cleanse dispel burn bleed poison provoke silence counter
     value = 0.2
     receivers = "all"             # heal / barrier / cleanse: self / all / lowest:N; resurrect: all / one
     note = "VIP Treatment"        # optional, free text
 
-Optional effect fields: debuff (default: the kind's usual side), turns (2), chance (1.0), all_allies (false),
-scaling ([hp, atk, def] shares of the caster's stats), count (0 = all). A malformed file is an error naming the file
-(never skipped silently).
+Optional effect fields: debuff (default: the kind's usual side), turns (2), chance (1.0; up to 2.0 for "200% chance"),
+all_allies (false), scaling ([hp, atk, def] shares of the caster's stats), count (0 = all), condition ("kill": only
+when the skill defeated an enemy). Extra kinds for hand kits: sacrifice (`value` = share of current Health paid by the
+caster), revive_buff (`value` = Health share restored when a hero holding it dies, for `turns`). A malformed file is
+an error naming the file (never skipped silently).
 """
 
 from __future__ import annotations
 
+import dataclasses
 import tomllib
 from collections.abc import Mapping
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final
 
@@ -60,10 +73,13 @@ KINDS: Final = frozenset(
         "provoke",
         "silence",
         "counter",
+        "sacrifice",
+        "revive_buff",
     }
 )
 _DEBUFFS: Final = frozenset({"stun", "dispel", "burn", "bleed", "poison", "provoke", "silence"})
-WHEN: Final = frozenset({"use", "start", "turn", "revive"})
+WHEN: Final = frozenset({"use", "start", "turn", "revive", "low_hp"})
+PASSIVES: Final = frozenset({"reflect", "speed_cap", "no_counter", "immune", "low_hp", "low_hp_cooldown"})
 
 
 class KitError(ValueError):
@@ -85,6 +101,8 @@ class KitOverride:
     status: str
     replace: tuple[int, ...] = ()
     handles: tuple[str, ...] = ()
+    unmodelled: tuple[str, ...] = ()
+    passive: Mapping[str, Any] = field(default_factory=dict)
     cooldowns: Mapping[int, int] = field(default_factory=dict)
     effects: tuple[Placed, ...] = ()
     path: str = ""
@@ -116,12 +134,18 @@ def parse_override(text: str, name: str = "<kit>") -> KitOverride:
         raise KitError(f"{name}: 'status' must be one of {sorted(STATUSES)}")
     cooldowns = {int(k): _int(v, name, "cooldowns") for k, v in dict(data.get("cooldowns", {})).items()}
     effects = tuple(_placed(raw, name, i) for i, raw in enumerate(data.get("effect", []), 1))
+    passive = dict(data.get("passive", {}))
+    unknown = sorted(set(passive) - PASSIVES)
+    if unknown:
+        raise KitError(f"{name}: unknown passive {unknown} (one of {sorted(PASSIVES)})")
     return KitOverride(
         hero=hero,
         source=source,
         status=str(status),
         replace=tuple(_int(s, name, "replace") for s in data.get("replace", [])),
         handles=tuple(str(h) for h in data.get("handles", [])),
+        unmodelled=tuple(str(h) for h in data.get("unmodelled", [])),
+        passive=passive,
         cooldowns=cooldowns,
         effects=effects,
         path=name,
@@ -130,14 +154,17 @@ def parse_override(text: str, name: str = "<kit>") -> KitOverride:
 
 def apply_override(kit: Kit, cooldowns: Mapping[int, int], override: KitOverride) -> tuple[Kit, dict[int, int]]:
     """The automatic kit corrected by hand: replaced slots dropped, hand effects added, handled names no longer
-    listed as not simulated."""
-    out = Kit(
+    listed as not simulated, passives set."""
+    dropped = 2 in override.replace  # a replaced S2 clears the passive parts read automatically
+    out = dataclasses.replace(
+        kit,
         on_use={slot: list(effects) for slot, effects in kit.on_use.items() if slot not in override.replace},
-        at_start=[] if 2 in override.replace else list(kit.at_start),
-        on_turn=[] if 2 in override.replace else list(kit.on_turn),
-        revive=None if 2 in override.replace else kit.revive,
-        revive_effects=[] if 2 in override.replace else list(kit.revive_effects),
-        unmodelled=[n for n in kit.unmodelled if n not in override.handles],
+        at_start=[] if dropped else list(kit.at_start),
+        on_turn=[] if dropped else list(kit.on_turn),
+        revive=None if dropped else kit.revive,
+        revive_effects=[] if dropped else list(kit.revive_effects),
+        unmodelled=[n for n in kit.unmodelled if n not in override.handles] + list(override.unmodelled),
+        low_hp_effects=[],
     )
     revive_effects: list[Effect] = []
     for placed in override.effects:
@@ -147,12 +174,21 @@ def apply_override(kit: Kit, cooldowns: Mapping[int, int], override: KitOverride
             out.at_start.append(placed.effect)
         elif placed.when == "turn":
             out.on_turn.append(placed.effect)
+        elif placed.when == "low_hp":
+            out.low_hp_effects.append(placed.effect)
         elif placed.effect.kind in ("heal", "resurrect"):  # revive: `value` = Health fraction regained
             out.revive = placed.effect.value
         else:
             revive_effects.append(placed.effect)
     if revive_effects:
         out.revive_effects = revive_effects
+    passive = override.passive
+    out.reflect = float(passive.get("reflect", out.reflect))
+    out.speed_cap = float(passive.get("speed_cap", out.speed_cap))
+    out.no_counter = bool(passive.get("no_counter", out.no_counter))
+    out.immune = tuple(str(k) for k in passive.get("immune", out.immune))
+    out.low_hp = float(passive.get("low_hp", out.low_hp))
+    out.low_hp_cooldown = int(passive.get("low_hp_cooldown", out.low_hp_cooldown))
     return out, {**cooldowns, **override.cooldowns}
 
 
@@ -182,12 +218,15 @@ def _placed(raw: Any, name: str, index: int) -> Placed:
             scaling=(float(scaling[0]), float(scaling[1]), float(scaling[2])),
             receivers=str(raw.get("receivers", "")),
             count=int(raw.get("count", 0)),
+            condition=str(raw.get("condition", "")),
         )
     except (TypeError, ValueError) as exc:
         raise KitError(f"{where}: {exc}") from exc
-    if not 0.0 <= effect.chance <= 1.0:
-        raise KitError(f"{where}: 'chance' must be between 0 and 1")
-    return Placed(slot, str(when), replace(effect), str(raw.get("note", "")))
+    if not 0.0 <= effect.chance <= 2.0:
+        raise KitError(f"{where}: 'chance' must be between 0 and 2")
+    if effect.condition not in ("", "kill"):
+        raise KitError(f"{where}: 'condition' must be \"kill\" or left out")
+    return Placed(slot, str(when), effect, str(raw.get("note", "")))
 
 
 def _int(value: Any, where: str, key: str) -> int:

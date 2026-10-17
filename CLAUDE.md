@@ -32,7 +32,8 @@ for the heroes the user meets most in Arena: ask the user for that list first, ~
 **Paused 2026-10-12** (user saving the weekly budget for other projects). On resume: (1) hand refinement of the most met
 heroes (above): ready since D73 — run `e7 kit todo` on the user's PC (they paste the output), then for each hero
 `e7 kit show HERO` and write `src/e7ac/predict/kits/<code>.toml` (format in `predict/overrides.py`); (2) effects part 2 done
-(D74); next model gaps: artifacts, combat set effects; (3) the main window (PySide6, ~150–200 MB: confirm the dependency with
+(D74); six hand kits done 2026-10-17 (D76: c1162, c2011, c1153, c1104, c1131, c2049) — next: the user's `e7 kit todo`
+list, one hero at a time; model gaps: artifacts, combat set effects, lifesteal, ally-attacked triggers (Mort S2); (3) the main window (PySide6, ~150–200 MB: confirm the dependency with
 the user first), overlay later.
 
 ## Golden rules

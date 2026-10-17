@@ -1,0 +1,30 @@
+# Maid Chloe
+hero = "c2049"
+source = "epic7db skill text (the in-game description) and Fribbels skill options, read by hand; the revive amount is assumed 2026-10-17"
+status = "assumed"
+replace = [3]
+handles = ["Revive"]
+# epic7db also lists an "Increase Attack" icon on S3, but the text says nothing of the kind: dropped.
+# The text gives no Health share for the revive status: 30% is `assumed` (docs/MECHANICS.md NV-38).
+
+[[effect]]
+slot = 3
+kind = "resurrect"
+value = 0.2
+receivers = "all"
+note = "S3: revives all dead allies to 20% Health"
+
+[[effect]]
+slot = 3
+kind = "cleanse"
+receivers = "all"
+count = 2
+note = "S3: dispels two debuffs from all living allies"
+
+[[effect]]
+slot = 3
+kind = "revive_buff"
+value = 0.3
+turns = 3
+receivers = "all"
+note = "S3: grants revive for 3 turns (30%: assumed)"

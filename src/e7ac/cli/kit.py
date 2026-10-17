@@ -55,6 +55,9 @@ def show(
     if kit.revive is not None:
         extra = ", ".join(_describe(e) for e in kit.revive_effects)
         typer.echo(f"  revive once: {kit.revive:.0%} Health" + (f" + {extra}" if extra else ""))
+    passives = _passives(kit)
+    if passives:
+        typer.echo("  passives: " + ", ".join(passives))
     typer.echo("  not simulated: " + (", ".join(kit.unmodelled) or "-"))
 
 
@@ -125,6 +128,26 @@ def _overrides() -> dict[str, KitOverride]:
         _fail(f"hand-written kit: {exc}")
 
 
+def _passives(kit: Kit) -> list[str]:
+    found = []
+    if kit.counter:
+        found.append(f"counterattack {kit.counter:.0%}")
+    if kit.reflect:
+        found.append(f"reflect {kit.reflect:.0%} of Health lost")
+    if kit.speed_cap:
+        found.append(f"speed cap {kit.speed_cap:.0%} for everyone else")
+    if kit.no_counter:
+        found.append("nobody else counterattacks")
+    if kit.immune:
+        found.append("immune to " + "/".join(kit.immune))
+    if kit.low_hp:
+        found.append(
+            f"at {kit.low_hp:.0%} Health or less (every {kit.low_hp_cooldown} turns): "
+            + ", ".join(_describe(e) for e in kit.low_hp_effects)
+        )
+    return found
+
+
 def _describe(effect: Effect) -> str:
     parts = [effect.kind]
     if effect.value:
@@ -136,8 +159,10 @@ def _describe(effect: Effect) -> str:
         parts.append(effect.receivers)
     if effect.kind in ("cleanse", "dispel"):
         parts.append(f"x{effect.count or 'all'}")
-    if effect.debuff and effect.chance < 1:
+    if effect.debuff and effect.chance != 1:
         parts.append(f"{effect.chance:.0%} chance")
+    if effect.condition:
+        parts.append(f"if {effect.condition}")
     if effect.kind not in ("heal", "resurrect", "cleanse", "dispel", "cr", "extra_turn"):
         parts.append(f"{effect.turns}t")
     return " ".join(parts)

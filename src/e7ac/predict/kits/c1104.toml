@@ -1,0 +1,9 @@
+# Mort
+hero = "c1104"
+source = "epic7db skill text (the in-game description) and Fribbels skill options, read by hand 2026-10-17"
+status = "community"
+unmodelled = ["S2 ally counterattack 20% + Sacred Blessing (barrier to all allies, speed)", "S3 fear"]
+
+[passive]
+no_counter = true
+immune = ["stun"]

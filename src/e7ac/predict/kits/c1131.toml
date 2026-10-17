@@ -1,0 +1,38 @@
+# Yulha
+hero = "c1131"
+source = "epic7db skill text (the in-game description) and Fribbels skill options, read by hand 2026-10-17"
+status = "community"
+replace = [2]
+handles = ["S2 cr", "S2 barrier", "S2 cleanse", "Penetrate"]
+# S1 "redirected provoke" stays unmodelled: its rules are unverified and the simulation of plain provoke (S1 only) is
+# an assumption that would swing this hero's result by tens of points (leave-one-out 2026-10-17).
+# S3's 100% penetration comes from Fribbels (already in the damage), so "Penetrate" is handled.
+
+[passive]
+reflect = 0.4
+low_hp = 0.3
+low_hp_cooldown = 5
+
+[[effect]]
+slot = 2
+when = "low_hp"
+kind = "cleanse"
+receivers = "self"
+count = 0
+note = "S2 Murderous Intent: dispels all debuffs from the caster"
+
+[[effect]]
+slot = 2
+when = "low_hp"
+kind = "barrier"
+scaling = [0.35, 0, 0]
+turns = 3
+receivers = "self"
+note = "S2 Murderous Intent: barrier for 3 turns (35% max Health: Fribbels)"
+
+[[effect]]
+slot = 2
+when = "low_hp"
+kind = "cr"
+value = 0.25
+note = "S2 Murderous Intent: +25% Combat Readiness"

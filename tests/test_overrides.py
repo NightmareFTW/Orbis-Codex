@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -54,8 +55,9 @@ def test_a_hand_kit_replaces_slots_and_clears_what_it_handles() -> None:
         ('hero = "c2049"\nsource = "x"\nstatus = "sure"', "'status'"),
         ('hero = "c2049"\nsource = "x"\nstatus = "assumed"\n[[effect]]\nslot = 3\nkind = "nuke"', "unknown kind"),
         ('hero = "c2049"\nsource = "x"\nstatus = "assumed"\n[[effect]]\nkind = "heal"', "'slot'"),
-        ('hero = "c2049"\nsource = "x"\nstatus = "assumed"\n[[effect]]\nslot = 1\nkind = "stun"\nchance = 2', "chance"),
+        ('hero = "c2049"\nsource = "x"\nstatus = "assumed"\n[[effect]]\nslot = 1\nkind = "stun"\nchance = 3', "chance"),
         ("hero = ", "c"),
+        ('hero = "c2049"\nsource = "x"\nstatus = "assumed"\n[passive]\nflying = 1', "unknown passive"),
     ],
 )
 def test_a_malformed_hand_kit_is_an_error_naming_the_problem(text: str, message: str) -> None:
@@ -96,3 +98,65 @@ def test_kit_todo_lists_the_heroes_met_most_first(
     lines = [line for line in result.output.splitlines() if "x  " in line]
     assert "Test Hero" in lines[0] and "3x" in lines[0] and "Blood Blade Karin" in lines[1]
     assert "(no epic7db page)" in lines[0]
+
+
+def _duel(kit_a: Kit, kit_b: Kit | None = None, hp_a: float = 10000, hp_b: float = 10000) -> float:
+    from e7ac.predict.battle import simulate
+    from tests.test_effects import unit
+
+    return simulate([unit("a", "you", kit_a, hp=hp_a), unit("b", "them", kit_b, hp=hp_b)], runs=400).win
+
+
+def test_conditions_sacrifice_reflect_and_immunity_in_battle() -> None:
+    from e7ac.predict.battle import _State, simulate
+    from tests.test_effects import unit
+
+    plain = _duel(Kit())
+    # a Combat Readiness push only when the skill defeats an enemy: here one extra turn (after the weak one dies),
+    # between "no push" and "a push at every hit"
+    push = Effect("cr", False, 1.0, 2, 1.0, condition="kill")
+    ambush = [unit("a", "you", hp=6000), unit("b1", "them", hp=100), unit("b2", "them", hp=5000)]
+    wins = [
+        simulate(
+            [unit("a", "you", kit, hp=6000), unit("b1", "them", hp=100), unit("b2", "them", hp=5000)], runs=300
+        ).win
+        for kit in (Kit(), Kit(on_use={1: [push]}), Kit(on_use={1: [dataclasses.replace(push, condition="")]}))
+    ]
+    assert wins[0] < wins[1] < wins[2] and len(ambush) == 3
+    # health paid for nothing makes a duel harder; reflect makes the attacker pay
+    pay = Kit(on_use={1: [Effect("sacrifice", False, 0.5, 0, 1.0)]})
+    assert _duel(pay) < plain
+    assert _duel(Kit(), Kit(reflect=1.0)) < plain
+    # stun never lands on a stun-immune hero
+    stun = Kit(on_use={1: [Effect("stun", True, 0.0, 1, 1.0)]})
+    assert _duel(stun, Kit(immune=("stun",))) < _duel(stun)
+    # a revive status brings its holder back once, for its turns
+    state = _State()
+    state.apply(Effect("revive_buff", False, 0.3, 3, 1.0))
+    assert state.timers["revive_buff"] == 3 and state.revive_hp == 0.3
+    assert simulate([unit("a", "you"), unit("b", "them")], runs=50).runs == 50
+
+
+def test_a_speed_cap_and_no_counter_shape_turn_order() -> None:
+    from e7ac.predict.battle import Combatant, simulate
+    from tests.test_effects import S1, unit
+
+    stats = unit("x", "you").stats
+    fast = Combatant("fast", "you", stats, 300, S1, {}, Kit())
+    slow = Combatant("slow", "them", stats, 100, S1, {}, Kit())
+    assert simulate([fast, slow], runs=200).win > 0.9
+    capper = Combatant("cap", "them", stats, 100, S1, {}, Kit(speed_cap=0.9))
+    assert simulate([fast, capper], runs=200).win < 0.1  # 300 capped to 90: the capper acts first and wins the duel
+
+
+def test_the_shipped_kits_apply_and_show_their_passives() -> None:
+    from e7ac.predict.effects import Kit as AutoKit
+
+    kits = load_overrides()
+    assert {"c1162", "c2011", "c1153", "c1104", "c1131", "c2049"} <= set(kits)
+    yulha, _ = apply_override(AutoKit(), {}, kits["c1131"])
+    assert yulha.reflect == 0.4 and yulha.low_hp == 0.3 and len(yulha.low_hp_effects) == 3
+    harsetti, _ = apply_override(AutoKit(), {}, kits["c1153"])
+    assert harsetti.speed_cap == 0.9
+    karin, _ = apply_override(AutoKit(counter=0.3), {}, kits["c2011"])
+    assert karin.counter == 0.3  # a hand kit never drops what was read automatically
