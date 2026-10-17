@@ -46,8 +46,10 @@ PvE builds (NV-01, NV-02). Arena defence teams are probably better built than th
 are not in the simulation at all (NV-07, NV-17).
 
 **The game never shows an opponent's equipment** (the user, 2026-10-18), so the build cannot be read from the screen:
-the idea is closed. What is left is results (section 3) to choose between the typical, strong and top profiles, and
-the community data of what the heroes met most usually wear.
+the idea is closed. What is left is results (section 3) to choose between the profiles. Since SPEC D92 there are
+four: Stove typical / strong / top and **library** (the Fribbels hero library average of each hero, from epic7db's page:
+final stats with the sets already in them, speed included; `e7 predict win --profile library`, or the setting
+`opponent_profile`). On the lost fight the chance goes 99.4% (typical) -> 96.0% (library): still a win.
 
 ## 3. The real result of each fight
 

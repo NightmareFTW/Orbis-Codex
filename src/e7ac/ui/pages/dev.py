@@ -30,6 +30,7 @@ from e7ac.arena.questions import FaceQuestion
 from e7ac.arena.sightings import Popularity, SightingStore, popularity, sightings_path
 from e7ac.predict.overrides import KitError, load_overrides
 from e7ac.predict.worklist import WorkRow, kit_amounts, worklist
+from e7ac.skills.store import SkillStore, skills_dir
 from e7ac.storage.db import session_scope
 from e7ac.ui.context import AppContext
 from e7ac.ui.pages.base import Page, card, heading
@@ -80,7 +81,8 @@ class _Kits(QObject):
                 for number, (code, seen) in enumerate(counts, 1):
                     with session_scope(open_engine(context.paths)) as session:
                         amounts = {code: kit_amounts(session, code)}
-                    self.row.emit(worklist([(code, seen)], heroes, amounts, overrides, http)[0])
+                    captured = {code: SkillStore(skills_dir(context.paths.home)).load(code)}
+                    self.row.emit(worklist([(code, seen)], heroes, amounts, overrides, http, captured=captured)[0])
                     self.progress.emit(number, len(counts))
         except KitError as exc:
             self.done.emit(f"a hand-written kit is broken: {exc}")

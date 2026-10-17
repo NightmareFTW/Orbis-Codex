@@ -309,6 +309,15 @@ ATK 21→273, HP 32→416.
   imprints, awakening; artifact pages.
 - robots.txt: `Disallow:` (empty) → allowed. No licence → personal use only, cached, ≤ 1 req/s.
 - Planned use: skill text + cooldowns + soul gain for kits and mechanic tags (M2/M14). Slug ↔ code mapping via Fribbels `_id`.
+- **SPEC D90**: also read from each hero page: the skill's name (the skill image's `alt`), the soulburn text
+  (`class="soulburn"`), the soul gain, the enhancement steps (`class="upgrade"`: level + description, e.g. "-1 turn
+  cooldown", "+10% effect chance"), the highlighted keywords (`<strong>` in the text) and the **Fribbels hero-library
+  block** (`id="fribbels"`: average final stats, up to three set combinations with their use rate, the top builds with
+  their artifact; "an aggregate of people who use Fribbels' gear optimizer", updated every few days). The RTA tier
+  list (`/tierlists/epic-seven-rta-tier-list`: SS, S, A, B, C, D, 375 heroes) is read for its order. epic7db's numbers
+  are the base ones for some heroes and the maximum ones for others (NV-56). Hero count in the catalog: 391, epic7db
+  has 382 pages (missing 2026-10-18: Ainos 2.0, Baal & Sezan, Haru, Immortal Wukong, Lisette, Mei Lin, Renoa, Sage Baal
+  & Sezan, Uncharted Pioneer Politis).
 - **Used since 2026-10-12 (SPEC D62)** for skill cooldowns: `<slug>_skill_<n>.webp` icon, then `<div class="cooldown">` with
   "None" / "Passive" / "<n> Turns"; slug from the catalog name (lower case, apostrophes dropped, symbols → hyphens);
   the page must contain the hero name. Cached 30 days (`epic7db/heroes`). Real pages are local fixtures (`fixtures/epic7db/`).

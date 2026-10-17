@@ -39,6 +39,9 @@ From a terminal opened in that folder (cmd or PowerShell), run commands as `.\Or
 | `e7 capture --list-windows` | Show the open windows and which one looks like the game |
 | `e7 app` | Open the main window (the same as double-clicking `Orbis.cmd`) |
 | `e7 kit todo` | The heroes met in Arena, most seen first, and what the simulation does not cover for each |
+| `e7 kit audit` | Every hero of the catalog: what is read, what is not, the named mechanics no reader knows (reads epic7db, cached) |
+| `e7 skills watch` | Reads the skill popup of the game while you hold each skill icon (also the Skill reader page of the window) |
+| `e7 skills todo` / `show` / `read` / `export` | The heroes whose skills are still to read, what was read, captures read offline, one text file to send |
 | `e7 roster scan captures\*.png` | Read hero screens (Equipment tab or Hero Info) and store the builds, checked against the catalog |
 
 ## Develop

@@ -12,13 +12,23 @@ from e7ac.paths import AppPaths
 from e7ac.roster.store import list_owned
 from e7ac.storage.db import session_scope
 from e7ac.ui.art import Portraits, hero_of_the_day
+from e7ac.ui.skill_controller import SkillController
 from e7ac.ui.watch_controller import WatchController
 
 
 class AppContext:
-    def __init__(self, paths: AppPaths, watch: WatchController, previous: PreviousRun | None = None) -> None:
+    def __init__(
+        self,
+        paths: AppPaths,
+        watch: WatchController,
+        previous: PreviousRun | None = None,
+        skills: SkillController | None = None,
+    ) -> None:
         self.paths = paths
         self.watch = watch
+        self.skills = skills or SkillController()
+        """The skill reader (Dev tools): reads the skill popups of the game while you hold the skill icons."""
+        self.watch.rival, self.skills.rival = self.skills, self.watch
         self.previous = previous
         """The run before this one did not end normally (Home says so until it is dismissed)."""
         self.portraits = Portraits(paths.cache_dir)

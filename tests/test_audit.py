@@ -3,6 +3,8 @@ the Fribbels library block of a hero page, and the audit over many heroes (synth
 
 from __future__ import annotations
 
+from typing import cast
+
 from e7ac.domain.codes import Stat
 from e7ac.predict.audit import (
     audit_hero,
@@ -14,6 +16,7 @@ from e7ac.predict.audit import (
     vocabulary,
 )
 from e7ac.sources.epic7db import parse_kit, parse_library
+from e7ac.sources.http import CachedHttp
 
 
 def skill(
@@ -177,3 +180,24 @@ def test_the_vocabulary_and_the_fewest_popups_cover_every_unknown_mechanic() -> 
     covered = {word for need in needs for word in need.why}
     assert covered == {"offering", "venom", "focus", "erosion"} and len(needs) == 2  # Alpha S1 + Gamma S2
     assert screens_needed(heroes, known={"offering", "venom", "focus", "erosion"}) == []  # type: ignore[arg-type]
+
+
+def test_the_library_profile_gives_an_opponent_the_fribbels_average_and_its_speed() -> None:
+    from e7ac.cli.predict import _Fighter, _from_library
+
+    class Page:
+        text = "<h1>Lady of the Scales</h1>" + PAGE
+
+    class Http:
+        def get_text(self, *args: object, **kwargs: object) -> Page:
+            return Page()
+
+    fighter = _Fighter("Lady of the Scales", "them", "c6005", name="Lady of the Scales")
+    http = cast(CachedHttp, Http())
+    assert _from_library(http, fighter)
+    assert fighter.stats[Stat.SPEED] == 262 and fighter.stats[Stat.EFFECT_RESISTANCE] == 1.82
+    assert fighter.speed == 262 and "Fribbels library average" in fighter.spread
+    given = _Fighter("Lady of the Scales", "them", "c6005", speed="270", name="Lady of the Scales")
+    assert _from_library(http, given) and given.speed == 270.0  # a speed the user gave is kept
+    nameless = _Fighter("Nobody", "them", "c9999")
+    assert not _from_library(http, nameless)

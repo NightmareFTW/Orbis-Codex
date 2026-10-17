@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Annotated, Any, NoReturn
+from typing import Annotated, Any, Final, NoReturn
 
 import typer
 
@@ -26,8 +26,10 @@ from e7ac.predict.worklist import effective_kit
 from e7ac.roster.composition import compose_final_stats
 from e7ac.roster.screen_gear import ScreenCatalog
 from e7ac.roster.store import build_from_row, list_owned
-from e7ac.settings import SettingsError, load_settings
-from e7ac.sources.http import FetchError
+from e7ac.settings import OpponentProfile, SettingsError, load_settings
+from e7ac.skills.store import SkillStore, skills_dir
+from e7ac.sources.epic7db import fetch_library
+from e7ac.sources.http import CachedHttp, FetchError
 from e7ac.sources.stove_usage import UsageError, fetch_hero_usage
 from e7ac.storage.db import session_scope
 
@@ -38,6 +40,10 @@ _TEAM = typer.Option(help='Your heroes, comma separated, the foremost first: "Ka
 _VS = typer.Option(help='Opponents, comma separated; add "=SPEED" when you know it: "c2011, Arbiter Vildred=231".')
 _WORLD = typer.Option(help="Stove region for opponents (default: your setting).")
 _OFFLINE = typer.Option("--offline", help="Use cached Stove data only.")
+_PROFILE = typer.Option(
+    help="The build assumed for the opponents: typical / strong / top (Stove, each stat taken alone) or library "
+    "(the average of the Fribbels hero library, from epic7db). Default: your setting opponent_profile."
+)
 
 
 @dataclass(slots=True)
@@ -66,10 +72,11 @@ def order(
     vs: Annotated[str, _VS],
     world: Annotated[World | None, _WORLD] = None,
     offline: Annotated[bool, _OFFLINE] = False,
+    profile: Annotated[OpponentProfile | None, _PROFILE] = None,
 ) -> None:
     """Who takes the first turn: your heroes' speeds come from your roster; an opponent's speed is drawn from Stove's
     usage statistics (or given with "=SPEED"), so the uncertainty about its build is in the odds."""
-    fighters = _fighters(team, vs, world, offline)
+    fighters = _fighters(team, vs, world, offline, profile)
     result = first_turns([Unit(f.label, f.side, f.speed) for f in fighters])
     spreads = {f.label: f.spread for f in fighters}
     typer.echo(
@@ -92,10 +99,11 @@ def hits(
     vs: Annotated[str, _VS],
     world: Annotated[World | None, _WORLD] = None,
     offline: Annotated[bool, _OFFLINE] = False,
+    profile: Annotated[OpponentProfile | None, _PROFILE] = None,
 ) -> None:
     """How many hits of S1 / S3 each hero needs to defeat each enemy (expected damage, MECH-DMG-01/02/05). Opponents
     use their typical (median) Stove build. Not counted yet: buffs, combat set effects, artifacts, elements..."""
-    fighters = _fighters(team, vs, world, offline)
+    fighters = _fighters(team, vs, world, offline, profile)
     yours = [f for f in fighters if f.side == "you"]
     theirs = [f for f in fighters if f.side == "them"]
     typer.echo("Hits to defeat, with S1 / S3 (skills fully enhanced; ~ = skill only partly modelled):")
@@ -109,11 +117,12 @@ def win(
     vs: Annotated[str, _VS],
     world: Annotated[World | None, _WORLD] = None,
     offline: Annotated[bool, _OFFLINE] = False,
+    profile: Annotated[OpponentProfile | None, _PROFILE] = None,
 ) -> None:
     """Chance to win, from many simulated battles: turn order (speed, start CR) and damage (S3 whenever its cooldown
     allows, else S1; focus fire). Opponents use their typical Stove build and a speed drawn from Stove. A first
     estimate: buffs, passives, heals, barriers, artifacts and combat set effects are not simulated yet."""
-    win_odds(team, vs, world, offline)
+    win_odds(team, vs, world, offline, profile=profile)
 
 
 class OddsUnavailable(typer.Exit):
@@ -130,11 +139,17 @@ def _fail(message: str) -> NoReturn:
 
 
 def win_odds(
-    team: str, vs: str, world: World | None, offline: bool, runs: int = RUNS, quiet: bool = False
+    team: str,
+    vs: str,
+    world: World | None,
+    offline: bool,
+    runs: int = RUNS,
+    quiet: bool = False,
+    profile: OpponentProfile | None = None,
 ) -> BattleOdds:
     """`predict win` with its printout; the odds are returned (the Arena watch shows them on its badge). `quiet`: no
     printout when it works (the Arena watch compares three opponents); failures still say why."""
-    fighters = _fighters(team, vs, world, offline)
+    fighters = _fighters(team, vs, world, offline, profile)
     missing = [f.label for f in fighters if not f.stats]
     if missing:
         _fail(f"no stats for {', '.join(missing)} (Stove has no data: only the speed was given)")
@@ -188,10 +203,14 @@ def _table(title: str, attackers: list[_Fighter], defenders: list[_Fighter]) -> 
         typer.echo(f"  {attacker.label:<24}" + "".join(f"{c:<24}" for c in cells))
 
 
-def _fighters(team: str, vs: str, world: World | None, offline: bool) -> list[_Fighter]:
+def _fighters(
+    team: str, vs: str, world: World | None, offline: bool, profile: OpponentProfile | None = None
+) -> list[_Fighter]:
     paths = default_paths()
     try:
-        region = world or load_settings(paths.settings_file).world
+        settings = load_settings(paths.settings_file)
+        region = world or settings.world
+        chosen = profile or settings.opponent_profile
     except SettingsError as exc:
         _fail(str(exc))
     fighters: list[_Fighter] = []
@@ -241,16 +260,21 @@ def _fighters(team: str, vs: str, world: World | None, offline: bool) -> list[_F
         overrides = load_overrides()
     except KitError as exc:
         _fail(f"hand-written kit: {exc}")
+    skill_store = SkillStore(skills_dir(paths.home))  # the skills read from the game's own popup (SPEC D91)
     with catalog_cli.http_factory(paths, offline) as http:
         for fighter in fighters:
             hand = overrides.get(fighter.code)
             if fighter.name:
-                fighter.kit, fighter.cooldowns = effective_kit(http, fighter.name, fighter.amounts, hand)
+                fighter.kit, fighter.cooldowns = effective_kit(
+                    http, fighter.name, fighter.amounts, hand, captured=skill_store.load(fighter.code)
+                )
             else:  # not in the catalog: nothing is known of its skills
                 fighter.kit, fighter.cooldowns = Kit(unread=[1, 2, 3]), {}
             if hand is not None:
                 typer.echo(f"note: {fighter.label}: kit refined by hand ({hand.status}, {hand.source})", err=True)
         for fighter in (f for f in fighters if f.side == "them"):
+            if chosen is OpponentProfile.LIBRARY and _from_library(http, fighter):
+                continue
             try:
                 usage = fetch_hero_usage(http, region, fighter.code)
             except (FetchError, UsageError) as exc:
@@ -260,7 +284,7 @@ def _fighters(team: str, vs: str, world: World | None, offline: bool) -> list[_F
                     _fail(f"{fighter.label}: Stove has no usage data: give its speed as {fighter.label}=SPEED")
                 fighter.speed = _given_speed(fighter)
                 continue
-            typical = assumed_build(usage, Profile.TYPICAL, http.now())
+            typical = assumed_build(usage, _PROFILES.get(chosen, Profile.TYPICAL), http.now())
             fighter.stats = {stat: s.value for stat, s in typical.stats.items()}
             if fighter.speed is not None:
                 fighter.speed = _given_speed(fighter)
@@ -271,6 +295,26 @@ def _fighters(team: str, vs: str, world: World | None, offline: bool) -> list[_F
                 fighter.spread = f"~{low.value:.0f}-{high.value:.0f} (P10-P90)"
             fighter.speed = histogram.sampler()
     return fighters
+
+
+_PROFILES: Final = {
+    OpponentProfile.TYPICAL: Profile.TYPICAL,
+    OpponentProfile.STRONG: Profile.STRONG,
+    OpponentProfile.TOP: Profile.TOP,
+}
+
+
+def _from_library(http: CachedHttp, fighter: _Fighter) -> bool:
+    """The opponent as the Fribbels hero library averages it (the builds optimizer users submitted, shown on the
+    hero's epic7db page): its final stats, speed included. False when the hero has none: the Stove build is used."""
+    library = fetch_library(http, fighter.name) if fighter.name else None
+    if library is None or Stat.SPEED not in library.average:
+        typer.echo(f"note: {fighter.label}: no Fribbels library data, using the Stove build", err=True)
+        return False
+    fighter.stats = dict(library.average)
+    fighter.speed = _given_speed(fighter) if fighter.speed is not None else library.average[Stat.SPEED]
+    fighter.spread = f"{library.average[Stat.SPEED]:g} (Fribbels library average)"
+    return True
 
 
 def _given_speed(fighter: _Fighter) -> float:

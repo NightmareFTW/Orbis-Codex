@@ -5,7 +5,8 @@ from __future__ import annotations
 
 import queue
 import threading
-from typing import Final
+from collections.abc import Callable
+from typing import Any, Final
 
 from PySide6.QtCore import QObject, Signal
 
@@ -55,15 +56,21 @@ class WatchController(QObject):
         self._answers: queue.Queue[str] = queue.Queue()
         self._choices: queue.Queue[str | None] = queue.Queue()
         self._taught: queue.Queue[tuple[FaceQuestion, str]] = queue.Queue()
-        self._relay: _Relay | None = None
+        self._relay: Relay | None = None
+        self.rival: Any = None
+        """The other thing that watches the game (the skill reader): never both at once."""
 
     @property
     def running(self) -> bool:
         return self._state != STOPPED
 
+    @property
+    def current(self) -> str:
+        return self._state
+
     def start(self, *, offline: bool, collect_only: bool, overlay: bool, compare_runs: int = SIMULATIONS) -> bool:
-        """False when a watch is already running."""
-        if self.running:
+        """False when a watch is already running (this one, or the skill reader: both capture the game)."""
+        if self.running or (self.rival is not None and self.rival.running):
             return False
         from e7ac.cli import arena as arena_cli
 
@@ -97,7 +104,7 @@ class WatchController(QObject):
                 badge, why = arena_cli.signal_factory(self._retry.set, self._share.set)
                 if why:
                     self.line.emit(f"note: {why}")
-            relay = _Relay(self, badge)
+            relay = Relay(self.said.emit, badge)
             self._relay = relay
             relay.say("Arena: starting", "reading the catalog and the hero icons", LIGHT)
             reason = run_captured(
@@ -166,11 +173,11 @@ class WatchController(QObject):
         self.state.emit(value)
 
 
-class _Relay:
-    """The badge the watch talks to: the window first, and the small badge on the game too when there is one."""
+class Relay:
+    """The badge a watch talks to: the window first (`said`), and the small badge on the game too when there is one."""
 
-    def __init__(self, controller: WatchController, overlay: WatchSignal) -> None:
-        self._controller = controller
+    def __init__(self, said: Callable[[str, str, str], None], overlay: WatchSignal) -> None:
+        self._said = said
         self._overlay = overlay
 
     def place(self, area: Rect) -> None:
@@ -186,7 +193,7 @@ class _Relay:
         self._overlay.result(name, outcome, waiting)
 
     def say(self, top: str, bottom: str, colour: str) -> None:
-        self._controller.said.emit(top, bottom, colour)
+        self._said(top, bottom, colour)
         self._overlay.say(top, bottom, colour)
 
     def capturable(self, on: bool) -> bool:

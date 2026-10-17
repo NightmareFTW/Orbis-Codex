@@ -61,7 +61,12 @@ def _tree(window: MainWindow) -> list[tuple[str, list[str]]]:
 
 def test_the_window_builds_its_pages_on_the_first_visit(context: AppContext) -> None:
     window = MainWindow(context)
-    assert _tree(window) == [("Home", []), ("Arena", []), ("\u25b8  Dev tools", ["Arena stats"]), ("Settings", [])]
+    assert _tree(window) == [
+        ("Home", []),
+        ("Arena", []),
+        ("\u25b8  Dev tools", ["Arena stats", "Skill reader"]),
+        ("Settings", []),
+    ]
     assert window.page("home") is not None and window.page("arena") is None and window.page("dev") is None
     window.show_page("arena")
     assert window.page("arena") is not None and window._stack.currentWidget() is window.page("arena")
@@ -785,3 +790,43 @@ def test_the_settings_page_makes_the_desktop_shortcut(
     page.make_shortcut()
     assert page._note.text() == "The shortcut was not made: PowerShell did not make the shortcut: access denied"
     window.close()
+
+
+def test_the_skill_reader_page_lists_what_is_missing_and_exports_what_was_read(
+    context: AppContext, synthetic_catalog: list[str], qapp: Any
+) -> None:
+    from e7ac.cli.skills import ReadEvent
+    from e7ac.skills.store import SkillStore, skills_dir
+    from e7ac.vision.skill_popup import SkillPopup
+
+    store = SkillStore(skills_dir(context.paths.home))
+    for name in ("Lethal Strike", "Second", "Third"):
+        store.save("c2011", SkillPopup("Karin", name, 5, (), None, "", "Attacks.", "", None, (), (), 0.99))
+    window = MainWindow(context)
+    window.show_page("skills")
+    page: Any = window.page("skills")
+    table = page._table
+    total = len(context.heroes())
+    shown = [table.item(r, 1).text() for r in range(table.rowCount())]
+    assert "Blood Blade Karin" not in shown and len(shown) == total - 1  # its three skills are read: hidden
+    assert f"1 of {total} heroes complete" in page._summary.text() and "3 skills read" in page._summary.text()
+    page._hide.setChecked(False)
+    assert table.rowCount() == total
+    marks = {table.item(r, 1).text(): table.item(r, 3).text() for r in range(total)}
+    assert marks["Blood Blade Karin"] == "S S S" and marks[shown[0]] == "- - -"
+    event = ReadEvent("c2011", "Blood Blade Karin", "Lethal Strike", 5, False, False, ())
+    context.skills.read.emit(event)
+    assert "Blood Blade Karin: Lethal Strike +5 (again)" in page._status.text()
+    page._export()
+    exported = (skills_dir(context.paths.home) / "skills_export.txt").read_text(encoding="utf-8")
+    assert "== Blood Blade Karin (c2011)" in exported and "Lethal Strike" in exported
+    window.close()
+
+
+def test_the_arena_watch_and_the_skill_reader_never_run_together(context: AppContext) -> None:
+    context.skills._state = "running"  # as `start` leaves it
+    assert not context.watch.start(offline=True, collect_only=False, overlay=False)
+    context.skills._state = "stopped"
+    context.watch._state = "running"
+    assert not context.skills.start(overlay=False)
+    context.watch._state = "stopped"

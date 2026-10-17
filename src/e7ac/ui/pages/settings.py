@@ -150,6 +150,13 @@ class SettingsPage(Page):
             spin,
             "Simulated when the three opponents are compared: more is steadier, slower.",
         )
+        self._choice(
+            grid,
+            4,
+            "opponent_profile",
+            "Opponent build",
+            "The game never shows an opponent's gear: Stove's typical, strong or top, or the Fribbels library average.",
+        )
         if sys.platform != "win32":
             self._editors["badge_overlay"].setEnabled(False)
         return frame

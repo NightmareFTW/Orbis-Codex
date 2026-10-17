@@ -2,6 +2,7 @@
 hero = "c6005"
 source = "in-game skill screens read by hand 2026-10-17: Divine Punishment +5, Scales of Equity +5, The Caress of Mercy +5 (max enhancement) with the Fear, Offering, Immortal and Abundance descriptions; heal amounts from Fribbels' skill options (community)"
 status = "verified"
+handles = ["Fear", "Offering", "Immortal", "Abundance"]
 replace = [1, 2, 3]
 cooldowns = { 3 = 4 }  # "4 turns" on the screen at +5 (epic7db lists 5: without the -1 turn of +3, NV-41)
 unmodelled = [

@@ -20,18 +20,30 @@ from typing import Final
 
 from e7ac.predict.effects import Scaling, kit_from
 from e7ac.predict.overrides import KitOverride, apply_override
+from e7ac.skills.merge import merge
+from e7ac.skills.store import StoredSkill
 from e7ac.sources.epic7db import HeroLibrary, SkillInfo
 
 _HANDLED: Final = re.compile(
-    r"\b(?:fear|stun|sleep|dispel\w*|cleans\w*|combat readiness|extra turn|immunity|immortal\w*|invincib\w*|heal\w*|"
-    r"recover\w*|barrier|burn\w*|bleed\w*|poison\w*|provok\w*|silenc\w*|counter\w*|defense|attack|speed|"
-    r"revive\w*|resurrect\w*|reviv\w*|decreas\w*|increas\w*)\b",
+    r"\b(?:fear\w*|stun\w*|sleep\w*|asleep|dispel\w*|cleans\w*|combat readiness|extra turn|immunity|immortal\w*|"
+    r"invincib\w*|heal\w*|recover\w*|barrier|burn\w*|bleed\w*|poison\w*|provok\w*|silenc\w*|counter\w*|"
+    r"defense|attack\w*|speed|reviv\w*|resurrect\w*|decreas\w*|increas\w*|dual attack|extra attack)\b",
+    re.IGNORECASE,
+)
+_VERBS: Final = re.compile(
+    r"^(?:activates?|activating|gains?|consum(?:es|ing)|acquir(?:es|ing)|removes?|inflicts?|grants?|resets?|"
+    r"resetting|absorb(?:s|ing)?|enrages?|detonat(?:es|ing)|unleash(?:es)?|triggers?|all|the|its|a|an)\s+",
     re.IGNORECASE,
 )
 _GENERIC: Final = re.compile(
-    r"^(?:target'?s? max health|caster'?s? max health|max health|defense|attack|speed|damage|all enemies|all allies|"
-    r"penetrates|penetrate|health|critical hit|crit\w*|dual attack|extra attack|soulburn|effect resistance|"
-    r"effectiveness|hit chance|evasion|the caster|target)$",
+    r"^(?:target'?s? max health|caster'?s? max health|max health|damage|enemies|enemy|allies|ally|"
+    r"penetrat\w*|health|critical hit\w*|crit\w*|soulburn|souls?|effect resistance|effectiveness|hit chance|"
+    r"evasion|the caster|the target|target|caster'?s? level|level|additional damage|additional fixed damage|"
+    r"fixed damage|number of \w+|proportional to .*|damage limit|up to|targeted|attacks all enemies|all enemies.*|"
+    r"two enemies|one enemy|three enemies|random \w+|extend any buffs|resource reduction|"
+    r"ignores effect resistance|always results in a critical hit|cannot trigger a critical hit.*|"
+    r"damage sharing effects are ignored|unaffected by elemental disadvantage|immune to .*|"
+    r"debuffs? which prevents? movement|movement)$",
     re.IGNORECASE,
 )
 
@@ -59,6 +71,8 @@ class SkillAudit:
     steps: tuple[str, ...]
     """The kinds of enhancement step (effect chance, cooldown, Combat Readiness, ...)."""
     soulburn: bool
+    captured: bool = False
+    """The skill was read from the game's own popup."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,7 +104,9 @@ def audit_hero(
     amounts: Mapping[int, Mapping[str, Scaling]] | None = None,
     hand: KitOverride | None = None,
     library: HeroLibrary | None = None,
+    captured: Sequence[StoredSkill] = (),
 ) -> HeroAudit:
+    skills = merge(skills, captured) if captured else skills
     kit = kit_from(dict(skills), amounts)
     cooldowns = {s: k.cooldown for s, k in skills.items() if k.cooldown is not None}
     if hand is not None:
@@ -117,19 +133,33 @@ def audit_hero(
                 unread=slot in kit.unread,
                 unmodelled=tuple(dict.fromkeys(n for n in kit.unmodelled if n)),
                 keywords=info.keywords,
-                unknown=tuple(k for k in info.keywords if is_named_mechanic(k)),
+                unknown=tuple(dict.fromkeys(m for k in info.keywords if (m := canonical_mechanic(k)) is not None)),
                 steps=tuple(dict.fromkeys(step_kind(desc) for _, desc in info.enhance)),
                 soulburn=bool(info.soulburn),
+                captured=info.captured,
             )
         )
     return HeroAudit(code, name, bool(skills), hand is not None, tuple(rows), library is not None)
 
 
+def canonical_mechanic(keyword: str) -> str | None:
+    """The name of the mechanic a highlighted term stands for, or None when it is a generic effect the readers know
+    or a plain stat / target phrase: "gains 10 fighting spirit" and "consumes all fighting spirit" are both "fighting
+    spirit"; "acquire 10 soul", "attacks all enemies" and "fear" are none."""
+    word = re.sub(r"\s+", " ", re.sub(r"\d+%?", " ", keyword.strip().lower())).strip(" ,.;:()")
+    previous = None
+    while previous != word:
+        previous, word = word, _VERBS.sub("", word).strip()
+    if not word or _GENERIC.match(word) or _HANDLED.search(word):
+        return None
+    if word.endswith("ies") and len(word) > 5:
+        return word[:-3] + "y"  # injuries -> injury
+    return word[:-1] if word.endswith("s") and not word.endswith(("ss", "us")) and len(word) > 4 else word
+
+
 def is_named_mechanic(keyword: str) -> bool:
-    """A highlighted term that is neither a generic effect the readers know nor a plain stat / target phrase: the name
-    of a mechanic ("offering", "venom", "focus", "erosion", ...)."""
-    word = keyword.strip().lower()
-    return bool(word) and not _GENERIC.match(word) and not _HANDLED.search(word)
+    """A highlighted term that names a mechanic ("offering", "venom", "focus", "erosion", ...)."""
+    return canonical_mechanic(keyword) is not None
 
 
 def step_kind(description: str) -> str:

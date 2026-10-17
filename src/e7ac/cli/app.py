@@ -15,6 +15,7 @@ from e7ac.cli.kit import kit_app
 from e7ac.cli.opponent import opponent_app
 from e7ac.cli.predict import predict_app
 from e7ac.cli.roster import roster_app
+from e7ac.cli.skills import skills_app
 from e7ac.doctor import CheckStatus, run_checks
 from e7ac.paths import default_paths
 from e7ac.settings import (
@@ -41,6 +42,7 @@ app.add_typer(opponent_app, name="opponent")
 app.add_typer(predict_app, name="predict")
 app.add_typer(arena_app, name="arena")
 app.add_typer(kit_app, name="kit")
+app.add_typer(skills_app, name="skills")
 app.command("capture")(capture_command)
 
 

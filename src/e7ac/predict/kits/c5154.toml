@@ -2,6 +2,7 @@
 hero = "c5154"
 source = "in-game skill screens read by hand 2026-10-17: Rose Breeze +5, Elixir de Belle Nuit +5, Aura de la Mort +5 (max enhancement) with the Lingering Fragrance, Barrier, Increase Effectiveness, Redirected Provoke, Venom and Detonate descriptions; heal and barrier amounts from Fribbels' skill options (community)"
 status = "verified"
+handles = ["Decrease Defense", "Lingering Fragrance", "Barrier", "Increase Effectiveness", "Redirected Provoke", "Venom", "Detonate"]
 replace = [1, 2, 3]
 cooldowns = { 3 = 3 }  # "3 turns" on the screen at +5
 unmodelled = [

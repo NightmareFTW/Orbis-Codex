@@ -54,6 +54,8 @@ UI_LABELS: Final = frozenset(
 )
 """Text of the Hero Info screen around the popup (its tabs and buttons), never part of it."""
 TEXT_STEP: Final = re.compile(r"^[+-]\s*\d+(?:\.\d+)?\s*(?:%|turns?)", re.IGNORECASE)
+CONTINUES: Final = frozenset({"prevent", "prevents", "of", "the", "to", "which", "and", "for", "with", "by", "in"})
+"""A panel title ending in one of these goes on in the next line."""
 FLAGS: Final = re.compile(r"\(([^)]*)\)\s*$")
 MIN_LINES: Final = 6
 """Fewer lines than this is not a skill popup."""
@@ -298,6 +300,8 @@ def _panel(lines: Sequence[tuple[TextLine, str]]) -> EffectPanel:
     title, rest = lines[0][1], list(lines[1:])
     if len(rest) > 1 and re.match(r"^\([^)]*\)$", rest[0][1]):  # "(Undispellable)" wrapped onto its own line
         title, rest = f"{title} {rest[0][1]}", rest[1:]
+    if len(rest) > 1 and title.split()[-1].lower() in CONTINUES:  # "Debuffs Which Prevent" / "Movement"
+        title, rest = f"{title} {rest[0][1]}", rest[1:]
     flags = FLAGS.search(title)
     marks = tuple(m.strip() for m in flags.group(1).split(",")) if flags else ()
     return EffectPanel(FLAGS.sub("", title).strip() if flags else title, marks, _join(rest))
@@ -310,4 +314,4 @@ def _hero(rows: Sequence[tuple[TextLine, str]], title: TextLine, left: float) ->
         r for r in rows if r[0].box.height >= 60 and r[0].box.x0 <= 0.12 * wide and not r[1].lower().startswith("lv")
     ]
     top = min(tall, key=lambda r: r[0].box.y0, default=None)
-    return re.sub(r"[^\w' .&-]+", "", top[1]).strip() if top else None
+    return re.sub(r"[^A-Za-z0-9' .&:-]+", "", top[1]).strip() if top else None

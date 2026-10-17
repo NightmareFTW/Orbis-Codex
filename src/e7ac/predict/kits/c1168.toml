@@ -2,6 +2,7 @@
 hero = "c1168"
 source = "in-game skill screens read by hand 2026-10-17: Vital Point Slash +5, Pickpocketing +5, Clumsy Finish +5 (max enhancement) with the Penetrate, Pilfer, Spoils, Increase Attack, Extra Turn and Stun descriptions; the speed factors of S1 and S3 and the 7,000 from e7calc and Fribbels' skill data (community)"
 status = "verified"
+handles = ["Penetrate", "Pilfer", "Spoils", "Increase Attack", "Extra Turn", "Stun"]
 replace = [2, 3]
 cooldowns = { 2 = 3, 3 = 4 }  # "3 turns" and "4 turns" on the screens at +5 (S3: -1 turn from +3)
 unmodelled = [

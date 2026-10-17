@@ -14,6 +14,8 @@ from e7ac.catalog.store import current_snapshot, load_entity
 from e7ac.predict.damage import support_amounts
 from e7ac.predict.effects import Kit, Scaling, kit_from
 from e7ac.predict.overrides import KitOverride, apply_override
+from e7ac.skills.merge import merge
+from e7ac.skills.store import StoredSkill
 from e7ac.sources.epic7db import SkillInfo, fetch_kit
 from e7ac.sources.http import CachedHttp
 
@@ -49,9 +51,11 @@ def effective_kit(
     amounts: dict[int, dict[str, Scaling]],
     hand: KitOverride | None,
     fetch: Fetch = fetch_kit,
+    captured: Sequence[StoredSkill] = (),
 ) -> tuple[Kit, dict[int, int]]:
-    """The kit as the simulation sees it: read automatically (epic7db icons and text), corrected by the hand file."""
-    skills = fetch(http, name)
+    """The kit as the simulation sees it: read automatically (epic7db icons and text, the skills read from the game's
+    own popup in their place, SPEC D91), corrected by the hand file."""
+    skills = merge(fetch(http, name), captured) if captured else fetch(http, name)
     kit = kit_from(skills, amounts)
     # the cooldown of a fully enhanced skill (the steps that shorten it applied; skills assumed complete, NV-32)
     cooldowns = {s: k.max_cooldown for s, k in skills.items() if k.max_cooldown is not None}
@@ -68,12 +72,15 @@ def worklist(
     overrides: Mapping[str, KitOverride],
     http: CachedHttp,
     fetch: Fetch = fetch_kit,
+    captured: Mapping[str, Sequence[StoredSkill]] | None = None,
 ) -> list[WorkRow]:
     """One row per (hero code, times seen), in the order given."""
     rows = []
     for code, seen in counts:
         name = heroes[code].name if code in heroes and heroes[code].name else code
-        kit, _ = effective_kit(http, name, amounts.get(code, {}), overrides.get(code), fetch)
+        kit, _ = effective_kit(
+            http, name, amounts.get(code, {}), overrides.get(code), fetch, (captured or {}).get(code, ())
+        )
         unread = tuple(
             f"S{slot}: effects in its text, none read"
             for slot in kit.unread

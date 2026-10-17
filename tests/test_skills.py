@@ -1,0 +1,267 @@
+"""The skills read from the game (SPEC D91): the store, the merge into epic7db's kit, the worklist, the export and the
+commands (synthetic popups; the OCR itself is tested in test_skill_popup)."""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from pathlib import Path
+
+import numpy as np
+import pytest
+from typer.testing import CliRunner
+
+from e7ac.cli import roster as roster_cli
+from e7ac.cli.app import app
+from e7ac.paths import AppPaths
+from e7ac.predict.effects import Effect, kit_from
+from e7ac.skills.export import export_text
+from e7ac.skills.merge import merge, remaining, skill_info, slot_of, to_maximum, unplaced
+from e7ac.skills.store import SkillStore, StoredSkill
+from e7ac.skills.worklist import progress, worklist
+from e7ac.sources.epic7db import SkillInfo, parse_tier_order
+from e7ac.vision.ocr import TextLine
+from e7ac.vision.skill_popup import EffectPanel, SkillPopup
+from tests.test_hero_screen import FakeReader
+from tests.test_skill_popup import synthetic
+
+NOW = datetime(2026, 10, 18, 12, 0, tzinfo=UTC)
+
+
+def popup(
+    name: str = "Road Sign Smash",
+    level: int | None = 6,
+    text: str = "Attacks the enemy and has a 60% chance to inflict decreased Defense for 1 turn.",
+    cooldown: int | None = None,
+    enhance: tuple[tuple[int, str], ...] = (
+        (1, "+5% damage dealt"),
+        (2, "+5% effect chance"),
+        (5, "+10% effect chance"),
+    ),
+    effects: tuple[EffectPanel, ...] = (EffectPanel("Decrease Defense", (), "Decreases Defense by 70%."),),
+) -> SkillPopup:
+    return SkillPopup("Boss Arunka", name, level, (("Soul", 1),), cooldown, "", text, "", None, enhance, effects, 0.97)
+
+
+def test_a_popup_is_stored_replaced_and_its_effects_learned(tmp_path: Path) -> None:
+    store = SkillStore(tmp_path / "skills")
+    first = store.save("c2124", popup(), NOW)
+    assert first.new and not first.changed and first.new_effects == ("Decrease Defense",)
+    again = store.save("c2124", popup(), NOW)
+    assert not again.new and not again.changed and again.new_effects == ()
+    higher = store.save("c2124", popup(level=3, text="Attacks the enemy and has a 70% chance."), NOW)
+    assert not higher.new and higher.changed  # another level or another text: the game says something else now
+    assert [s.name for s in store.load("c2124")] == ["Road Sign Smash"]
+    store.save("c2124", popup(name="Coruscated Trajectory", cooldown=3), NOW)
+    assert [s.name for s in store.load("c2124")] == ["Road Sign Smash", "Coruscated Trajectory"]
+    assert store.heroes() == ["c2124"]
+    reworded = EffectPanel("Decrease Defense", (), "Decreases Defense by 60%.")
+    assert store.save("c2124", popup(effects=(reworded,)), NOW).new_effects == ("Decrease Defense",)  # an update
+    assert store.effects()["decrease defense"]["text"] == "Decreases Defense by 60%."
+    assert store.effects()["decrease defense"]["heroes"] == ["c2124"]
+
+
+def test_a_damaged_file_counts_as_nothing_read(tmp_path: Path) -> None:
+    store = SkillStore(tmp_path)
+    (tmp_path / "c2124.json").write_text("{not json", encoding="utf-8")
+    (tmp_path / "effects.json").write_text("[1, 2", encoding="utf-8")
+    assert store.load("c2124") == [] and store.effects() == {}
+    assert store.save("c2124", popup(), NOW).new  # and it is written again from scratch
+
+
+def test_the_slot_of_a_popup_is_found_by_its_name_among_epic7db_skills() -> None:
+    skills = {
+        1: SkillInfo(1, 0, {}, "x", name="Road Sign Smash"),
+        3: SkillInfo(3, 3, {}, "y", name="Coruscated Trajectory"),
+    }
+    assert slot_of("road sign smash", skills) == 1 and slot_of("Coruscated  Trajectory", skills) == 3
+    assert slot_of("Unknown", skills) is None
+
+
+def test_steps_still_to_come_move_the_numbers_of_the_text_forward() -> None:
+    steps = ["+5% effect chance", "+3% Combat Readiness", "+15% damage dealt", "-1 turn cooldown", "+5% healing"]
+    text, left = to_maximum("Has a 60% chance to inflict fear and increases Combat Readiness by 20%.", steps)
+    assert text == "Has a 65% chance to inflict fear and increases Combat Readiness by 23%."
+    assert left == ["+5% healing"]  # a number of the text it cannot be applied to
+    ambiguous, left = to_maximum("A 50% chance, then a 30% chance.", ["+10% effect chance"])
+    assert ambiguous == "A 50% chance, then a 30% chance." and left == [
+        "+10% effect chance"
+    ]  # two numbers: not guessed
+
+
+def stored_of(p: SkillPopup) -> StoredSkill:
+    return StoredSkill(
+        "c2124",
+        p.name,
+        p.level,
+        p.gains,
+        p.cooldown,
+        p.cooldown_note,
+        p.text,
+        p.soulburn,
+        p.soulburn_cost,
+        p.enhance,
+        p.effects,
+        p.confidence,
+        NOW.isoformat(),
+    )
+
+
+def test_a_capture_becomes_the_skill_epic7db_could_not_describe() -> None:
+    steps = ((1, "+5% damage dealt"), (3, "-1 turn cooldown"), (5, "+5% effect chance"))
+    at_three = popup(name="Aura", level=3, cooldown=3, text="A 90% chance to inflict venom.", enhance=steps)
+    assert remaining(stored_of(at_three)) == ["+5% effect chance"]
+    info = skill_info(stored_of(at_three), 3)
+    assert info.captured and info.level == 3
+    assert info.cooldown == 4 and info.cooldown_max == 3 and info.max_cooldown == 3  # the -1 at +3 was applied already
+    assert info.text == "A 95% chance to inflict venom."  # the +5% effect chance of +5 still to come
+    early = skill_info(stored_of(popup(name="Aura", level=1, cooldown=4, enhance=steps, text="A 90% chance.")), 3)
+    assert early.cooldown == 4 and early.max_cooldown == 3 and early.text == "A 95% chance."
+    blind = skill_info(stored_of(popup(name="Aura", level=None, cooldown=4, enhance=steps, text="A 90% chance.")), 3)
+    assert blind.max_cooldown == 4 and blind.text == "A 90% chance."  # no badge read: nothing is moved forward
+
+
+def test_the_merged_skill_gives_the_kit_reader_the_effects_it_could_not_see() -> None:
+    page = {1: SkillInfo(1, 0, {}, "Attacks the enemy.", name="Road Sign Smash")}  # a newer hero: no icons
+    assert kit_from(page).unread == [] or kit_from(page).unread == [1]
+    captured = [
+        stored_of(popup(text="Attacks the enemy and has a 60% chance to inflict decreased Defense for 1 turn."))
+    ]
+    merged = merge(page, captured)
+    assert merged[1].captured and merged[1].effects == {"Decrease Defense": 0.7}
+    kit = kit_from(merged)
+    assert kit.on_use[1] == [Effect("def", True, -0.7, 1, 0.6)]  # at +6 every step with an effect chance is behind it
+    assert not kit.unread
+    assert unplaced(page, [stored_of(popup(name="Someone Else's Skill"))])[0].name == "Someone Else's Skill"
+
+
+def test_the_worklist_puts_what_is_met_first_then_the_tier_list_then_the_rest(tmp_path: Path) -> None:
+    store = SkillStore(tmp_path)
+    store.save("c2", popup(name="One"), NOW)
+    store.save("c2", popup(name="Two"), NOW)
+    for name in ("A", "B", "C"):
+        store.save("c1", popup(name=name), NOW)
+    heroes = {"c1": "Alpha", "c2": "Beta", "c3": "Gamma", "c4": "Delta"}
+    rows = worklist(heroes, [("c3", 5)], ["c4", "c3", "c2"], store)
+    assert [r.code for r in rows] == ["c3", "c4", "c2", "c1"]
+    assert [r.why for r in rows] == ["met 5x in your Arena", "RTA tier list #1", "RTA tier list #3", ""]
+    assert [(r.read, r.marks, r.complete) for r in rows] == [(0, "- - -", False)] * 2 + [
+        (2, "S S -", False),
+        (3, "S S S", True),
+    ]
+    assert progress(rows) == (1, 2, 5, 4)
+
+
+def test_the_export_is_the_games_own_words_per_hero_then_the_effects(tmp_path: Path) -> None:
+    store = SkillStore(tmp_path)
+    store.save("c2124", popup(name="Coruscated Trajectory", cooldown=3), NOW)
+    text = export_text(store, {"c2124": "Boss Arunka"}, now=NOW)
+    assert text.startswith("# Orbis Codex: skills read from the game, 2026-10-18 12:00 UTC: 1 heroes, 1 skills")
+    assert "== Boss Arunka (c2124)" in text and "[+6] Coruscated Trajectory | Soul 1, 3 turns" in text
+    assert "  Enhance: +1 +5% damage dealt; +2 +5% effect chance; +5 +10% effect chance" in text
+    assert "  Effect Decrease Defense: Decreases Defense by 70%." in text
+    assert text.rstrip().endswith("Decrease Defense: Decreases Defense by 70%.") and "== Effects (1)" in text
+
+
+def test_the_rta_tier_list_gives_the_heroes_best_first() -> None:
+    page = (
+        '<a href="https://epic7db.com/heroes/boss-arunka"><img></a><a href="https://epic7db.com/heroes/boss-arunka">x</a>'
+        '<a href="https://epic7db.com/heroes/rinak">r</a><h2>All Epic Seven Heroes</h2>'
+        '<a href="https://epic7db.com/heroes/abigail">a</a><a href="https://epic7db.com/heroes/rinak">r</a>'
+    )
+    assert parse_tier_order(page) == ["boss-arunka", "rinak"]
+
+
+# --- the commands ---------------------------------------------------------------------------------------------------
+
+runner = CliRunner()
+
+
+def named(hero: str) -> list[TextLine]:
+    """The synthetic popup of test_skill_popup with another hero's name at the top left."""
+    return [TextLine(hero, ln.score, ln.box, ln.words) if ln.text == "Lady of the Scales" else ln for ln in synthetic()]
+
+
+@pytest.fixture
+def reading(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    import cv2
+
+    monkeypatch.setattr(roster_cli, "reader_factory", lambda: FakeReader(named("Blood Blade Karin")))
+    image = tmp_path / "popup.png"
+    cv2.imwrite(str(image), np.full((60, 100, 3), 30, np.uint8))
+    return image
+
+
+def test_skills_read_stores_a_popup_and_show_and_export_say_what_was_read(
+    reading: Path, synthetic_catalog: list[str], isolated_home: AppPaths
+) -> None:
+    result = runner.invoke(app, ["skills", "read", str(reading)])
+    assert result.exit_code == 0, result.output
+    assert (
+        "Blood Blade Karin: The Caress of Mercy +5 (new); effects learned: Offering, Lingering Fragrance"
+        in result.output
+    )
+    assert "1 skill(s) stored of 1 capture(s)." in result.output
+    again = runner.invoke(app, ["skills", "read", str(reading)])
+    assert "(again)" in again.output
+    shown = runner.invoke(app, ["skills", "show", "Blood Blade Karin"])
+    assert shown.exit_code == 0 and "The Caress of Mercy" in shown.output and "Effect Offering:" in shown.output
+    out = isolated_home.home / "skills_export.txt"
+    exported = runner.invoke(app, ["skills", "export", "--out", str(out)])
+    assert exported.exit_code == 0 and "== Blood Blade Karin (c2011)" in out.read_text(encoding="utf-8")
+    todo = runner.invoke(app, ["skills", "todo", "--offline"])
+    assert todo.exit_code == 0 and "0 of" in todo.output and "S - -" in todo.output
+
+
+def test_a_hero_that_is_not_in_the_catalog_is_not_stored_and_says_why(
+    monkeypatch: pytest.MonkeyPatch, reading: Path, synthetic_catalog: list[str], isolated_home: AppPaths
+) -> None:
+    monkeypatch.setattr(roster_cli, "reader_factory", lambda: FakeReader(named("Nobody Atall")))
+    result = runner.invoke(app, ["skills", "read", str(reading)])
+    assert "not stored: The Caress of Mercy +5: no catalog hero is called 'Nobody Atall'" in result.output
+    assert SkillStore(isolated_home.home / "skills").heroes() == []
+    given = runner.invoke(app, ["skills", "read", str(reading), "--hero", "Blood Blade Karin"])
+    assert "Blood Blade Karin: The Caress of Mercy" in given.output
+
+
+class Badge:
+    """A badge that records what it is told."""
+
+    def __init__(self) -> None:
+        self.said: list[tuple[str, str]] = []
+
+    def place(self, area: object) -> None: ...
+    def settling(self) -> None: ...
+    def captured(self, waiting: int) -> None: ...
+    def result(self, name: str, outcome: str, waiting: int) -> None: ...
+
+    def say(self, top: str, bottom: str, colour: str) -> None:
+        self.said.append((top, bottom))
+
+    def capturable(self, on: bool) -> bool:
+        return False
+
+    def resize(self, size: str) -> None: ...
+    def close(self) -> None: ...
+
+
+def test_the_watch_reads_a_popup_once_the_screen_has_settled(
+    monkeypatch: pytest.MonkeyPatch, synthetic_catalog: list[str], isolated_home: AppPaths
+) -> None:
+    import threading
+
+    from e7ac.cli import arena as arena_cli
+    from e7ac.cli import skills as skills_cli
+    from e7ac.vision.window import Rect
+
+    frames = [np.full((36, 64, 3), 40, np.uint8)] * 6 + [np.full((36, 64, 3), 200, np.uint8)] * 6
+    monkeypatch.setattr(arena_cli, "game_frames", lambda client, hwnd: iter([(f, Rect(0, 0, 64, 36)) for f in frames]))
+    ticks = iter(x * 0.5 for x in range(1000))
+    monkeypatch.setattr(skills_cli, "clock", lambda: next(ticks))
+    monkeypatch.setattr(roster_cli, "reader_factory", lambda: FakeReader(named("Blood Blade Karin")))
+    events: list[skills_cli.ReadEvent] = []
+    badge = Badge()
+    skills_cli.run_skill_watch(skills_cli.SkillWatchOptions(on_read=events.append), badge, threading.Event())
+    assert [e.skill for e in events] == ["The Caress of Mercy", "The Caress of Mercy"]  # one per settled screen
+    assert [e.new for e in events] == [True, False]  # the same skill held again: read, not new
+    assert ("Read: Blood Blade Karin", "The Caress of Mercy +5") in badge.said
+    assert SkillStore(isolated_home.home / "skills").heroes() == ["c2011"]

@@ -2,6 +2,7 @@
 hero = "c2124"
 source = "in-game skill screens read by hand 2026-10-17: Road Sign Smash +6, Vanguard of the Silent Expanse +3, Coruscated Trajectory +6 (max enhancement) with the Decrease Defense, Increase Defense, Barrier and Ferocious Stand descriptions; the barrier amount from Fribbels' skill options (community)"
 status = "verified"
+handles = ["Decrease Defense", "Increase Defense", "Barrier", "Ferocious Stand"]
 replace = [1, 3]
 cooldowns = { 3 = 3 }  # "3 turns" on the screen at +6
 unmodelled = [

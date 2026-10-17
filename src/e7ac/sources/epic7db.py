@@ -62,11 +62,20 @@ class SkillInfo:
     """The terms the page highlights in the text (bold): the named effects and mechanics the skill mentions."""
     effect_titles: dict[str, str] = field(default_factory=dict)
     """Icon name -> the full description shown for it (when epic7db has the icon)."""
+    captured: bool = False
+    """Read from the game's own skill popup (`skills.merge`), not from epic7db: the numbers are the game's, at the
+    enhancement level of the hero captured (`level`)."""
+    level: int | None = None
+    cooldown_max: int | None = None
+    """The cooldown fully enhanced, when it is known directly (a capture at some level, the steps still to come taken
+    off); `max_cooldown` is then this."""
 
     @property
     def max_cooldown(self) -> int | None:
         """The cooldown with every enhancement step that shortens it ("-1 turn cooldown") applied: what a fully enhanced
         skill has, e.g. the 5 turns shown for Lady of the Scales S3 are 4 in the game at +5 (NV-41)."""
+        if self.cooldown_max is not None:
+            return self.cooldown_max
         if self.cooldown is None:
             return None
         cut = sum(int(n) for _, desc in self.enhance for n in _COOLDOWN_STEP.findall(desc))
@@ -243,3 +252,32 @@ def fetch_library(http: CachedHttp, hero_name: str) -> HeroLibrary | None:
     if hero_name.lower() not in page.text.lower():
         return None
     return parse_library(page.text)
+
+
+# --- the RTA tier list: a proxy for which heroes matter in PvP (SPEC D91) ---------------------------------------------
+
+RTA_URL: Final = "https://epic7db.com/tierlists/epic-seven-rta-tier-list"
+_TIER_HERO: Final = re.compile(r'href="https://epic7db\.com/heroes/([a-z0-9-]+)"', re.IGNORECASE)
+_ALL_HEROES: Final = "All Epic Seven Heroes"
+
+
+def parse_tier_order(html: str) -> list[str]:
+    """Hero slugs in the order the tier list gives them, best tier first (the alphabetical index of every hero at the
+    end of the page is left out)."""
+    cut = html.find(_ALL_HEROES)
+    found = _TIER_HERO.findall(html[:cut] if cut > 0 else html)
+    return list(dict.fromkeys(found))
+
+
+def fetch_tier_order(http: CachedHttp) -> list[str]:
+    """The RTA tier list's hero slugs, best first; empty when the page cannot be read (the order is only a hint)."""
+    try:
+        page = http.get_text("epic7db/tierlists", RTA_URL, max_age=timedelta(days=7), validate=_validate_tiers)
+    except FetchError:
+        return []
+    return parse_tier_order(page.text)
+
+
+def _validate_tiers(text: str) -> None:
+    if "/heroes/" not in text:
+        raise ValueError("no heroes in the tier list page")

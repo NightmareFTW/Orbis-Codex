@@ -96,6 +96,7 @@ class MainWindow(QMainWindow):
         self._watching = QLabel()
         self.statusBar().addPermanentWidget(self._watching)
         context.watch.state.connect(self._watch_state)
+        context.skills.state.connect(lambda _state: self._watch_state(self.context.watch.current))
         self._watch_state(STOPPED)
         if self._specs:
             self.show_page(self._specs[0].key)
@@ -162,10 +163,14 @@ class MainWindow(QMainWindow):
     def _watch_state(self, state: str) -> None:
         mode = {ARENA: "Arena watch", COLLECT: "Collecting Arena opponents"}.get(self.context.watch.mode, "Watch")
         text = {STOPPED: "Not watching the game", RUNNING: f"{mode}: running", STOPPING: f"{mode}: stopping..."}[state]
+        if state == STOPPED and self.context.skills.running:
+            text = "Skill reader: running"
         self._watching.setText(text)
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 (Qt's name)
         """Closing the window stops the watch first (its thread ends within a second)."""
         self.context.watch.stop()
+        self.context.skills.stop()
         self.context.watch.wait(5.0)
+        self.context.skills.wait(5.0)
         super().closeEvent(event)

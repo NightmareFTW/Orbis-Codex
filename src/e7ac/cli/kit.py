@@ -9,8 +9,7 @@ from typing import Annotated
 import typer
 from sqlalchemy.orm import Session
 
-from e7ac.arena.references import ReferenceStore
-from e7ac.arena.sightings import SightingStore, popularity, sightings_path
+from e7ac.arena.met import met_heroes
 from e7ac.cli import catalog as catalog_cli
 from e7ac.cli.roster import _catalog_heroes, _engine, _fail, _resolve_hero_code
 from e7ac.paths import default_paths
@@ -18,6 +17,7 @@ from e7ac.predict.audit import audit_hero, screens_needed, summarize, to_json, v
 from e7ac.predict.effects import Effect, Kit, Scaling
 from e7ac.predict.overrides import KitError, KitOverride, load_overrides
 from e7ac.predict.worklist import effective_kit, kit_amounts, worklist
+from e7ac.skills.store import SkillStore, StoredSkill, skills_dir
 from e7ac.sources.epic7db import fetch_kit, fetch_library
 from e7ac.sources.http import CachedHttp
 from e7ac.storage.db import session_scope
@@ -41,7 +41,9 @@ def show(
         amounts = _amounts(session, code)
     name = heroes[code].name if code in heroes and heroes[code].name else code
     with catalog_cli.http_factory(paths, offline) as http:
-        kit, cooldowns = _effective(http, name, amounts, overrides.get(code))
+        kit, cooldowns = _effective(
+            http, name, amounts, overrides.get(code), SkillStore(skills_dir(paths.home)).load(code)
+        )
     typer.echo(f"{name} ({code})")
     hand = overrides.get(code)
     typer.echo(f"  hand file: {hand.path} ({hand.status}; {hand.source})" if hand else "  hand file: none (automatic)")
@@ -85,7 +87,9 @@ def todo(
         heroes = _catalog_heroes(session) or {}
         amounts = {code: _amounts(session, code) for code, _ in seen[:limit]}
     with catalog_cli.http_factory(paths, offline) as http:
-        rows = worklist(seen[:limit], heroes, amounts, overrides, http, lambda h, name: fetch_kit(h, name))
+        store = SkillStore(skills_dir(paths.home))
+        captured = {code: store.load(code) for code, _ in seen[:limit]}
+        rows = worklist(seen[:limit], heroes, amounts, overrides, http, lambda h, name: fetch_kit(h, name), captured)
     for row in rows:
         mark = "refined" if row.refined else "auto"
         missing = ", ".join(row.unmodelled) or "-"
@@ -111,11 +115,12 @@ def audit(
             names = names[:limit]
         amounts = {code: _amounts(session, code) for _, code in names}
     audits = []
+    store = SkillStore(skills_dir(paths.home))
     with catalog_cli.http_factory(paths, offline) as http:
         for index, (name, code) in enumerate(names, 1):
             skills = fetch_kit(http, name)
             library = fetch_library(http, name) if skills else None
-            audits.append(audit_hero(code, name, skills, amounts[code], overrides.get(code), library))
+            audits.append(audit_hero(code, name, skills, amounts[code], overrides.get(code), library, store.load(code)))
             if index % 25 == 0 or index == len(names):
                 typer.echo(f"  {index}/{len(names)} heroes read", err=True)
     total = summarize(audits)
@@ -146,9 +151,13 @@ def audit(
 
 
 def _effective(
-    http: CachedHttp, name: str, amounts: dict[int, dict[str, Scaling]], hand: KitOverride | None
+    http: CachedHttp,
+    name: str,
+    amounts: dict[int, dict[str, Scaling]],
+    hand: KitOverride | None,
+    captured: list[StoredSkill] | None = None,
 ) -> tuple[Kit, dict[int, int]]:
-    return effective_kit(http, name, amounts, hand, lambda h, n: fetch_kit(h, n))
+    return effective_kit(http, name, amounts, hand, lambda h, n: fetch_kit(h, n), captured or ())
 
 
 def _amounts(session: Session, code: str) -> dict[int, dict[str, Scaling]]:
@@ -156,20 +165,7 @@ def _amounts(session: Session, code: str) -> dict[int, dict[str, Scaling]]:
 
 
 def _met(home: Path) -> list[tuple[str, int]]:
-    """Hero code -> defence teams it was seen in (the sightings of the watch); before any, the pictures learned of it
-    (VS models and Attack Guide faces) plus one when in your last team."""
-    sightings, _ = SightingStore(sightings_path(home)).read()
-    if sightings:
-        return [(h.code, h.teams) for h in popularity(sightings).heroes]
-    root = home / "references"
-    counts: dict[str, int] = {}
-    for kind in ("arena", "faces"):
-        store = ReferenceStore(root / kind)
-        for code in store.codes():
-            counts[code] = counts.get(code, 0) + len(list((root / kind / code).glob("*.png")))
-    for code in ReferenceStore(root / "arena").last_team():
-        counts[code] = counts.get(code, 0) + 1
-    return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    return met_heroes(home)
 
 
 def _overrides() -> dict[str, KitOverride]:
