@@ -88,7 +88,8 @@ src/e7ac/
                  # (what pages share), `watch_controller` (the one Arena watch on a thread, as Qt signals), `tasks`
                  # (background commands, output captured), `theme` (the game's colours as tokens + stylesheet), `art` (round
                  # hero portraits from the cached face icons, never fetched or committed), `widgets` (ornament, hero row,
-                 # featured hero, badge size); the sidebar has folders (`PageSpec.group`); the small badge over the game is
+                 # featured hero, badge size), `questions` (the "who is this?" card: one click on a suggested hero, the name
+                 # last); the sidebar has folders (`PageSpec.group`); the small badge over the game is
                  # still tkinter (`watch_signal`, sized from the screen's scale and `badge_size`) until the Qt overlay
   appdata.py     # database + catalog heroes, shared by the CLI and the window
   cli/           # Typer app: e7 catalog|roster|import|predict|sim|data …

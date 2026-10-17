@@ -15,12 +15,13 @@ import itertools
 import json
 from collections import Counter
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final
 
 from e7ac.domain.codes import is_hero_code
+from e7ac.fileio import write_text_atomic
 
 FILE_NAME: Final = "sightings.jsonl"
 """Under `<home>/arena/`."""
@@ -92,6 +93,31 @@ class SightingStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.path.open("a", encoding="utf-8", newline="\n") as handle:
             handle.writelines(lines)
+
+    def name_face(self, when: str, row: int, face: int, code: str) -> bool:
+        """The user named a face the watch could not (`codes[face]` was null): rewrite that line, atomically. False when
+        the line is not there, or that face already has a name (a name is never overwritten)."""
+        if not self.path.is_file() or not is_hero_code(code) or not 0 <= face < TEAM_SIZE:
+            return False
+        lines = self.path.read_text(encoding="utf-8", errors="replace").splitlines()
+        changed = False
+        for i, line in enumerate(lines):
+            try:
+                sighting = Sighting.from_json(line)
+            except (ValueError, KeyError, TypeError):
+                continue
+            if (
+                sighting.when.astimezone(UTC).isoformat() == when
+                and sighting.row == row
+                and sighting.codes[face] is None
+            ):
+                codes = list(sighting.codes)
+                codes[face] = code
+                lines[i] = replace(sighting, codes=tuple(codes)).to_json()
+                changed = True
+        if changed:
+            write_text_atomic(self.path, "\n".join(lines) + "\n")
+        return changed
 
     def read(self) -> tuple[list[Sighting], int]:
         """Every readable sighting, and how many lines could not be read."""

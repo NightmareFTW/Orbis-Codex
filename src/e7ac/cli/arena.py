@@ -20,7 +20,8 @@ import numpy.typing as npt
 import typer
 
 from e7ac.arena.identify import Slot, identify
-from e7ac.arena.list_read import ListHero, resolve_list
+from e7ac.arena.list_read import ListHero, resolve_list, shape_group
+from e7ac.arena.questions import FaceQuestion
 from e7ac.arena.references import ReferenceStore
 from e7ac.arena.sightings import Sighting, SightingStore, sightings_path
 from e7ac.catalog.resolve import ResolvedEntity
@@ -44,7 +45,7 @@ from e7ac.vision.arena_badges import (
     normalise,
     read_badges,
 )
-from e7ac.vision.arena_guide import Face, FaceMatcher, list_rows
+from e7ac.vision.arena_guide import Face, FaceMatcher, ListLayout, fit_rows, list_rows
 from e7ac.vision.arena_list import read_list_badges
 from e7ac.vision.image import ImageError, load_image
 from e7ac.vision.window import Rect
@@ -88,9 +89,17 @@ class WatchOptions:
     offline: bool = False
     collect_only: bool = False
     """Record the opponents, make no prediction (fast: refresh as often as you like)."""
-    ask: Callable[[int], None] | None = None
-    """Called with the face number (1-4) when an opponent hero needs a name; the answer goes to the `answers` queue.
-    None: the question is asked in the terminal (the keyboard is read in the background)."""
+    ask_face: Callable[[FaceQuestion], None] | None = None
+    """Called when an Attack Guide face needs a name; the answer (a name or code, empty to skip) goes to the `answers`
+    queue. None: the question is asked in the terminal (the keyboard is read in the background)."""
+    choose: Callable[[FaceQuestion], str | None] | None = None
+    """Called, and waited for, when a hero of the VS screen needs a name: returns its code, or None to skip it. None:
+    the question is asked in the terminal."""
+    unknown: Callable[[list[FaceQuestion]], None] | None = None
+    """Called with the faces of the Opponents list that no name fits, so they can be taught at leisure (the watch goes
+    on); the names come back through `taught`."""
+    taught: queue.Queue[tuple[FaceQuestion, str]] | None = None
+    """Faces named for `unknown`: (the question, the hero's code)."""
     recorded: Callable[[int], None] | None = None
     """Called with the number of teams just recorded on the sightings file."""
     teams: Callable[[list[str], list[str]], None] | None = None
@@ -120,7 +129,25 @@ def run_watch(
     last: list[tuple[str, str, str]] = [("", "", "")]  # the last prediction shown
     sightings = SightingStore(sightings_path(paths.home))
     match = _Match(team=list(reversed(store.last_team())))  # the foremost first (the VS screen lists left to right)
+    context = _Context(
+        templates,
+        faces,
+        faces.for_list(),
+        face_store,
+        heroes,
+        owned,
+        store,
+        badge,
+        options.offline,
+        paths,
+        answers,
+        last,
+        sightings,
+        options,
+    )
     badge.say("Arena: open a match", "the VS screen, before the battle", LIGHT)
+    if options.collect_only:
+        badge.say("Collecting opponents", "open the Opponents list in the game", LIGHT)
     typer.echo("Watching the game for the Arena VS screen and the Attack Guide (magnifier). Ctrl+C stops.")
     for item in game_frames(client, options.hwnd):
         if stop.is_set():
@@ -132,26 +159,11 @@ def run_watch(
         if share.is_set():
             share.clear()
             _share(match.frame, last[0], paths, badge, client, options.hwnd)
+        _learn_taught(context)
         if item is not None:
             frame, area = item
             match.frame = frame
             badge.place(area)
-            context = _Context(
-                templates,
-                faces,
-                faces.for_list(),
-                face_store,
-                heroes,
-                owned,
-                store,
-                badge,
-                options.offline,
-                paths,
-                answers,
-                last,
-                sightings,
-                options,
-            )
             _step(normalise(frame), match, context)
 
 
@@ -173,6 +185,15 @@ class _Match:
     """What the faces of the list looked like in the last frame (a refresh changes it, the layout stays)."""
     list_read: npt.NDArray[np.float32] | None = None
     """... and when the list was last read."""
+    list_layout: ListLayout | None = None
+    """Where the faces of the list are on this screen size (`fit_rows`)."""
+    list_rows: list[list[tuple[float, float, float]]] = field(default_factory=list)
+    list_calm: int = 0
+    """Frames in a row in which the list looked the same (read once it has been calm for `CALM_FRAMES`)."""
+    list_waited: int = 0
+    """Calm frames spent waiting for the rows still missing."""
+    list_recorded: list[npt.NDArray[np.float32]] = field(default_factory=list)
+    """The faces of each row already recorded: a row that looks the same is not recorded twice."""
     guide_armed: bool = True
     vs_theirs: list[str] = field(default_factory=list)
     """The opponent as the last VS screen named it (all four, or nothing)."""
@@ -276,6 +297,7 @@ def _again(match: _Match, badge: WatchSignal, collect_only: bool = False) -> Non
     match.vs_armed = match.guide_armed = match.list_armed = True
     match.previous, match.seen_faces = [], ()
     match.list_read = None
+    match.list_calm = match.list_waited = 0
     where = "the Opponents list" if collect_only else "Opponents list, VS screen, then the magnifier"
     badge.say("Checking again...", where, AMBER)
     typer.echo("Check again: reading the screen anew.")
@@ -285,21 +307,17 @@ def _step(image: BgrImage, match: _Match, c: _Context) -> None:
     if match.pending and not c.answers.empty():
         _answer(c.answers.get(), match, c)
     try:
-        rows = list_rows(image)
+        found = list_rows(image)
     except ArenaScreenError:
-        rows = []
-    if rows:  # the Opponents list: every opponent at once
-        layout = tuple((round(row[0][0]), round(row[0][1])) for row in rows)
-        signature = _list_signature(image, rows)
-        still = layout == match.list_seen and _same_faces(signature, match.list_signature)  # two frames alike
-        if still and (match.list_armed or not _same_faces(signature, match.list_read)):  # new, or a refresh (SPEC D81)
-            match.list_armed = False
-            match.list_read = signature
-            _opponents(image, match, c)
-        match.list_seen, match.list_signature = layout, signature
+        found = []
+    if found:  # the Opponents list: every opponent at once
+        _list_frame(image, found, match, c)
         return
-    match.list_armed, match.list_seen = True, ()
+    match.list_armed, match.list_layout, match.list_rows = True, match.list_layout, []
     match.list_signature = match.list_read = None
+    match.list_calm = match.list_waited = 0
+    if c.options.collect_only:  # only the list matters: no VS screen, no Attack Guide, no questions
+        return
     try:
         badges = read_badges(image, c.templates)
     except ArenaScreenError:
@@ -311,7 +329,17 @@ def _step(image: BgrImage, match: _Match, c: _Context) -> None:
         match.vs_armed = False
         kept = _keep_capture(c.paths.captures_dir / "arena", image)
         typer.echo(f"{datetime.now().astimezone():%H:%M:%S} Arena VS screen (capture kept: {kept})")
-        slots = _resolve(image, badges, c.heroes, c.owned, c.store, asking=True, always_ask=False, sides=("you",))
+        slots = _resolve(
+            image,
+            badges,
+            c.heroes,
+            c.owned,
+            c.store,
+            asking=True,
+            always_ask=False,
+            sides=("you",),
+            choose=c.options.choose,
+        )
         match.vs = (image, badges)
         team = [s.code for s in slots if s.badge.side == "you" and s.code]
         theirs = [s.code for s in slots if s.badge.side == "them" and s.code]
@@ -358,6 +386,46 @@ def _step(image: BgrImage, match: _Match, c: _Context) -> None:
         _ask_next(match, c)
         return
     _guide_done([n for n in names if n], match, c)
+
+
+CALM_FRAMES: Final = 2
+"""A list is read once it has looked the same for this many frames in a row (about a second)."""
+EXPECTED_ROWS: Final = 3
+"""Opponents shown by the Arena list (`assumed`, NV-46): fewer rows are waited for `PARTIAL_WAIT` calm frames."""
+PARTIAL_WAIT: Final = 6
+
+
+def _list_frame(image: BgrImage, found: list[list[tuple[float, float, float]]], match: _Match, c: _Context) -> None:
+    """One frame of the Opponents list (SPEC D81, D83): when it has looked the same for a moment and is new (or a
+    refresh, or "Check again"), every opponent is read once."""
+    rows, match.list_layout = fit_rows(found, match.list_layout, image)
+    signature = _list_signature(image, rows)
+    alike = _same_place(rows, match.list_rows) and _same_faces(signature, match.list_signature)
+    match.list_calm = match.list_calm + 1 if alike else 0
+    match.list_rows, match.list_signature = rows, signature
+    if match.list_calm < CALM_FRAMES:
+        return
+    if not match.list_armed and _same_faces(signature, match.list_read):
+        return  # the list that was read is still there
+    if len(rows) < EXPECTED_ROWS and match.list_waited < PARTIAL_WAIT:
+        match.list_waited += 1  # the other rows may still be fading in
+        if match.list_waited == 1:
+            typer.echo(f"  Opponents list: {len(rows)} of {EXPECTED_ROWS} rows so far, waiting a moment...")
+        return
+    match.list_armed, match.list_waited = False, 0
+    match.list_read = signature
+    _opponents(image, match, c, rows, signature)
+
+
+def _same_place(a: list[list[tuple[float, float, float]]], b: list[list[tuple[float, float, float]]]) -> bool:
+    """The same faces at the same places, give or take the jitter of circle detection (a third of a radius)."""
+    if len(a) != len(b) or not a:
+        return False
+    return all(
+        abs(p[0] - q[0]) <= 0.33 * p[2] and abs(p[1] - q[1]) <= 0.33 * p[2]
+        for row_a, row_b in zip(a, b, strict=True)
+        for p, q in zip(row_a, row_b, strict=True)
+    )
 
 
 def _four_in_a_row(read: list[Face]) -> bool:
@@ -435,8 +503,21 @@ def _ask_next(match: _Match, c: _Context) -> None:
         f"Opponent hero {number} not recognised: type its exact name (or code) and press Enter, or just Enter to skip. "
         "The watch goes on meanwhile."
     )
-    if c.options.ask is not None:
-        c.options.ask(number)
+    if c.options.ask_face is not None:
+        face = match.pending[number - 1]
+        taken = {code for code in match.pending_codes if code}
+        suggestions = [code for code, _ in c.faces.suggest(face, None, 8) if code not in taken][:6]
+        c.options.ask_face(
+            FaceQuestion(
+                "guide",
+                f"Opponent hero {number}",
+                "from the Attack Guide",
+                face.crop,
+                face.candidate or None,
+                (),
+                tuple(suggestions),
+            )
+        )
     else:
         listen(c.answers)
 
@@ -526,11 +607,18 @@ def _learn(
             store.add(fits[0], hero_crop(image, badge, badges), when)
 
 
-def _opponents(image: BgrImage, match: _Match, c: _Context) -> None:
-    """The Opponents list (SPEC D75, D81, D82): each opponent's defence read from its faces and badges and recorded
-    (what the Arena stats page counts), then checked against your team; the badge names the best one."""
+def _opponents(
+    image: BgrImage,
+    match: _Match,
+    c: _Context,
+    rows: list[list[tuple[float, float, float]]] | None = None,
+    signature: npt.NDArray[np.float32] | None = None,
+) -> None:
+    """The Opponents list (SPEC D75, D81-D83): each opponent's defence read from its faces and badges and recorded
+    (what the Arena stats page counts; a row recorded before is not recorded twice), the faces nobody could name offered
+    to be taught, then the teams checked against yours; the badge names the best one."""
     typer.echo(f"{datetime.now().astimezone():%H:%M:%S} Opponents list")
-    rows = list_rows(image)
+    rows = rows if rows is not None else list_rows(image)
     read = resolve_list(
         c.list_faces.read_rows(image, rows),
         read_list_badges(image, rows, c.templates),
@@ -538,15 +626,29 @@ def _opponents(image: BgrImage, match: _Match, c: _Context) -> None:
         c.list_faces.among,
         lambda code: _name(c.heroes, code),
     )
+    seen = [signature[4 * i : 4 * i + 4] for i in range(len(read))] if signature is not None else []
+    fresh = [
+        i for i in range(len(read)) if not seen or not any(_same_faces(seen[i], old) for old in match.list_recorded)
+    ]
+    match.list_recorded = seen
     for number, row in enumerate(read, 1):
-        typer.echo(f"  opponent {number}: " + ", ".join(_list_hero_line(h, c.heroes) for h in row))
+        old = "" if number - 1 in fresh else "  (recorded before)"
+        typer.echo(f"  opponent {number}: " + ", ".join(_list_hero_line(h, c.heroes) for h in row) + old)
         for hero in row:
             if hero.note:
                 typer.echo(f"    note: {hero.note}")
-    _record(c, read)
+    when = _record(c, read, fresh)
+    _offer_unknown(c, read, fresh, when)
+    if not fresh and not c.options.collect_only:
+        typer.echo("  nothing new on this list")
     if c.options.collect_only:
         known = sum(h.code is not None for row in read for h in row)
-        c.badge.say(f"Saved {len(read)} opponents", f"{known} of {4 * len(read)} heroes recognised", GREEN)
+        said = (
+            f"Saved {len(fresh)} of {len(read)} opponents" if len(fresh) < len(read) else f"Saved {len(read)} opponents"
+        )
+        c.badge.say(said, f"{known} of {4 * len(read)} heroes recognised", GREEN)
+        if not fresh:
+            typer.echo("  (all of them were recorded before: nothing added)")
         return
     if len(match.team) != 4:
         c.badge.say("Your team is not known", "open a VS screen once", RED)
@@ -584,17 +686,68 @@ def _list_hero_line(hero: ListHero, heroes: dict[str, ResolvedEntity]) -> str:
     return f"?{kind} (closest {_name(heroes, hero.face.candidate)} {hero.face.score:.2f})"
 
 
-def _record(c: _Context, teams: list[list[ListHero]]) -> None:
-    """The teams of one reading of the Opponents list, on the sightings file (one instant for all of them)."""
-    if c.sightings is None or not teams:
-        return
+def _record(c: _Context, teams: list[list[ListHero]], rows: list[int]) -> str:
+    """The teams of `rows` (positions in `teams`) of one reading of the Opponents list, on the sightings file (one
+    instant for all of them). Returns that instant as the file writes it ("" when nothing was written)."""
+    if c.sightings is None or not rows:
+        return ""
     when = datetime.now(UTC)
     c.sightings.add(
-        Sighting(when, "list", row, tuple(h.code for h in heroes), tuple(h.shape for h in heroes))
-        for row, heroes in enumerate(teams, 1)
+        Sighting(when, "list", i + 1, tuple(h.code for h in teams[i]), tuple(h.shape for h in teams[i])) for i in rows
     )
     if c.options.recorded is not None:
-        c.options.recorded(len(teams))
+        c.options.recorded(len(rows))
+    return when.isoformat()
+
+
+def _offer_unknown(c: _Context, teams: list[list[ListHero]], rows: list[int], when: str) -> None:
+    """The faces of the recorded rows that no name fits, with the heroes they look most like (SPEC D83): offered to be
+    taught while the watch goes on."""
+    if c.options.unknown is None or not when:
+        return
+    questions = []
+    for i in rows:
+        for j, hero in enumerate(teams[i]):
+            if hero.code is not None or hero.face.crop is None:
+                continue
+            group = shape_group(c.heroes, hero.shape) if hero.shape else []
+            suggestions = [code for code, _ in c.list_faces.suggest(hero.face, group or None, 6)]
+            questions.append(
+                FaceQuestion(
+                    "list",
+                    f"Opponent {i + 1}, hero {j + 1}",
+                    f"{hero.shape[0]} {hero.shape[1]}" if hero.shape else "badge not read",
+                    hero.face.crop,
+                    hero.face.candidate or None,
+                    tuple(group),
+                    tuple(suggestions),
+                    (when, i + 1, j),
+                )
+            )
+    if questions:
+        c.options.unknown(questions)
+
+
+def _learn_taught(c: _Context) -> None:
+    """Faces the user named on the window since the last frame."""
+    queue_ = c.options.taught
+    while queue_ is not None and not queue_.empty():
+        question, code = queue_.get_nowait()
+        _teach(question, code, c)
+
+
+def _teach(question: FaceQuestion, code: str, c: _Context) -> None:
+    """A face of the Opponents list named by the user: kept (local only), known from now on by both readers, and the
+    record it came from corrected."""
+    if question.crop is not None:
+        c.faces.learn(code, question.crop)  # the list reader learns it too
+        c.face_store.add(code, question.crop, datetime.now(UTC))
+    if question.key is not None and c.sightings is not None:
+        when, row, face = question.key
+        c.sightings.name_face(when, row, face, code)
+        if c.options.recorded is not None:
+            c.options.recorded(0)
+    typer.echo(f"  {question.title}: {_name(c.heroes, code)} (learned)")
 
 
 def _predict(team: list[str], theirs: list[str], c: _Context) -> None:
@@ -783,8 +936,10 @@ def _resolve(
     asking: bool,
     always_ask: bool,
     sides: tuple[str, ...] = ("you", "them"),
+    choose: Callable[[FaceQuestion], str | None] | None = None,
 ) -> list[Slot]:
-    """Identify, ask (only about `sides`) and learn what was confirmed."""
+    """Identify, ask (only about `sides`) and learn what was confirmed. `choose`: asks the window instead of the
+    terminal (and only about what is unknown)."""
     for side in ("you", "them"):
         count = sum(1 for b in badges if b.side == side)
         if count != 4:
@@ -796,7 +951,7 @@ def _resolve(
     _show(slots, heroes)
     open_question = any(s.code is None and s.badge.side in sides for s in slots)
     if asking and (always_ask or open_question):
-        _ask(slots, heroes, sides)
+        _ask(slots, heroes, sides, choose, crops)
         when = datetime.now(UTC)
         for slot, crop in zip(slots, crops, strict=True):
             if slot.code is not None and slot.badge.side in sides:
@@ -833,10 +988,18 @@ def _show(slots: list[Slot], heroes: dict[str, ResolvedEntity]) -> None:
         typer.echo(f"  {number}. {_SIDES[badge.side]}  {what:<22} {hero}")
 
 
-def _ask(slots: list[Slot], heroes: dict[str, ResolvedEntity], sides: tuple[str, ...] = ("you", "them")) -> None:
+def _ask(
+    slots: list[Slot],
+    heroes: dict[str, ResolvedEntity],
+    sides: tuple[str, ...] = ("you", "them"),
+    choose: Callable[[FaceQuestion], str | None] | None = None,
+    crops: list[BgrImage] | None = None,
+) -> None:
     for number, slot in enumerate(slots, 1):
         if slot.code is None and slot.badge.side in sides:
-            _choose(number, slot, slots, heroes)
+            _choose(number, slot, slots, heroes, choose, crops[number - 1] if crops else None)
+    if choose is not None:
+        return  # the window asks only what is unknown: no "All right?" round
     while True:
         answer = typer.prompt("All right? Enter = yes, or the slot number(s) to fix", default="", show_default=False)
         numbers = [int(part) for part in answer.replace(",", " ").split() if part.isdigit()]
@@ -848,10 +1011,33 @@ def _ask(slots: list[Slot], heroes: dict[str, ResolvedEntity], sides: tuple[str,
         _show(slots, heroes)
 
 
-def _choose(number: int, slot: Slot, slots: list[Slot], heroes: dict[str, ResolvedEntity]) -> None:
+def _choose(
+    number: int,
+    slot: Slot,
+    slots: list[Slot],
+    heroes: dict[str, ResolvedEntity],
+    choose: Callable[[FaceQuestion], str | None] | None = None,
+    crop: BgrImage | None = None,
+) -> None:
     taken = {s.code for s in slots if s is not slot and s.badge.side == slot.badge.side and s.code}
     options = [code for code in slot.candidates if code not in taken]
     badge = slot.badge
+    if choose is not None:  # the window: the likeliest heroes first (matching points), then the name
+        ranked = sorted(options, key=lambda code: -slot.scores.get(code, 0))
+        owner = "Your team" if badge.side == "you" else "Opponent"
+        code = choose(
+            FaceQuestion(
+                "slot",
+                f"{owner}, slot {number}",
+                f"{badge.element.display} {badge.hero_class.display}",
+                crop,
+                None,
+                tuple(options),
+                tuple(ranked[:6]),
+            )
+        )
+        slot.code, slot.method = (code, "confirmed") if code else (None, "review")
+        return
     typer.echo(f"Slot {number} ({badge.side}, {badge.element.display} {badge.hero_class.display}):")
     for i, code in enumerate(options, 1):
         score = f"  [{slot.scores[code]} matching points]" if code in slot.scores else ""

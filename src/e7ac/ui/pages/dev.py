@@ -26,12 +26,14 @@ from PySide6.QtWidgets import (
 )
 
 from e7ac.appdata import open_engine
+from e7ac.arena.questions import FaceQuestion
 from e7ac.arena.sightings import Popularity, SightingStore, popularity, sightings_path
 from e7ac.predict.overrides import KitError, load_overrides
 from e7ac.predict.worklist import WorkRow, kit_amounts, worklist
 from e7ac.storage.db import session_scope
 from e7ac.ui.context import AppContext
 from e7ac.ui.pages.base import Page, card, heading
+from e7ac.ui.questions import QuestionCard
 from e7ac.ui.theme import status_style
 from e7ac.ui.watch_controller import COLLECT, RUNNING, STOPPED, STOPPING
 from e7ac.ui.widgets import BadgeSizeBox
@@ -139,6 +141,10 @@ class DevPage(Page):
         summary_layout.addWidget(self._status)
         layout.addWidget(summary)
 
+        self._card = QuestionCard(context)
+        self._card.answered.connect(self._watch.respond)
+        layout.addWidget(self._card)
+
         actions = QHBoxLayout()
         self._kits = QPushButton(f"Read kit status (top {KIT_HEROES})")
         self._kits.clicked.connect(self._read_kits)
@@ -180,17 +186,19 @@ class DevPage(Page):
 
         self._kit_loader = _Kits()
         self._kit_loader.row.connect(self._kit_row)
-        self._kit_loader.progress.connect(lambda n, total: self._kits.setText(f"Reading kits {n}/{total}..."))
+        self._kit_loader.progress.connect(self._kit_progress)
         self._kit_loader.done.connect(self._kits_done)
         self._refresh_soon = QTimer(self)
         self._refresh_soon.setSingleShot(True)
         self._refresh_soon.setInterval(300)
         self._refresh_soon.timeout.connect(self.reload)
-        self._watch.recorded.connect(lambda _n: self._refresh_soon.start())
+        self._watch.recorded.connect(self._recorded)
         self._watch.state.connect(self._state)
         self._watch.line.connect(self._on_line)
-        self._watch.failed.connect(lambda reason: self._status.setText(f"The watch stopped: {reason}"))
+        self._watch.failed.connect(self._failed)
         self._watch.said.connect(self._said)
+        self._watch.question.connect(self._asked)
+        self._watch.unknown_faces.connect(self._unknown)
         self._state(STOPPED)
 
     def shown(self) -> None:
@@ -257,6 +265,23 @@ class DevPage(Page):
         self._status.setText("Starting: reading the catalog and the hero icons...")
         self._watch.start(offline=self._offline.isChecked(), collect_only=True, overlay=self._overlay.isChecked())
 
+    def _kit_progress(self, done: int, total: int) -> None:
+        self._kits.setText(f"Reading kits {done}/{total}...")
+
+    def _asked(self, question: FaceQuestion) -> None:
+        if self._watch.mode == COLLECT:
+            self._card.add([question])
+
+    def _unknown(self, questions: list[FaceQuestion]) -> None:
+        if self._watch.mode == COLLECT:
+            self._card.add(questions)
+
+    def _recorded(self, _count: int) -> None:
+        self._refresh_soon.start()  # on the window's thread: the signal is queued to this page
+
+    def _failed(self, reason: str) -> None:
+        self._status.setText(f"The watch stopped: {reason}")
+
     def _on_line(self, line: str) -> None:
         if self._watch.mode == COLLECT:
             self._log.appendPlainText(line)
@@ -286,6 +311,7 @@ class DevPage(Page):
             self._status.setStyleSheet(status_style("warn"))
         elif state == STOPPED:
             self._status.setStyleSheet("")
+            self._card.clear()
 
     def _read_kits(self) -> None:
         stats = self._popularity

@@ -9,6 +9,7 @@ from typing import Final
 
 from PySide6.QtCore import QObject, Signal
 
+from e7ac.arena.questions import FaceQuestion
 from e7ac.ui.tasks import run_captured
 from e7ac.ui.watch_signal import LIGHT, NoSignal, WatchSignal
 from e7ac.vision.window import Rect
@@ -27,8 +28,10 @@ class WatchController(QObject):
     """What the badge says: top line, bottom line, colour."""
     state = Signal(str)
     """"stopped", "running" or "stopping"."""
-    question = Signal(int)
-    """An opponent hero (face 1-4) needs a name: `answer` it."""
+    question = Signal(object)
+    """A `FaceQuestion` to answer now: a hero of the VS screen (the watch waits) or an Attack Guide face; `respond`."""
+    unknown_faces = Signal(list)
+    """`FaceQuestion`s for faces of the Opponents list nobody could name: taught at leisure, the watch goes on."""
     recorded = Signal(int)
     """Opponent teams just recorded on the sightings file."""
     teams = Signal(list, list)
@@ -44,6 +47,8 @@ class WatchController(QObject):
         self._stop = threading.Event()
         self._retry, self._share = threading.Event(), threading.Event()
         self._answers: queue.Queue[str] = queue.Queue()
+        self._choices: queue.Queue[str | None] = queue.Queue()
+        self._taught: queue.Queue[tuple[FaceQuestion, str]] = queue.Queue()
         self._relay: _Relay | None = None
 
     @property
@@ -61,10 +66,15 @@ class WatchController(QObject):
         self._retry.clear()
         self._share.clear()
         self._answers = queue.Queue()
+        self._choices = queue.Queue()
+        self._taught = queue.Queue()
         options = arena_cli.WatchOptions(
             offline=offline,
             collect_only=collect_only,
-            ask=self.question.emit,
+            ask_face=self.question.emit,
+            choose=self._choose,
+            unknown=self.unknown_faces.emit,
+            taught=self._taught,
             recorded=self.recorded.emit,
             teams=self.teams.emit,
         )
@@ -116,9 +126,25 @@ class WatchController(QObject):
     def save_picture(self) -> None:
         self._share.set()
 
-    def answer(self, name: str) -> None:
-        """The name typed for the face asked about (empty: skip it)."""
-        self._answers.put(name.strip())
+    def respond(self, question: FaceQuestion, answer: str) -> None:
+        """The answer to a question (a hero's code or exact name; empty: skip it)."""
+        answer = answer.strip()
+        if question.kind == "slot":
+            self._choices.put(answer or None)
+        elif question.kind == "guide":
+            self._answers.put(answer)
+        elif answer:
+            self._taught.put((question, answer))
+
+    def _choose(self, question: FaceQuestion) -> str | None:
+        """Called by the watch for a hero of the VS screen: shows the question, waits for the answer (or the stop)."""
+        self.question.emit(question)
+        while not self._stop.is_set():
+            try:
+                return self._choices.get(timeout=0.2)
+            except queue.Empty:
+                continue
+        return None
 
     def _set_state(self, value: str) -> None:
         self._state = value

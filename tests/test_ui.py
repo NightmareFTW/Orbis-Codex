@@ -16,6 +16,7 @@ import typer
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 widgets = pytest.importorskip("PySide6.QtWidgets", exc_type=ImportError)
 
+from e7ac.arena.questions import FaceQuestion  # noqa: E402
 from e7ac.arena.sightings import Sighting, SightingStore, sightings_path  # noqa: E402
 from e7ac.paths import default_paths  # noqa: E402
 from e7ac.ui.context import AppContext  # noqa: E402
@@ -130,7 +131,7 @@ def test_the_dev_page_lists_the_heroes_met_most_and_copies_the_list(
     window.close()
 
 
-def test_the_pages_follow_the_one_watch(context: AppContext, qapp: Any) -> None:
+def test_the_pages_follow_the_one_watch(context: AppContext, synthetic_catalog: list[str], qapp: Any) -> None:
     window = MainWindow(context)
     window.show_page("arena")
     window.show_page("dev")
@@ -144,11 +145,12 @@ def test_the_pages_follow_the_one_watch(context: AppContext, qapp: Any) -> None:
     assert arena._start.text() == "Stop" and arena._again.isEnabled() and not dev._start.isEnabled()
     watch.said.emit("Win chance 70%", "vs Test Hero", "#2fa84f")
     assert arena._top.text() == "Win chance 70%" and "70%" not in dev._status.text()
-    watch.question.emit(2)
-    assert not arena._ask.isHidden() and "2" in arena._question.text()
-    arena._name.setText("  Blood Blade Karin ")
-    arena._answer()
-    assert watch._answers.get_nowait() == "Blood Blade Karin" and arena._ask.isHidden()
+    asked = FaceQuestion("guide", "Opponent hero 2", "from the Attack Guide", None, None, (), ())
+    watch.question.emit(asked)
+    assert not arena._card.isHidden() and arena._card.current is asked and dev._card.isHidden()
+    arena._card._name.setText("  Blood Blade Karin ")
+    arena._card._typed()
+    assert watch._answers.get_nowait() == "c2011" and arena._card.isHidden()  # the code, found from the name
     watch._state = STOPPED
     watch.state.emit(STOPPED)
     assert arena._start.text() == "Start" and dev._start.isEnabled()
@@ -160,11 +162,13 @@ def test_the_watch_controller_turns_the_watch_into_signals(
 ) -> None:
     from e7ac.cli import arena as arena_cli
 
+    asked = FaceQuestion("guide", "Opponent hero 2", "from the Attack Guide", None, None, (), ("c9001",))
+
     def fake_watch(options: Any, badge: Any, answers: Any, retry: Any, share: Any, stop: Any) -> None:
         typer.echo("Watching")
         badge.say("Win chance 70%", "vs Test Hero", "#2fa84f")
         options.recorded(3)
-        options.ask(2)
+        options.ask_face(asked)
         stop.wait(5)
 
     monkeypatch.setattr(arena_cli, "run_watch", fake_watch)
@@ -176,7 +180,7 @@ def test_the_watch_controller_turns_the_watch_into_signals(
     assert not watch.start(offline=True, collect_only=False, overlay=False)  # one at a time
     _wait(qapp, lambda: seen["question"])
     assert "Watching" in seen["line"] and ("Win chance 70%", "vs Test Hero", "#2fa84f") in seen["said"]
-    assert seen["recorded"] == [3] and seen["question"] == [2] and seen["state"][0] == RUNNING
+    assert seen["recorded"] == [3] and seen["question"] == [asked] and seen["state"][0] == RUNNING
     watch.stop()
     _wait(qapp, lambda: seen["state"][-1] == STOPPED)
     assert not watch.running
@@ -339,3 +343,109 @@ def test_the_home_page_offers_to_download_the_missing_portraits(
     home.shown()
     assert home._icons.isHidden()  # everything is there: nothing to offer
     window.close()
+
+
+def _question(
+    kind: str = "slot", suggestions: tuple[str, ...] = ("c9001", "c2011"), title: str = "Your team, slot 2"
+) -> Any:
+    import numpy as np
+
+    crop = np.full((64, 64, 3), (40, 90, 200), np.uint8)
+    return FaceQuestion(kind, title, "light knight", crop, "c9001", (), suggestions)
+
+
+def test_the_question_card_offers_the_likeliest_heroes_to_click(
+    context: AppContext, synthetic_catalog: list[str], qapp: Any
+) -> None:
+    from e7ac.ui.questions import QuestionCard
+
+    card = QuestionCard(context)
+    answers: list[tuple[Any, str]] = []
+    card.answered.connect(lambda q, code: answers.append((q, code)))
+    asked = _question()
+    card.add([asked])
+    assert not card.isHidden() and card.current is asked and "Who is this?" in card._title.text()
+    buttons = card.choices()
+    assert [b.text().replace("\n", " ") for b in buttons] == ["Test Hero", "Blood Blade Karin"]  # in their order
+    assert [b.toolTip() for b in buttons] == ["Test Hero (c9001)", "Blood Blade Karin (c2011)"]
+    assert card._typing.isHidden() and not card._none.isHidden()  # the name only if none of them fits
+    buttons[1].click()
+    assert answers == [(asked, "c2011")] and card.isHidden()  # one click: answered
+
+
+def test_the_name_is_asked_only_when_no_suggestion_fits(
+    context: AppContext, synthetic_catalog: list[str], qapp: Any
+) -> None:
+    from e7ac.ui.questions import QuestionCard
+
+    card = QuestionCard(context)
+    answers: list[tuple[Any, str]] = []
+    card.answered.connect(lambda q, code: answers.append((q, code)))
+    card.add([_question(suggestions=("c9001",))])
+    card._none.click()  # none of them: now the name
+    assert not card._typing.isHidden()
+    card._name.setText("Nobody Atall")
+    card._typed()
+    assert "not a hero of the catalog" in card._problem.text() and answers == []  # never a guess
+    card._name.setText("blood blade karin")  # any case; or the code
+    card._typed()
+    assert answers[0][1] == "c2011"
+    card.add([_question(suggestions=())])  # nothing to suggest: straight to the name
+    assert not card._typing.isHidden() and card._none.isHidden() and card._hint.isHidden()
+    card._name.setText("c9001")
+    card._typed()
+    assert answers[1][1] == "c9001"
+
+
+def test_questions_wait_their_turn_and_can_be_skipped_one_or_all(
+    context: AppContext, synthetic_catalog: list[str], qapp: Any
+) -> None:
+    from e7ac.ui.questions import QuestionCard
+
+    card = QuestionCard(context)
+    answers: list[tuple[Any, str]] = []
+    card.answered.connect(lambda q, code: answers.append((q, code)))
+    first, second, third = _question(title="one"), _question("list", title="two"), _question("list", title="three")
+    card.add([first, second, third])
+    assert card.pending() == 3 and card._more.text() == "+2 more" and card.property("urgent") is True
+    card._answer("")  # skip the first
+    assert answers == [(first, "")] and card.current is second and card.property("urgent") is False  # list: calmer
+    card._drop_all()
+    assert [a[1] for a in answers] == ["", "", ""] and card.isHidden() and card.pending() == 0
+    card.add([_question(title="again")])
+    card.clear()  # the watch stopped: nothing is answered, nothing is left
+    assert card.isHidden() and len(answers) == 3
+
+
+def test_the_vs_screen_question_waits_for_the_window_and_the_stop_frees_it(
+    context: AppContext, qapp: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import threading
+
+    watch = context.watch
+    shown: list[Any] = []
+    watch.question.connect(shown.append)
+    asked = _question()
+    result: list[str | None] = []
+    waiting = threading.Thread(target=lambda: result.append(watch._choose(asked)), daemon=True)
+    waiting.start()
+    _wait(qapp, lambda: shown)
+    assert result == []  # the watch is waiting for the window
+    watch.respond(asked, "c2011")
+    waiting.join(3)
+    assert result == ["c2011"]
+    again = threading.Thread(target=lambda: result.append(watch._choose(asked)), daemon=True)
+    again.start()
+    watch.respond(asked, "")  # skipped
+    again.join(3)
+    assert result[-1] is None
+    last = threading.Thread(target=lambda: result.append(watch._choose(asked)), daemon=True)
+    last.start()
+    watch._stop.set()  # the watch is stopped while it waits: it does not hang
+    last.join(3)
+    assert result[-1] is None and not last.is_alive()
+    watch._stop.clear()
+    teach = _question("list")
+    watch.respond(teach, "c9001")
+    watch.respond(teach, "")  # a skipped list face is not a lesson
+    assert watch._taught.get_nowait() == (teach, "c9001") and watch._taught.empty()

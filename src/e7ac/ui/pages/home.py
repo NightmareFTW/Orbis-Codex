@@ -104,7 +104,10 @@ class HomePage(Page):
         self._icons_task.finished.connect(self._icons_done)
         self._runner = _Checks()
         self._runner.done.connect(self._show_checks)
-        context.watch.state.connect(lambda _state: self._sync_button.setEnabled(not context.watch.running))
+        context.watch.state.connect(self._watch_state)
+
+    def _watch_state(self, _state: str) -> None:
+        self._sync_button.setEnabled(not self.context.watch.running)
 
     def shown(self) -> None:
         self._show_facts()

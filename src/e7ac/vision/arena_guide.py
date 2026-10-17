@@ -74,6 +74,7 @@ class FaceMatcher:
         self._keep = self._mask.astype(bool)
         self._entries: list[tuple[str, list[npt.NDArray[np.float32]]]] = []
         self._quick: list[npt.NDArray[np.float32]] = []
+        self._twins: list[FaceMatcher] = []
         for code, variants in references.items():
             self._add(code, variants)
 
@@ -82,6 +83,7 @@ class FaceMatcher:
         twin = FaceMatcher({}, layout="list")
         for code, variants in self._entries:
             twin._add(code, variants)
+        self._twins.append(twin)  # a face learned here is known there too
         return twin
 
     def read_list(self, image: BgrImage) -> list[list[Face]]:
@@ -119,6 +121,8 @@ class FaceMatcher:
         face = cv2.resize(crop, (SIZE, SIZE), interpolation=cv2.INTER_AREA).astype(np.float32)
         padded = np.asarray(cv2.copyMakeBorder(face, 4, 4, 4, 4, cv2.BORDER_REPLICATE), np.float32)
         self._add(code, [padded] * len(SCALES))
+        for twin in self._twins:
+            twin._add(code, [padded] * len(SCALES))
 
     def read(self, image: BgrImage) -> list[Face]:
         """The faces of the defence team, left to right. Raises ArenaScreenError when there is no row of icons."""
@@ -139,24 +143,37 @@ class FaceMatcher:
 
     def among(self, face: Face, codes: Iterable[str]) -> tuple[str | None, float, float]:
         """The best of `codes` for this face: (its code when clear by the group rule, score, margin)."""
-        if face.crop is None:
-            return None, 0.0, 0.0
-        crop = face.crop.astype(np.float32)
-        wanted = set(codes)
-        scores: dict[str, float] = {}
-        for code, variants in self._entries:
-            if code in wanted:
-                for reference in variants:
-                    result = cv2.matchTemplate(reference, crop, cv2.TM_CCOEFF_NORMED, mask=self._mask)
-                    result[~np.isfinite(result)] = -1
-                    scores[code] = max(scores.get(code, -1.0), float(result.max()))
-        ranked = sorted(scores.items(), key=lambda kv: -kv[1])
+        ranked = self._ranked(face, set(codes))
         if not ranked:
             return None, 0.0, 0.0
         top, score = ranked[0]
         margin = score - (ranked[1][1] if len(ranked) > 1 else 0.0)
         clear = score >= GROUP_MIN_SCORE and margin >= GROUP_MIN_MARGIN
         return (top if clear else None), round(score, 3), round(margin, 3)
+
+    def suggest(self, face: Face, codes: Iterable[str] | None = None, count: int = 6) -> list[tuple[str, float]]:
+        """The heroes this face looks most like, best first, for the user to pick from (SPEC D83): among `codes`, or
+        among the whole catalog when none are given (the quick comparison first, as in `_identify`)."""
+        return [
+            (code, round(score, 3)) for code, score in self._ranked(face, None if codes is None else set(codes))[:count]
+        ]
+
+    def _ranked(self, face: Face, wanted: set[str] | None) -> list[tuple[str, float]]:
+        if face.crop is None or not self._entries:
+            return []
+        crop = face.crop.astype(np.float32)
+        if wanted is None:
+            quick = np.stack(self._quick) @ _vector(crop, self._keep)
+            entries = [self._entries[int(i)] for i in np.argsort(-quick)[:SHORTLIST]]
+        else:
+            entries = [entry for entry in self._entries if entry[0] in wanted]
+        scores: dict[str, float] = {}
+        for code, variants in entries:
+            for reference in variants:
+                result = cv2.matchTemplate(reference, crop, cv2.TM_CCOEFF_NORMED, mask=self._mask)
+                result[~np.isfinite(result)] = -1
+                scores[code] = max(scores.get(code, -1.0), float(result.max()))
+        return sorted(scores.items(), key=lambda kv: -kv[1])
 
     def _add(self, code: str, variants: list[npt.NDArray[np.float32]]) -> None:
         self._entries.append((code, variants))
@@ -217,6 +234,67 @@ def list_rows(image: BgrImage) -> list[list[tuple[float, float, float]]]:
     if len(rows) < 2:
         raise ArenaScreenError("no rows of four hero icons: not the Opponents list")
     return rows
+
+
+@dataclass(frozen=True, slots=True)
+class ListLayout:
+    """Where the Opponents list puts its faces on a screen of one size: the columns, the rows and the face radius."""
+
+    height: int
+    xs: tuple[float, ...]
+    ys: tuple[float, ...]
+    r: float
+
+
+LIST_FACE_SPREAD: Final = 18.0
+"""Smallest grey-level spread (standard deviation) of the square inside a face disc for it to count as a picture, not
+the panel behind it. Measured on the user's two Opponents list captures (2026-10-18): the 24 faces 34.7-83.0, the
+panel between two rows 8.6-10.9 on one of them and, where a row's glow reaches it, up to 65.6 on the other: a missing
+row is only added when at least three of its four places hold a picture."""
+
+
+def fit_rows(
+    found: Sequence[Sequence[tuple[float, float, float]]], layout: ListLayout | None, image: BgrImage
+) -> tuple[list[list[tuple[float, float, float]]], ListLayout]:
+    """The rows of the Opponents list as its layout says (SPEC D83): circle detection jitters by a pixel or two from
+    frame to frame and may miss a face or a whole row (a row fading in, a highlight on it). The faces found fix the
+    layout (columns by the median of the rows, rows by position); every frame then reads the faces where the layout
+    puts them, with a row the detection missed added when its four places hold pictures. A layout from another screen
+    size, or whose columns do not fit these faces, is replaced."""
+    height = image.shape[0]
+    rows = [r for r in found if len(r) == 4]
+    xs = tuple(float(np.median([row[i][0] for row in rows])) for i in range(4))
+    radius = float(np.median([f[2] for row in rows for f in row]))
+    ys = sorted(float(np.median([f[1] for f in row])) for row in rows)
+    fits = (
+        layout is not None
+        and layout.height == height
+        and all(abs(a - b) <= 0.3 * radius for a, b in zip(layout.xs, xs, strict=True))
+        and abs(layout.r - radius) <= 0.2 * radius
+    )
+    if layout is None or not fits:
+        layout = ListLayout(height, xs, tuple(ys), radius)
+    else:
+        merged = list(layout.ys)
+        for y in ys:
+            if all(abs(y - known) > 0.5 * layout.r for known in merged):
+                merged.append(y)  # a row never seen before at this size
+        layout = ListLayout(height, layout.xs, tuple(sorted(merged)), layout.r)
+    grey = np.asarray(cv2.cvtColor(image, cv2.COLOR_BGR2GRAY), np.uint8)
+    fitted: list[list[tuple[float, float, float]]] = []
+    for y in layout.ys:
+        faces = [(x, y, layout.r) for x in layout.xs]
+        seen = any(abs(row[0][1] - y) <= 0.5 * layout.r for row in rows)
+        if seen or sum(_has_picture(grey, f) for f in faces) >= 3:
+            fitted.append(faces)
+    return fitted, layout
+
+
+def _has_picture(grey: npt.NDArray[np.uint8], face: tuple[float, float, float]) -> bool:
+    x, y, r = face
+    half = round(0.6 * r)
+    patch = grey[max(0, round(y) - half) : round(y) + half, max(0, round(x) - half) : round(x) + half]
+    return bool(patch.size and float(patch.std()) >= LIST_FACE_SPREAD)
 
 
 def find_row(image: BgrImage) -> list[tuple[float, float, float]]:

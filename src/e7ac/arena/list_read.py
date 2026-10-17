@@ -42,6 +42,20 @@ def hero_shape(hero: ResolvedEntity) -> Shape | None:
     return (str(element), str(role)) if element and role else None
 
 
+def shape_groups(heroes: Mapping[str, ResolvedEntity]) -> dict[Shape, list[str]]:
+    """The catalog's heroes by (element, class)."""
+    groups: dict[Shape, list[str]] = {}
+    for code, hero in heroes.items():
+        shape = hero_shape(hero)
+        if shape is not None:
+            groups.setdefault(shape, []).append(code)
+    return groups
+
+
+def shape_group(heroes: Mapping[str, ResolvedEntity], shape: Shape) -> list[str]:
+    return shape_groups(heroes).get(shape, [])
+
+
 def resolve_list(
     faces: Sequence[Sequence[Face]],
     badges: Sequence[Sequence[ListBadge]],
@@ -50,11 +64,7 @@ def resolve_list(
     name: Callable[[str], str] = str,
 ) -> list[list[ListHero]]:
     """One `ListHero` per face, rows and faces in the order given."""
-    groups: dict[Shape, list[str]] = {}
-    for code, hero in heroes.items():
-        shape = hero_shape(hero)
-        if shape is not None:
-            groups.setdefault(shape, []).append(code)
+    groups = shape_groups(heroes)
     out: list[list[ListHero]] = []
     for face_row, badge_row in zip(faces, badges, strict=True):
         row = []

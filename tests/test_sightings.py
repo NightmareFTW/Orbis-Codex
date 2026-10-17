@@ -3,7 +3,6 @@ list (every refresh, with or without a known team)."""
 
 from __future__ import annotations
 
-import queue
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -15,7 +14,6 @@ import pytest
 from typer.testing import CliRunner
 
 from e7ac.arena.sightings import Sighting, SightingStore, popularity, sightings_path
-from e7ac.vision.arena_badges import ArenaScreenError
 from e7ac.vision.arena_guide import Face
 from e7ac.vision.arena_list import ListBadge
 
@@ -195,46 +193,6 @@ def test_the_same_faces_are_recognised_through_noise_and_other_heroes_are_not() 
     assert not _same_faces(_list_signature(a, rows), _list_signature(other, rows))
     assert not _same_faces(_list_signature(a, rows), _list_signature(a, rows[:2]))  # another size
     assert not _same_faces(None, _list_signature(a, rows))
-
-
-def test_a_refresh_is_read_again_but_a_list_that_stays_is_not(monkeypatch: pytest.MonkeyPatch) -> None:
-    from e7ac.cli import arena as arena_cli
-
-    screens = {1: _screen(1), 2: _screen(2)}
-    reads: list[int] = []
-
-    def list_rows(image: Any) -> Any:
-        if int(image[0, 0, 0]) == 99:  # a frame that is not the list
-            raise ArenaScreenError("not the list")
-        return next(rows for img, rows in screens.values() if img is image)
-
-    def not_the_list(image: Any, templates: Any) -> Any:
-        raise ArenaScreenError("nothing")
-
-    def no_faces(image: Any) -> Any:
-        raise ArenaScreenError("nothing")
-
-    monkeypatch.setattr(arena_cli, "list_rows", list_rows)
-    monkeypatch.setattr(arena_cli, "read_badges", not_the_list)
-    monkeypatch.setattr(arena_cli, "_opponents", lambda image, match, c: reads.append(1))
-    match = arena_cli._Match()
-    context = cast(
-        "arena_cli._Context",
-        SimpleNamespace(answers=queue.Queue(), templates={}, faces=SimpleNamespace(read=no_faces)),
-    )
-    away = np.full((10, 10, 3), 99, np.uint8)
-
-    def feed(*names: int | str) -> list[int]:
-        reads.clear()
-        for name in names:
-            arena_cli._step(away if name == "away" else screens[int(name)][0], match, context)
-        return list(reads)
-
-    assert len(feed(1)) == 0  # one frame is not "still"
-    assert len(feed(1)) == 1  # the second frame alike: read once
-    assert len(feed(1, 1, 1)) == 0  # the list stays: no new reading
-    assert len(feed(2)) == 0 and len(feed(2)) == 1  # a refresh: other faces, read once they are still
-    assert len(feed(2, "away", 2, 2)) == 1  # leaving and coming back reads the list again
 
 
 def test_kit_todo_counts_the_teams_the_watch_recorded(

@@ -76,6 +76,14 @@ QLabel#muted {{ color: {t["muted"]}; }}
 QLabel#gold {{ color: {t["gold"]}; font-weight: 600; }}
 QFrame#card {{ background: {t["panel"]}; border: 1px solid {t["border"]}; border-radius: 10px; }}
 QFrame#card QLabel {{ background: transparent; }}
+QFrame#ask {{ background: {t["panel_alt"]}; border: 2px solid {t["gold_dim"]}; border-radius: 10px; }}
+QFrame#ask[urgent="true"] {{ border: 2px solid {t["gold_bright"]}; background: #2a2618; }}
+QFrame#ask QLabel {{ background: transparent; }}
+QToolButton#choice {{
+    background: {bronze}; border: 1px solid {t["gold_dim"]}; border-radius: 8px; padding: 4px 2px; color: {t["text"]};
+    font-size: 8pt;
+}}
+QToolButton#choice:hover {{ border-color: {t["gold_bright"]}; background: {blue}; }}
 QPushButton {{
     background: {bronze}; border: 1px solid {t["gold_dim"]}; border-radius: 7px; padding: 8px 18px; color: {t["text"]};
 }}

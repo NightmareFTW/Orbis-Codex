@@ -10,16 +10,15 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QPlainTextEdit,
     QPushButton,
     QVBoxLayout,
-    QWidget,
 )
 
+from e7ac.arena.questions import FaceQuestion
 from e7ac.ui.context import AppContext
 from e7ac.ui.pages.base import Page, card, heading
-from e7ac.ui.theme import status_style
+from e7ac.ui.questions import QuestionCard
 from e7ac.ui.watch_controller import ARENA, COLLECT, RUNNING, STOPPED, STOPPING
 from e7ac.ui.watch_signal import LIGHT
 from e7ac.ui.widgets import BadgeSizeBox, HeroRow
@@ -84,24 +83,9 @@ class ArenaPage(Page):
         controls.addStretch()
         layout.addLayout(controls)
 
-        self._ask = QWidget()
-        ask_layout = QHBoxLayout(self._ask)
-        ask_layout.setContentsMargins(0, 0, 0, 0)
-        self._question = QLabel()
-        self._question.setStyleSheet(status_style("warn"))
-        self._name = QLineEdit()
-        self._name.setPlaceholderText("Exact hero name (or code), then Enter")
-        self._name.returnPressed.connect(self._answer)
-        send = QPushButton("Name it")
-        send.clicked.connect(self._answer)
-        skip = QPushButton("Skip")
-        skip.clicked.connect(self._skip)
-        ask_layout.addWidget(self._question)
-        ask_layout.addWidget(self._name, 1)
-        ask_layout.addWidget(send)
-        ask_layout.addWidget(skip)
-        self._ask.hide()
-        layout.addWidget(self._ask)
+        self._card = QuestionCard(context)
+        self._card.answered.connect(self._watch.respond)
+        layout.addWidget(self._card)
 
         self._log = QPlainTextEdit()
         self._log.setReadOnly(True)
@@ -112,9 +96,13 @@ class ArenaPage(Page):
         self._watch.line.connect(self._on_line)
         self._watch.state.connect(self._state)
         self._watch.question.connect(self._asked)
+        self._watch.unknown_faces.connect(self._unknown)
         self._watch.teams.connect(self._teams)
-        self._watch.failed.connect(lambda reason: self._say("The watch stopped", reason, "#d04040"))
+        self._watch.failed.connect(self._failed)
         self._state(STOPPED)
+
+    def _failed(self, reason: str) -> None:
+        self._say("The watch stopped", reason, "#d04040")
 
     def _toggle(self) -> None:
         if self._watch.running:
@@ -147,7 +135,7 @@ class ArenaPage(Page):
         self._overlay.setEnabled(state == STOPPED and sys.platform == "win32")
         self._offline.setEnabled(state == STOPPED)
         if state == STOPPED:
-            self._ask.hide()
+            self._card.clear()
             self._say("Not watching", "Press Start", LIGHT)
             self._yours.set_codes([])
             self._theirs.set_codes([])
@@ -159,16 +147,10 @@ class ArenaPage(Page):
             self._yours.set_codes(yours)
             self._theirs.set_codes(theirs)
 
-    def _asked(self, number: int) -> None:
-        self._question.setText(f"Opponent hero {number} not recognised:")
-        self._name.clear()
-        self._ask.show()
-        self._name.setFocus(Qt.FocusReason.OtherFocusReason)
+    def _asked(self, question: FaceQuestion) -> None:
+        if self._watch.mode == ARENA:
+            self._card.add([question])
 
-    def _answer(self) -> None:
-        self._watch.answer(self._name.text())
-        self._ask.hide()
-
-    def _skip(self) -> None:
-        self._watch.answer("")
-        self._ask.hide()
+    def _unknown(self, questions: list[FaceQuestion]) -> None:
+        if self._watch.mode == ARENA:
+            self._card.add(questions)

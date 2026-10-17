@@ -9,6 +9,8 @@ import datetime
 from collections.abc import Sequence
 from pathlib import Path
 
+import numpy as np
+import numpy.typing as npt
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QGuiApplication, QImage, QPainter, QPainterPath, QPen, QPixmap, QRadialGradient
 
@@ -58,6 +60,17 @@ def _ratio() -> float:
 
 
 def _round(data: bytes | None, size: int) -> QPixmap:
+    return _round_image(QImage.fromData(data) if data else QImage(), size)
+
+
+def round_from_bgr(picture: npt.NDArray[np.uint8], size: int) -> QPixmap:
+    """A round portrait of a picture the watch cut from the screen (BGR, as OpenCV has it)."""
+    height, width = picture.shape[:2]
+    image = QImage(picture.data, width, height, 3 * width, QImage.Format.Format_BGR888).copy()
+    return _round_image(image, size)
+
+
+def _round_image(image: QImage, size: int) -> QPixmap:
     ratio = _ratio()
     side = round(size * ratio)
     pixmap = QPixmap(side, side)
@@ -69,7 +82,6 @@ def _round(data: bytes | None, size: int) -> QPixmap:
     inner = QRectF(ring, ring, size - 2 * ring, size - 2 * ring)
     disc = QPainterPath()
     disc.addEllipse(inner)
-    image = QImage.fromData(data) if data else QImage()
     if image.isNull():  # not cached: a dark disc with a faint glow
         glow = QRadialGradient(QPointF(size / 2, size / 2), size / 2)
         glow.setColorAt(0.0, QColor(TOKENS["panel_alt"]))
