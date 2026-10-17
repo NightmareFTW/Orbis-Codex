@@ -9,14 +9,13 @@ import typer
 from sqlalchemy.orm import Session
 
 from e7ac.arena.references import ReferenceStore
-from e7ac.catalog.facts import EntityType
-from e7ac.catalog.store import current_snapshot, load_entity
+from e7ac.arena.sightings import SightingStore, popularity, sightings_path
 from e7ac.cli import catalog as catalog_cli
 from e7ac.cli.roster import _catalog_heroes, _engine, _fail, _resolve_hero_code
 from e7ac.paths import default_paths
-from e7ac.predict.damage import support_amounts
-from e7ac.predict.effects import Effect, Kit, Scaling, kit_from
-from e7ac.predict.overrides import KitError, KitOverride, apply_override, load_overrides
+from e7ac.predict.effects import Effect, Kit, Scaling
+from e7ac.predict.overrides import KitError, KitOverride, load_overrides
+from e7ac.predict.worklist import effective_kit, kit_amounts, worklist
 from e7ac.sources.epic7db import fetch_kit
 from e7ac.sources.http import CachedHttp
 from e7ac.storage.db import session_scope
@@ -66,51 +65,43 @@ def todo(
     limit: Annotated[int, typer.Option(min=1, help="How many heroes to list.")] = 30,
     offline: Annotated[bool, _OFFLINE] = False,
 ) -> None:
-    """The heroes met in Arena (most seen first: VS models and faces learned, your last team), with what the
-    simulation does not cover yet for each: the list to refine by hand."""
+    """The heroes met in Arena (most seen first), with what the simulation does not cover yet for each: the list to
+    refine by hand. It counts the defence teams the watch read (the Dev page of `e7 app` collects them on every
+    refresh of the Opponents list); before any is read, the pictures learned (VS models and faces) are counted."""
     paths = default_paths()
     overrides = _overrides()
-    seen = _met(paths.home / "references")
+    seen = _met(paths.home)
     if not seen:
-        typer.echo("No Arena hero seen yet: run e7 arena watch (Arena.cmd) first.")
+        typer.echo("No Arena hero seen yet: run e7 arena watch (Arena.cmd) or the Dev page of e7 app first.")
         return
     with session_scope(_engine()) as session:
         heroes = _catalog_heroes(session) or {}
         amounts = {code: _amounts(session, code) for code, _ in seen[:limit]}
     with catalog_cli.http_factory(paths, offline) as http:
-        for code, count in seen[:limit]:
-            name = heroes[code].name if code in heroes and heroes[code].name else code
-            kit, _ = _effective(http, name, amounts[code], overrides.get(code))
-            mark = "refined" if code in overrides else "auto"
-            missing = ", ".join(kit.unmodelled) or "-"
-            typer.echo(f"  {count:>3}x  {name:<28} {code:<7} [{mark}]  not simulated: {missing}")
+        rows = worklist(seen[:limit], heroes, amounts, overrides, http, lambda h, name: fetch_kit(h, name))
+    for row in rows:
+        mark = "refined" if row.refined else "auto"
+        missing = ", ".join(row.unmodelled) or "-"
+        typer.echo(f"  {row.seen:>3}x  {row.name:<28} {row.code:<7} [{mark}]  not simulated: {missing}")
 
 
 def _effective(
     http: CachedHttp, name: str, amounts: dict[int, dict[str, Scaling]], hand: KitOverride | None
 ) -> tuple[Kit, dict[int, int]]:
-    skills = fetch_kit(http, name)
-    kit = kit_from(skills, amounts)
-    cooldowns = {s: k.cooldown for s, k in skills.items() if k.cooldown is not None}
-    if not skills:
-        kit.unmodelled.append("(no epic7db page)")
-    return apply_override(kit, cooldowns, hand) if hand is not None else (kit, cooldowns)
+    return effective_kit(http, name, amounts, hand, lambda h, n: fetch_kit(h, n))
 
 
 def _amounts(session: Session, code: str) -> dict[int, dict[str, Scaling]]:
-    snapshot = current_snapshot(session)
-    found: dict[int, dict[str, Scaling]] = {}
-    if snapshot is None:
-        return found
-    for slot in (1, 2, 3):
-        entity = load_entity(session, snapshot.id, EntityType.SKILL, f"{code}:s{slot}")
-        if entity is not None:
-            found[slot] = support_amounts(entity)
-    return found
+    return kit_amounts(session, code)
 
 
-def _met(root: Path) -> list[tuple[str, int]]:
-    """Hero code -> pictures learned of it (VS models and Attack Guide faces) plus one when in your last team."""
+def _met(home: Path) -> list[tuple[str, int]]:
+    """Hero code -> defence teams it was seen in (the sightings of the watch); before any, the pictures learned of it
+    (VS models and Attack Guide faces) plus one when in your last team."""
+    sightings, _ = SightingStore(sightings_path(home)).read()
+    if sightings:
+        return [(h.code, h.teams) for h in popularity(sightings).heroes]
+    root = home / "references"
     counts: dict[str, int] = {}
     for kind in ("arena", "faces"):
         store = ReferenceStore(root / kind)

@@ -16,10 +16,12 @@ from typing import Annotated, Any, Final
 
 import cv2
 import numpy as np
+import numpy.typing as npt
 import typer
 
 from e7ac.arena.identify import Slot, identify
 from e7ac.arena.references import ReferenceStore
+from e7ac.arena.sightings import Sighting, SightingStore, sightings_path
 from e7ac.catalog.resolve import ResolvedEntity
 from e7ac.cli import catalog as catalog_cli
 from e7ac.cli import predict as predict_cli
@@ -55,60 +57,98 @@ def watch(
     hwnd: Annotated[int | None, typer.Option(help="Watch this window (handle from e7 capture --list-windows).")] = None,
     offline: Annotated[bool, typer.Option("--offline", help="Use cached data only.")] = False,
     signal: Annotated[bool, typer.Option(help="Show what to do, and the result, on a small badge on the game.")] = True,
+    collect_only: Annotated[
+        bool,
+        typer.Option("--collect-only", help="Only record the opponents shown (no predictions): for the Dev page."),
+    ] = False,
 ) -> None:
     """The simple way: leave this running and play. On the Arena VS screen your team is read; tap the magnifier
     (Attack Guide) and the opponent's team is recognised from its face icons; the chance to win is then shown here
     and on the badge. To try another opponent (or another team): change it in the game, then click "Check again" on
-    the badge. Read-only: it only copies screen pixels, never a key or click to the game. Ctrl+C stops."""
+    the badge. Every opponent team of the Opponents list is also recorded (what the Dev page counts). Read-only: it
+    only copies screen pixels, never a key or click to the game. Ctrl+C stops."""
+    retry, share = threading.Event(), threading.Event()  # the badge's "Check again" and "Save picture" buttons
+    badge, why = signal_factory(retry.set, share.set) if signal else (NoSignal(), "")
+    if why:
+        typer.echo(f"note: {why}", err=True)
+    options = WatchOptions(hwnd=hwnd, offline=offline, collect_only=collect_only)
+    try:
+        run_watch(options, badge, queue.Queue(), retry, share, threading.Event())
+    except (KeyboardInterrupt, typer.Abort):  # Ctrl+C, also while a question waits
+        typer.echo("Stopped.")
+    badge.close()
+
+
+@dataclass(frozen=True, slots=True)
+class WatchOptions:
+    hwnd: int | None = None
+    """Watch this window (None: the game window of the client in the settings)."""
+    offline: bool = False
+    collect_only: bool = False
+    """Record the opponents, make no prediction (fast: refresh as often as you like)."""
+    ask: Callable[[int], None] | None = None
+    """Called with the face number (1-4) when an opponent hero needs a name; the answer goes to the `answers` queue.
+    None: the question is asked in the terminal (the keyboard is read in the background)."""
+    recorded: Callable[[int], None] | None = None
+    """Called with the number of teams just recorded on the sightings file."""
+
+
+def run_watch(
+    options: WatchOptions,
+    badge: WatchSignal,
+    answers: queue.Queue[str],
+    retry: threading.Event,
+    share: threading.Event,
+    stop: threading.Event,
+) -> None:
+    """The watch itself, for the command and for the window: until `stop` is set (or the frames end). `answers`:
+    names typed for unknown faces; `retry` / `share`: the "Check again" and "Save picture" buttons."""
     paths = default_paths()
     try:
         client = load_settings(paths.settings_file).client
     except SettingsError as exc:
         _fail(str(exc))
-    templates = _templates(paths, offline)
+    templates = _templates(paths, options.offline)
     heroes, owned = _context()
     face_store = ReferenceStore(paths.home / "references" / "faces")
-    faces = _faces(paths, heroes, offline, face_store)
+    faces = _faces(paths, heroes, options.offline, face_store)
     store = ReferenceStore(paths.home / "references" / "arena")
-    answers: queue.Queue[str] = queue.Queue()  # names typed in the window, read in the background
     last: list[tuple[str, str, str]] = [("", "", "")]  # the last prediction shown
-    retry, share = threading.Event(), threading.Event()  # the badge's "Check again" and "Save picture" buttons
-    badge, why = signal_factory(retry.set, share.set) if signal else (NoSignal(), "")
-    if why:
-        typer.echo(f"note: {why}", err=True)
+    sightings = SightingStore(sightings_path(paths.home))
     match = _Match(team=list(reversed(store.last_team())))  # the foremost first (the VS screen lists left to right)
     badge.say("Arena: open a match", "the VS screen, before the battle", LIGHT)
     typer.echo("Watching the game for the Arena VS screen and the Attack Guide (magnifier). Ctrl+C stops.")
-    try:
-        for item in game_frames(client, hwnd):
-            if retry.is_set():
-                retry.clear()
-                _again(match, badge)
-            if share.is_set():
-                share.clear()
-                _share(match.frame, last[0], paths, badge, client, hwnd)
-            if item is not None:
-                frame, area = item
-                match.frame = frame
-                badge.place(area)
-                context = _Context(
-                    templates,
-                    faces,
-                    faces.for_list(),
-                    face_store,
-                    heroes,
-                    owned,
-                    store,
-                    badge,
-                    offline,
-                    paths,
-                    answers,
-                    last,
-                )
-                _step(normalise(frame), match, context)
-    except (KeyboardInterrupt, typer.Abort):  # Ctrl+C, also while a question waits
-        typer.echo("Stopped.")
-    badge.close()
+    for item in game_frames(client, options.hwnd):
+        if stop.is_set():
+            typer.echo("Stopped.")
+            break
+        if retry.is_set():
+            retry.clear()
+            _again(match, badge)
+        if share.is_set():
+            share.clear()
+            _share(match.frame, last[0], paths, badge, client, options.hwnd)
+        if item is not None:
+            frame, area = item
+            match.frame = frame
+            badge.place(area)
+            context = _Context(
+                templates,
+                faces,
+                faces.for_list(),
+                face_store,
+                heroes,
+                owned,
+                store,
+                badge,
+                options.offline,
+                paths,
+                answers,
+                last,
+                sightings,
+                options,
+            )
+            _step(normalise(frame), match, context)
 
 
 @dataclass(slots=True)
@@ -125,6 +165,10 @@ class _Match:
     seen_faces: tuple[str | None, ...] = ()
     list_armed: bool = True
     list_seen: tuple[tuple[int, int], ...] = ()
+    list_signature: npt.NDArray[np.float32] | None = None
+    """What the faces of the list looked like in the last frame (a refresh changes it, the layout stays)."""
+    list_read: npt.NDArray[np.float32] | None = None
+    """... and when the list was last read."""
     guide_armed: bool = True
     vs_theirs: list[str] = field(default_factory=list)
     """The opponent as the last VS screen named it (all four, or nothing)."""
@@ -150,6 +194,8 @@ class _Context:
     answers: queue.Queue[str]
     last: list[tuple[str, str, str]]
     """The last prediction as the badge shows it (two lines and their colour), for "Save picture"."""
+    sightings: SightingStore | None = None
+    options: WatchOptions = field(default_factory=WatchOptions)
 
 
 def _share(
@@ -216,12 +262,16 @@ def _step(image: BgrImage, match: _Match, c: _Context) -> None:
         rows = []
     if rows:  # the Opponents list: every opponent at once
         layout = tuple((round(row[0][0]), round(row[0][1])) for row in rows)
-        if match.list_armed and layout == match.list_seen:  # still for two frames
+        signature = _list_signature(image, rows)
+        still = layout == match.list_seen and _same_faces(signature, match.list_signature)  # two frames alike
+        if still and (match.list_armed or not _same_faces(signature, match.list_read)):  # new, or a refresh (SPEC D81)
             match.list_armed = False
+            match.list_read = signature
             _opponents(image, match, c)
-        match.list_seen = layout
+        match.list_seen, match.list_signature = layout, signature
         return
     match.list_armed, match.list_seen = True, ()
+    match.list_signature = match.list_read = None
     try:
         badges = read_badges(image, c.templates)
     except ArenaScreenError:
@@ -291,6 +341,40 @@ def _four_in_a_row(read: list[Face]) -> bool:
     return all(abs(g - mean) <= 0.15 * mean for g in gaps) and max(f.r for f in read) <= 1.2 * min(f.r for f in read)
 
 
+FACE_GRID: Final = 12
+SAME_FACE: Final = 0.25
+"""Largest mean difference between two looks of one face (each patch scaled to zero mean and unit spread, so that
+a dimmed or brighter screen is the same face) still counted as the same face. Measured on the user's Opponents list
+capture, 2026-10-18: the same faces through noise, JPEG, +8% brightness or a 40% dimmer screen differ by up to 0.06;
+different heroes in the same place by 0.52-0.95."""
+
+
+def _list_signature(image: BgrImage, rows: list[list[tuple[float, float, float]]]) -> npt.NDArray[np.float32]:
+    """The inside of every face circle of the list, as small grey patches scaled to zero mean and unit spread (one
+    row of numbers per face): a refresh changes them, a dimmer or brighter screen does not."""
+    grey = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    patches = []
+    for x, y, r in (face for row in rows for face in row):
+        half = 0.7 * r
+        x0, x1 = max(0, round(x - half)), min(grey.shape[1], round(x + half))
+        y0, y1 = max(0, round(y - half)), min(grey.shape[0], round(y + half))
+        crop = grey[y0:y1, x0:x1]
+        if crop.size == 0:
+            patches.append(np.zeros(FACE_GRID * FACE_GRID, np.float32))
+            continue
+        small = cv2.resize(crop, (FACE_GRID, FACE_GRID), interpolation=cv2.INTER_AREA).astype(np.float32).reshape(-1)
+        small -= small.mean()
+        patches.append(small / (small.std() + 5.0))
+    return np.asarray(patches, np.float32)
+
+
+def _same_faces(a: npt.NDArray[np.float32] | None, b: npt.NDArray[np.float32] | None) -> bool:
+    """The same faces in the same places (False for a list of another size, or nothing to compare)."""
+    if a is None or b is None or a.shape != b.shape:
+        return False
+    return bool(np.abs(a - b).mean(axis=1).max() < SAME_FACE)
+
+
 def _by_badges(names: list[str | None], read: list[Face], badges: list[Badge], c: _Context) -> None:
     """Faces not recognised, compared again only with the heroes of the VS badges left over (their element and class,
     SPEC D70), when the VS screen shows this opponent (the recognised faces fit its badges)."""
@@ -323,7 +407,10 @@ def _ask_next(match: _Match, c: _Context) -> None:
         f"Opponent hero {number} not recognised: type its exact name (or code) and press Enter, or just Enter to skip. "
         "The watch goes on meanwhile."
     )
-    listen(c.answers)
+    if c.options.ask is not None:
+        c.options.ask(number)
+    else:
+        listen(c.answers)
 
 
 def _answer(line: str, match: _Match, c: _Context) -> None:
@@ -412,18 +499,24 @@ def _learn(
 
 
 def _opponents(image: BgrImage, match: _Match, c: _Context) -> None:
-    """The Opponents list (SPEC D75): each opponent's defence read from its faces and checked against your team; the
-    badge names the best one."""
+    """The Opponents list (SPEC D75, D81): each opponent's defence read from its faces and recorded (what the Dev page
+    counts), then checked against your team; the badge names the best one."""
     typer.echo(f"{datetime.now().astimezone():%H:%M:%S} Opponents list")
+    read = c.list_faces.read_list(image)
+    for number, row in enumerate(read, 1):
+        typer.echo(f"  opponent {number}: " + ", ".join(_face_line(f, c.heroes) for f in row))
+    _record(c, [[f.code for f in row] for row in read])
+    if c.options.collect_only:
+        known = sum(f.code is not None for row in read for f in row)
+        c.badge.say(f"Saved {len(read)} opponents", f"{known} of {4 * len(read)} heroes recognised", GREEN)
+        return
     if len(match.team) != 4:
         c.badge.say("Your team is not known", "open a VS screen once", RED)
         typer.echo("  your team is not known yet: open the VS screen of any match once", err=True)
         return
     chances: list[str] = []
     best: tuple[float, int] | None = None
-    for number, row in enumerate(c.list_faces.read_list(image), 1):
-        line = ", ".join(_face_line(f, c.heroes) for f in row)
-        typer.echo(f"  opponent {number}: {line}")
+    for number, row in enumerate(read, 1):
         codes = [f.code for f in row]
         if None in codes:
             chances.append(f"{number}: ?")
@@ -442,6 +535,16 @@ def _opponents(image: BgrImage, match: _Match, c: _Context) -> None:
     colour = GREEN if best[0] >= 0.6 else RED if best[0] <= 0.4 else AMBER
     c.badge.say(f"Best: opponent {best[1]} ({best[0]:.0%})", "  ".join(chances), colour)
     c.last[0] = (f"Best: opponent {best[1]} ({best[0]:.0%})", "  ".join(chances), colour)
+
+
+def _record(c: _Context, teams: list[list[str | None]]) -> None:
+    """The teams of one reading of the Opponents list, on the sightings file (one instant for all of them)."""
+    if c.sightings is None or not teams:
+        return
+    when = datetime.now(UTC)
+    c.sightings.add(Sighting(when, "list", row, tuple(codes)) for row, codes in enumerate(teams, 1))
+    if c.options.recorded is not None:
+        c.options.recorded(len(teams))
 
 
 def _predict(team: list[str], theirs: list[str], c: _Context) -> None:

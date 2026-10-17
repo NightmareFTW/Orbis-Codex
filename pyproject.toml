@@ -21,6 +21,7 @@ dependencies = [
     "opencv-python-headless>=4.10",
     "platformdirs>=4.2",
     "pydantic>=2.7",
+    "pyside6-essentials>=6.8",
     "rapidocr>=3.9,<4",
     "sqlalchemy>=2.0.30",
     "typer>=0.12",
