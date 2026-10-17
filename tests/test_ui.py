@@ -703,3 +703,84 @@ def test_the_arena_page_lists_the_three_opponents_with_the_best_marked_and_remem
     arena._overlay.setChecked(False)
     assert not load_settings(context.paths.settings_file).badge_overlay
     window.close()
+
+
+def test_the_icon_is_also_a_windows_icon_file_for_shortcuts(
+    context: AppContext, qapp: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    import struct
+
+    from PySide6.QtGui import QColor, QImage
+
+    from e7ac.ui import icon
+
+    _fake_icons(monkeypatch, {icon.ICON_HERO: (200, 30, 30)})
+    paths = context.paths
+    ico = icon.write_ico(paths)
+    assert ico is not None and ico == icon.ico_path(paths) and ico.name == "orbis.ico"
+    data = ico.read_bytes()
+    reserved, kind, count = struct.unpack("<HHH", data[:6])
+    assert (reserved, kind, count) == (0, 1, len(icon.ICO_SIZES))  # an icon file with one picture per size
+    sizes = []
+    for i in range(count):
+        width, height, _c, _r, _planes, bits, length, offset = struct.unpack(
+            "<BBBBHHII", data[6 + 16 * i : 22 + 16 * i]
+        )
+        assert width == height and bits == 32 and data[offset : offset + 8] == b"\x89PNG\r\n\x1a\n"
+        picture = QImage.fromData(data[offset : offset + length])
+        assert picture.width() == (width or 256) and picture.pixelColor(0, 0).alpha() == 0  # round, exact pixels
+        sizes.append(width or 256)
+    assert sizes == list(icon.ICO_SIZES)
+    first = ico.stat().st_mtime_ns
+    assert icon.write_ico(paths) == ico and ico.stat().st_mtime_ns == first  # unchanged: not written again
+    face = QImage(40, 40, QImage.Format.Format_RGB32)
+    face.fill(QColor(0, 200, 0))
+    path = tmp_path / "face.png"
+    assert face.save(str(path)) and icon.use_picture(paths, path) == ""
+    assert icon.write_ico(paths) == ico and ico.read_bytes() != data  # the user's own picture is in it now
+
+
+def test_the_program_icon_is_in_the_window_at_the_sizes_icons_have(
+    context: AppContext, qapp: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from e7ac.ui import icon
+
+    _fake_icons(monkeypatch, {icon.ICON_HERO: (200, 30, 30)})
+    icon.install(qapp, context.paths)
+    window = MainWindow(context)
+    window.show()
+    qapp.processEvents()
+    handle = window.windowHandle()
+    assert handle is not None and not handle.icon().isNull()  # what the platform gives the taskbar
+    assert {s.width() for s in qapp.windowIcon().availableSizes()} >= {16, 24, 32, 48, 256}
+    assert icon.ico_path(context.paths).is_file()  # and the file a shortcut reads
+    window.close()
+
+
+def test_the_settings_page_makes_the_desktop_shortcut(
+    context: AppContext, qapp: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from pathlib import Path
+
+    from e7ac import shortcut
+
+    window, page = _settings_page(context)
+    assert not page._shortcut.isEnabled()  # a Windows thing
+    made: list[Any] = []
+
+    def create(working_dir: Path, ico: Path) -> Path:
+        made.append((working_dir, ico))
+        return Path("C:/Desktop/Orbis Codex.lnk")
+
+    monkeypatch.setattr(shortcut, "create_desktop_shortcut", create)
+    page.make_shortcut()
+    assert made[0][0] == context.paths.home and made[0][1].name == "orbis.ico" and made[0][1].is_file()
+    assert page._note.text().startswith("The shortcut is on your Desktop")
+
+    def refuse(working_dir: Path, ico: Path) -> Path:
+        raise shortcut.ShortcutError("PowerShell did not make the shortcut: access denied")
+
+    monkeypatch.setattr(shortcut, "create_desktop_shortcut", refuse)
+    page.make_shortcut()
+    assert page._note.text() == "The shortcut was not made: PowerShell did not make the shortcut: access denied"
+    window.close()

@@ -18,8 +18,21 @@ if not defined ORBIS_UV goto no_uv
 if not exist "%ORBIS_ROOT%\.venv" echo Orbis Codex: first start - installing Python 3.12 and dependencies ^(a few minutes, only once^) ...
 
 if "%~1"=="" goto interactive
+if /i "%~1"=="window" goto window
 "%ORBIS_UV%" run --frozen --no-dev --project "%ORBIS_ROOT%" e7 %*
 exit /b %ERRORLEVEL%
+
+:window
+rem The main window with no console (used by Orbis.cmd): bring the environment up to date (quick when nothing changed),
+rem start the Python that has no console window on the window's entry point, and let this console close.
+"%ORBIS_UV%" sync --frozen --no-dev --project "%ORBIS_ROOT%"
+if not "%ERRORLEVEL%"=="0" exit /b 1
+if not exist "%ORBIS_ROOT%\.venv\Scripts\pythonw.exe" (
+    echo Orbis Codex: the windowless Python was not found in "%ORBIS_ROOT%\.venv". Use: Orbis.cmd --console
+    exit /b 1
+)
+start "" "%ORBIS_ROOT%\.venv\Scripts\pythonw.exe" -m e7ac.ui
+exit /b 0
 
 :interactive
 "%ORBIS_UV%" run --frozen --no-dev --project "%ORBIS_ROOT%" e7 doctor

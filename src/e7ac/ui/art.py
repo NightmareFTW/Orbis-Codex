@@ -46,6 +46,10 @@ class Portraits:
             self._made[key] = _round(data, size)
         return self._made[key]
 
+    def icon_bytes(self, code: str) -> bytes | None:
+        """The cached face icon as it was downloaded (None when it is not cached)."""
+        return self._icon(code)
+
     def _icon(self, code: str | None) -> bytes | None:
         if not code:
             return None
@@ -70,8 +74,10 @@ def round_from_bgr(picture: npt.NDArray[np.uint8], size: int) -> QPixmap:
     return round_image(image, size)
 
 
-def round_image(image: QImage, size: int) -> QPixmap:
-    ratio = _ratio()
+def round_image(image: QImage, size: int, ratio: float | None = None) -> QPixmap:
+    """A round portrait with the gold ring, `size` logical pixels (`ratio`: device pixels per logical one; None = this
+    screen's; 1.0 gives exactly `size` pixels, as an icon needs)."""
+    ratio = _ratio() if ratio is None else ratio
     side = round(size * ratio)
     pixmap = QPixmap(side, side)
     pixmap.fill(Qt.GlobalColor.transparent)

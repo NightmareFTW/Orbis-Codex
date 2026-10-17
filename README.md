@@ -14,7 +14,9 @@ Status: Phase 1 in progress — see [`docs/ROADMAP.md`](docs/ROADMAP.md).
    running and play: the chance to win, with the small badge over the game; on the Opponents list it compares the
    three opponents and names the best), Arena stats (a dev tool: refresh the Opponents list in the game as often as
    you like and see the heroes met most) and Settings (is everything ready, the game and Arena options, folders,
-   diagnostics, the program icon). If the window ever closes by itself, `Orbis.cmd` waits with a message, and
+   diagnostics, the program icon). `Orbis.cmd` opens the window and its console closes by itself (the first start
+   shows the installation progress); Settings can make a desktop shortcut that opens it the same way. `Orbis.cmd
+   --console` keeps the console open and prints the program's messages there. If the window ever closes by itself,
    Settings > Diagnostics has the report to send.
 
 From a terminal opened in that folder (cmd or PowerShell), run commands as `.\OrbisCodex.cmd <command>`

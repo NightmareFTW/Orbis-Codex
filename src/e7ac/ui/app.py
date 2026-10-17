@@ -55,6 +55,7 @@ def run(argv: Sequence[str] | None = None) -> int:
         app.setStyleSheet(stylesheet())
         icon.install(app, paths)
     window = build_window(paths, previous)
+    window.setWindowIcon(icon.app_icon(paths))  # the window itself too, not only the application default
     window.resize(*WINDOW_SIZE)
     window.show()
     code = app.exec()

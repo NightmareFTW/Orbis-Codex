@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from e7ac import __version__, crashlog
+from e7ac import __version__, crashlog, shortcut
 from e7ac.doctor import CheckResult, CheckStatus, run_checks
 from e7ac.settings import COMPARE_RUNS_MAX, COMPARE_RUNS_MIN, Settings, allowed_values
 from e7ac.ui import icon, prefs
@@ -234,6 +234,20 @@ class SettingsPage(Page):
         row.addWidget(pick)
         row.addWidget(self._icon_default)
         layout.addLayout(row)
+        start = QHBoxLayout()
+        note = QLabel(
+            "Orbis.cmd opens the window with no console that stays open. A desktop shortcut starts it the same way, "
+            "with the icon above."
+        )
+        note.setObjectName("muted")
+        note.setWordWrap(True)
+        self._shortcut = QPushButton("Create desktop shortcut")
+        self._shortcut.setEnabled(shortcut.on_windows())
+        self._shortcut.setToolTip("Windows only.")
+        self._shortcut.clicked.connect(self.make_shortcut)
+        start.addWidget(note, 1)
+        start.addWidget(self._shortcut)
+        layout.addLayout(start)
         return frame
 
     # --- widgets ------------------------------------------------------------------------------------------------
@@ -364,6 +378,20 @@ class SettingsPage(Page):
             f"The icon was not changed: {problem}" if problem else "The icon is changed.", "bad" if problem else "ok"
         )
         self._icon_changed()
+
+    def make_shortcut(self) -> None:
+        """A desktop shortcut that opens the window with no console, wearing the program's icon."""
+        paths = self.context.paths
+        ico = icon.write_ico(paths)
+        if ico is None:
+            self._say("The shortcut was not made: the icon file could not be written.", "bad")
+            return
+        try:
+            link = shortcut.create_desktop_shortcut(paths.home, ico)
+        except shortcut.ShortcutError as exc:
+            self._say(f"The shortcut was not made: {exc}", "bad")
+            return
+        self._say(f"The shortcut is on your Desktop: {link}", "ok")
 
     def use_default_icon(self) -> None:
         problem = icon.use_default(self.context.paths)

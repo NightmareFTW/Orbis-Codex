@@ -40,6 +40,7 @@ class AppContext:
         app = QApplication.instance()
         if isinstance(app, QApplication):
             app.setWindowIcon(icon.app_icon(self.paths))
+        icon.write_ico(self.paths)  # the one a desktop shortcut wears
 
     def hero_name(self, code: str) -> str:
         hero = self.heroes().get(code)

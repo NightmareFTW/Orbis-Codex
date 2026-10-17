@@ -8,14 +8,17 @@ picture is ever part of the repository. Without either, a plain emblem is drawn.
 from __future__ import annotations
 
 import contextlib
+import logging
+import struct
 import sys
 from pathlib import Path
 from typing import Final
 
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QBuffer, QIODevice, QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QIcon, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QApplication
 
+from e7ac import crashlog
 from e7ac.paths import AppPaths
 from e7ac.ui.art import Portraits, round_image
 from e7ac.ui.theme import TOKENS
@@ -27,6 +30,8 @@ APP_ID: Final = "OrbisCodex.Arena"
 OVERRIDE_NAME: Final = "icon.png"
 """In the data folder: the user's own picture."""
 SIZES: Final = (16, 20, 24, 32, 40, 48, 64, 96, 128, 256)
+ICO_NAME: Final = "orbis.ico"
+ICO_SIZES: Final = (16, 24, 32, 48, 64, 128, 256)
 MAX_SIDE: Final = 512
 
 
@@ -34,22 +39,64 @@ def override_path(paths: AppPaths) -> Path:
     return paths.home / OVERRIDE_NAME
 
 
+def picture(paths: AppPaths) -> QImage | None:
+    """The picture the icon is made of: the user's own, else Celine's cached portrait; None when there is neither."""
+    own = _override(paths)
+    if own is not None:
+        return own
+    data = Portraits(paths.cache_dir).icon_bytes(ICON_HERO)
+    image = QImage.fromData(data) if data else QImage()
+    return None if image.isNull() else image
+
+
+def _round(image: QImage | None, side: int) -> QPixmap:
+    """The icon at exactly `side` x `side` pixels (icons are in device pixels: no screen scale in them)."""
+    return round_image(image, side, 1.0) if image is not None else _emblem(side)
+
+
 def app_icon(paths: AppPaths) -> QIcon:
     """The user's picture, else Celine's cached portrait, else the emblem; always a usable icon."""
-    image = _override(paths)
+    image = picture(paths)
     icon = QIcon()
-    if image is not None:
-        for size in SIZES:
-            icon.addPixmap(round_image(image, size))
-        return icon
-    portraits = Portraits(paths.cache_dir)
-    if portraits.has(ICON_HERO):
-        for size in SIZES:
-            icon.addPixmap(portraits.pixmap(ICON_HERO, size))
-        return icon
-    for size in SIZES:
-        icon.addPixmap(_emblem(size))
+    for side in SIZES:
+        icon.addPixmap(_round(image, side))
     return icon
+
+
+def ico_path(paths: AppPaths) -> Path:
+    return paths.home / ICO_NAME
+
+
+def ico_bytes(paths: AppPaths) -> bytes:
+    """The icon as a Windows `.ico` file (PNG pictures inside, from Windows Vista on): for shortcuts, whose icon the
+    shell reads from a file."""
+    image = picture(paths)
+    pictures = []
+    for side in ICO_SIZES:
+        buffer = QBuffer()
+        buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+        _round(image, side).save(buffer, "PNG")
+        pictures.append((side, buffer.data().data()))
+    header = struct.pack("<HHH", 0, 1, len(pictures))
+    offset = len(header) + 16 * len(pictures)
+    entries, blobs = b"", b""
+    for side, png in pictures:
+        entries += struct.pack("<BBBBHHII", side % 256, side % 256, 0, 0, 1, 32, len(png), offset + len(blobs))
+        blobs += png
+    return header + entries + blobs
+
+
+def write_ico(paths: AppPaths) -> Path | None:
+    """`orbis.ico` in the data folder, made again only when it would change. None when it cannot be written."""
+    target = ico_path(paths)
+    try:
+        data = ico_bytes(paths)
+        if not target.is_file() or target.read_bytes() != data:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+    except OSError:
+        return None
+    return target
 
 
 def source(paths: AppPaths) -> str:
@@ -66,7 +113,10 @@ def install(app: QApplication, paths: AppPaths) -> None:
 
         with contextlib.suppress(AttributeError, OSError):  # the icon still shows on the window itself
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)  # type: ignore[attr-defined,unused-ignore]
-    app.setWindowIcon(app_icon(paths))
+    icon = app_icon(paths)
+    app.setWindowIcon(icon)
+    shown = ", ".join(str(s.width()) for s in icon.availableSizes())
+    crashlog.note(f"icon: {source(paths)}; sizes {shown}; windows icon file {write_ico(paths)}", logging.INFO)
 
 
 def use_picture(paths: AppPaths, picture: Path) -> str:

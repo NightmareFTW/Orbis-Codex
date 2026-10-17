@@ -88,10 +88,11 @@ src/e7ac/
                  # (what pages share), `watch_controller` (the one Arena watch on a thread, as Qt signals), `tasks`
                  # (background commands, output captured), `theme` (the game's colours as tokens + stylesheet), `art` (round
                  # hero portraits from the cached face icons, never fetched or committed), `widgets` (ornament, hero row,
-                 # featured hero, badge size), `opponents` (the three opponents of the list side by side), `icon` (the program icon), `prefs` (settings read/write from the window), `questions` (the "who is this?" card: one click on a suggested hero, the name
+                 # featured hero, badge size), `opponents` (the three opponents of the list side by side), `icon` (the program icon and its `.ico`), `launch` (the entry point with no console: `python -m e7ac.ui`), `prefs` (settings read/write from the window), `questions` (the "who is this?" card: one click on a suggested hero, the name
                  # last); the sidebar has folders (`PageSpec.group`); the small badge over the game is
                  # still tkinter (`watch_signal`, sized from the screen's scale and `badge_size`) until the Qt overlay
   appdata.py     # database + catalog heroes, shared by the CLI and the window
+  shortcut.py    # the desktop shortcut that opens the window with no console (Windows PowerShell; SPEC D86)
   crashlog.py    # crash evidence under <home>/logs (faulthandler dump, app.log, unclean-run marker; SPEC D85)
   cli/           # Typer app: e7 catalog|roster|import|predict|sim|data …
 kits/            # hero/artifact kit files (YAML), each citing sources, with tests
