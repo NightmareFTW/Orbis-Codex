@@ -160,3 +160,25 @@ def test_the_shipped_kits_apply_and_show_their_passives() -> None:
     assert harsetti.speed_cap == 0.9
     karin, _ = apply_override(AutoKit(counter=0.3), {}, kits["c2011"])
     assert karin.counter == 0.3  # a hand kit never drops what was read automatically
+
+
+def test_a_redirected_provoke_sends_the_basic_skill_at_the_highest_max_health_enemy() -> None:
+    from e7ac.predict.battle import simulate
+    from tests.test_effects import unit
+
+    forced = Kit(at_start=[Effect("redirect_provoke", False, 0.0, 9, 1.0)])  # provoked for the whole fight
+
+    def win(kit: Kit) -> float:
+        a = unit("a", "you", kit, hp=6000)
+        return simulate([a, unit("weak", "them", hp=100), unit("tank", "them", hp=5000)], runs=300).win
+
+    assert win(forced) < win(Kit())  # forced onto the tank, the weak enemy stays alive longer
+
+
+def test_the_screen_verified_kits_say_so() -> None:
+    kits = load_overrides()
+    karin, cooldowns = apply_override(Kit(), {3: 5}, kits["c2011"])
+    assert cooldowns[3] == 4 and any(e.kind == "extra_turn" and e.condition == "kill" for e in karin.on_use[3])
+    yulha, _ = apply_override(Kit(), {}, kits["c1131"])
+    assert [e.kind for e in yulha.on_use[1]] == ["redirect_provoke"]
+    assert "verified" in kits["c1131"].source and "verified" in kits["c2011"].source

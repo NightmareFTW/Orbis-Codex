@@ -128,7 +128,7 @@ def _battle(
             waiting[actor][ready] = max(0, waiting[actor][ready] - 1)
         me.low_wait = max(0, me.low_wait - 1)
         dead_ally = any(hp[j] <= 0 and units[j].side == unit.side for j in range(n))
-        held = me.timers.get("silence", 0) > 0 or me.timers.get("provoke", 0) > 0
+        held = any(me.timers.get(kind, 0) > 0 for kind in ("silence", "provoke", "redirect_provoke"))
         slot = 1 if held else _choose(unit, waiting[actor], acted[actor], dead_ally)
         if slot != 1 and unit.cooldowns.get(slot):
             waiting[actor][slot] = unit.cooldowns[slot]  # counts down at the start of each own turn (MECH-CD-01)
@@ -141,6 +141,8 @@ def _battle(
             targets = enemies if skill.targets > 1 else [min(enemies, key=lambda j: hp[j] / hits[(actor, j, slot)])]
             if me.timers.get("provoke", 0) > 0 and me.provoker in enemies:
                 targets = [me.provoker]  # provoked: attacks its provoker
+            if me.timers.get("redirect_provoke", 0) > 0:  # MECH-PROV-01 (verified in game): basic skill on the enemy
+                targets = [max(enemies, key=lambda j: units[j].stats[Stat.HP])]  # with the highest max Health
             crit = skill.can_crit and rng.random() < min(unit.stats[Stat.CRIT_CHANCE], 1.0)
             factor = min(unit.stats[Stat.CRIT_DAMAGE], CD_CAP) if crit else 1.0
             attack = {**unit.stats, Stat.ATK: unit.stats[Stat.ATK] * me.factor("atk")}
@@ -225,7 +227,7 @@ class _State:
     def remove(self, debuffs: bool, count: int) -> None:
         """Cleanse (debuffs) or dispel (buffs): all when `count` is 0."""
         kinds = (
-            [("timer", k) for k in ("stun", "provoke", "silence")]
+            [("timer", k) for k in ("stun", "provoke", "silence", "redirect_provoke")]
             + [("dot", "")] * len(self.dots)
             + [("debuff", k) for k in self.debuffs]
             if debuffs
@@ -270,7 +272,17 @@ class _State:
                 self.barrier = 0.0
 
 
-_TIMERS: Final = ("stun", "immortal", "immunity", "invincible", "provoke", "silence", "counter", "revive_buff")
+_TIMERS: Final = (
+    "stun",
+    "immortal",
+    "immunity",
+    "invincible",
+    "provoke",
+    "silence",
+    "counter",
+    "revive_buff",
+    "redirect_provoke",
+)
 
 
 def _allies(units: Sequence[Combatant], hp: Sequence[float], i: int) -> list[int]:

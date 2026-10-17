@@ -33,7 +33,8 @@ One file per hero, named by its code (`c2049.toml`); every number carries where 
 Optional effect fields: debuff (default: the kind's usual side), turns (2), chance (1.0; up to 2.0 for "200% chance"),
 all_allies (false), scaling ([hp, atk, def] shares of the caster's stats), count (0 = all), condition ("kill": only
 when the skill defeated an enemy). Extra kinds for hand kits: sacrifice (`value` = share of current Health paid by the
-caster), revive_buff (`value` = Health share restored when a hero holding it dies, for `turns`). A malformed file is
+caster), revive_buff (`value` = Health share restored when a hero holding it dies, for `turns`), redirect_provoke (at
+its turn the target uses its basic skill on the enemy with the highest max Health). A malformed file is
 an error naming the file (never skipped silently).
 """
 
@@ -75,9 +76,10 @@ KINDS: Final = frozenset(
         "counter",
         "sacrifice",
         "revive_buff",
+        "redirect_provoke",
     }
 )
-_DEBUFFS: Final = frozenset({"stun", "dispel", "burn", "bleed", "poison", "provoke", "silence"})
+_DEBUFFS: Final = frozenset({"stun", "dispel", "burn", "bleed", "poison", "provoke", "silence", "redirect_provoke"})
 WHEN: Final = frozenset({"use", "start", "turn", "revive", "low_hp"})
 PASSIVES: Final = frozenset({"reflect", "speed_cap", "no_counter", "immune", "low_hp", "low_hp_cooldown"})
 

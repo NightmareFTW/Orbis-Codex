@@ -1,17 +1,25 @@
 # Yulha
 hero = "c1131"
-source = "epic7db skill text (the in-game description) and Fribbels skill options, read by hand 2026-10-17"
+source = "S1 from the in-game skill screen (user screenshot, 2026-10-17: verified); S2 and S3 from epic7db skill text and Fribbels skill options"
 status = "community"
 replace = [2]
-handles = ["S2 cr", "S2 barrier", "S2 cleanse", "Penetrate"]
-# S1 "redirected provoke" stays unmodelled: its rules are unverified and the simulation of plain provoke (S1 only) is
-# an assumption that would swing this hero's result by tens of points (leave-one-out 2026-10-17).
+handles = ["Redirected Provoke", "S2 cr", "S2 barrier", "S2 cleanse", "Penetrate"]
+# S1 "redirected provoke" from the in-game screen (the user's screenshot, 2026-10-17: verified): 85% chance at +0, +5% at
+# +2 and +10% at +4 (100% at max enhancement), 1 turn; "at the start of the turn, forcibly uses basic skill on the enemy
+# with the highest max Health".
 # S3's 100% penetration comes from Fribbels (already in the damage), so "Penetrate" is handled.
 
 [passive]
 reflect = 0.4
 low_hp = 0.3
 low_hp_cooldown = 5
+
+[[effect]]
+slot = 1
+kind = "redirect_provoke"
+chance = 1.0
+turns = 1
+note = "S1: redirected provoke for 1 turn (100% at max enhancement: 85% + 5% + 10%)"
 
 [[effect]]
 slot = 2
