@@ -1,12 +1,37 @@
 # Maid Chloe
 hero = "c2049"
-source = "S3 from the in-game skill screen (the user's screenshot, 2026-10-17: verified); S1 and S2 from epic7db skill text and Fribbels skill options"
+source = "S1 and S3 from the in-game skill screens (the user's screenshots, 2026-10-17: verified); S2 from epic7db skill text and Fribbels skill options"
 status = "community"
-replace = [3]
+replace = [1, 3]
 handles = ["Revive"]
 cooldowns = { 3 = 4 }
 # epic7db is out of date for S3: it says 20% Health, a 6-turn cooldown and an Attack icon; the game says 30%, 4 turns
 # (skill at +1) and Increase Defense by 60% (docs/SPEC.md D77).
+
+# S1 Heavy Strike (in-game screen, +7): 40% chance to stun for 1 turn, before increasing the caster's Combat Readiness by
+# 15%; after attacking, when the target is inflicted with stun, +15% Combat Readiness to all allies except the caster.
+# Soulburn (20 Soul: extra turn) is not simulated: Souls are not.
+
+[[effect]]
+slot = 1
+kind = "stun"
+chance = 0.4
+turns = 1
+note = "S1: 40% chance to inflict stun for 1 turn (+2, +4 and +6 effect chance included)"
+
+[[effect]]
+slot = 1
+kind = "cr"
+value = 0.15
+note = "S1: increases the Combat Readiness of the caster by 15%"
+
+[[effect]]
+slot = 1
+kind = "cr"
+value = 0.15
+receivers = "others"
+condition = "stun"
+note = "S1: when the target is inflicted with stun, +15% Combat Readiness to all allies except the caster"
 
 [[effect]]
 slot = 3

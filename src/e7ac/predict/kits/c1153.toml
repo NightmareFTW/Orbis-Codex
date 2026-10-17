@@ -1,15 +1,18 @@
 # Harsetti
 hero = "c1153"
-source = "epic7db skill text (the in-game description) and Fribbels skill options, read by hand 2026-10-17"
-status = "community"
+source = "in-game skill screens read by hand 2026-10-17: Gambit +7, The Law of Skuggiheim, Checkmate +8 (max enhancement)"
+status = "verified"
+replace = [1, 3]
+cooldowns = { 3 = 4 }  # shown as "4 turns" on the screen at +8 (epic7db lists 5: without the enhancements, NV-41)
 unmodelled = [
-    "S1 En Passant extra attack (all enemies, 60% Attack down)",
-    "S2 no Combat Readiness increases on the caster's turn",
-    "S3 buff durations -2 turns, unable to be buffed",
+    "S1 En Passant damage (no multiplier in the data; its Attack down is simulated)",
+    "S1/S3 Focus (damage up when full: the maximum and the bonus are not on the skill screen)",
+    "Soulburn (Souls are not simulated)",
 ]
 
 [passive]
 speed_cap = 0.9
+cr_lock = true
 
 [[effect]]
 slot = 1
@@ -17,4 +20,34 @@ kind = "def"
 value = -0.7
 chance = 0.75
 turns = 1
-note = "S1: 75% chance to decrease Defense for 1 turn (70%: MECH-DMG-06)"
+note = "Gambit: 75% chance to decrease Defense for 1 turn (+3 and +6 effect chance included); Defense down is 70%"
+
+[[effect]]
+slot = 1
+kind = "atk"
+value = -0.5
+chance = 0.6
+turns = 1
+receivers = "enemies"
+note = "En Passant, the extra attack on her own turn: every enemy, 60% chance to decrease Attack for 1 turn (50%)"
+
+[[effect]]
+slot = 3
+kind = "shorten"
+turns = 2
+receivers = "enemies"
+note = "Checkmate: every buff of every enemy hit lasts 2 turns fewer"
+
+[[effect]]
+slot = 3
+kind = "unable_counter"
+chance = 1.0
+turns = 2
+note = "Checkmate: 100% chance each (+3 +7 effect chance included); Penetrate is already in the skill data"
+
+[[effect]]
+slot = 3
+kind = "unable_buff"
+chance = 1.0
+turns = 2
+note = "Checkmate: unable to be buffed for 2 turns"

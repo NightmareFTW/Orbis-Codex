@@ -268,3 +268,86 @@ def test_young_senya_kit_carries_the_screen_verified_numbers() -> None:
     assert kinds["cr"].value == 0.20 and kinds["hot"].value == 0.15 and kinds["hot"].turns == 2
     assert kinds["spirit"].value == 20 and [e.kind for e in senya.spirit_effects] == ["cleanse", "extra_turn"]
     assert {e.kind for e in senya.on_use[1]} == {"cr", "dual_attack"}
+
+
+def test_harsetti_yulha_karin_and_chloe_kits_carry_the_screen_verified_numbers() -> None:
+    kits = load_overrides()
+    harsetti, cooldowns = apply_override(Kit(), {3: 5}, kits["c1153"])
+    assert cooldowns[3] == 4 and harsetti.speed_cap == 0.9 and harsetti.cr_lock
+    assert [(e.kind, e.value, e.chance, e.receivers) for e in harsetti.on_use[1]] == [
+        ("def", -0.7, 0.75, ""),
+        ("atk", -0.5, 0.6, "enemies"),
+    ]
+    assert [e.kind for e in harsetti.on_use[3]] == ["shorten", "unable_counter", "unable_buff"]
+    assert all(e.debuff and e.turns == 2 for e in harsetti.on_use[3])
+    yulha, cooldowns = apply_override(Kit(on_use={3: [Effect("heal", False, 0.0, 0, 1.0)]}), {3: 5}, kits["c1131"])
+    assert 3 not in yulha.on_use and cooldowns[3] == 5  # the in-game S3 has no heal
+    assert [e.value for e in yulha.low_hp_effects if e.kind == "cr"] == [0.20]
+    karin, _ = apply_override(Kit(), {}, kits["c2011"])
+    assert karin.lethal_immortal == 1
+    chloe, _ = apply_override(Kit(), {}, kits["c2049"])
+    assert [(e.kind, e.value, e.receivers, e.condition) for e in chloe.on_use[1]] == [
+        ("stun", 0.0, "", ""),
+        ("cr", 0.15, "", ""),
+        ("cr", 0.15, "others", "stun"),
+    ]
+
+
+def test_unable_to_buff_and_shortened_buffs_in_battle_state() -> None:
+    import random
+
+    from e7ac.predict.battle import _State, _use
+    from tests.test_effects import unit
+
+    units = [unit("a", "you"), unit("b", "them")]
+    hp, cr, state, rng = [5000.0, 10000.0], [0.0, 0.0], [_State(), _State()], random.Random(1)
+    state[0].timers["unable_buff"] = 2
+    _use(Effect("atk", False, 0.5, 2, 1.0), 0, [], units, hp, cr, state, rng)
+    _use(Effect("heal", False, 0.0, 0, 1.0, scaling=(0.1, 0.0, 0.0)), 0, [], units, hp, cr, state, rng)
+    assert not state[0].buffs and hp[0] == 6000.0  # no buff, but a heal still works
+    held = _State(buffs={"atk": (0.5, 3)}, timers={"immortal": 2, "stun": 2}, hots=[(0.1, 2)], barrier=100.0)
+    held.barrier_turns = 2
+    held.shorten(2)
+    assert held.buffs == {"atk": (0.5, 1)} and held.timers == {"stun": 2} and not held.hots and held.barrier == 0.0
+    # shorten always lands; a debuff with "enemies" reaches every living enemy, not only the target hit
+    trio = [unit("a", "you"), unit("b1", "them"), unit("b2", "them")]
+    hp, cr, state = [1.0, 1.0, 1.0], [0.0] * 3, [_State(), _State(buffs={"def": (0.5, 3)}), _State()]
+    _use(Effect("shorten", True, 0.0, 3, 1.0), 0, [1], trio, hp, cr, state, rng)
+    assert not state[1].buffs
+    _use(Effect("atk", True, -0.5, 1, 2.0, receivers="enemies"), 0, [1], trio, hp, cr, state, rng)
+    assert "atk" in state[1].debuffs and "atk" in state[2].debuffs and "atk" not in state[0].debuffs
+
+
+def test_counterattack_lock_combat_readiness_lock_and_lethal_immortality_in_battle() -> None:
+    from e7ac.predict.battle import simulate
+    from tests.test_effects import unit
+
+    def win(a: Kit, b: Kit | None = None, hp: float = 10000) -> float:
+        return simulate([unit("a", "you", a, hp=hp), unit("b", "them", b or Kit())], runs=300).win
+
+    plain = win(Kit())
+    counter = Kit(counter=1.0)
+    lock = Kit(on_use={1: [Effect("unable_counter", True, 0.0, 9, 2.0)]})
+    assert win(lock, counter, 14000) > win(Kit(), counter, 14000) + 0.1  # a hero that cannot counterattack stops
+    turn = Effect("extra_turn", False, 0.0, 0, 1.0)
+    extra, locked = Kit(on_use={1: [turn]}), Kit(on_use={1: [turn]}, cr_lock=True)
+    assert win(extra) > plain + 0.2 and win(locked) < win(extra) - 0.2  # no Combat Readiness up on her own turn
+    assert win(Kit(lethal_immortal=9)) > plain + 0.2
+
+
+def test_effects_that_need_a_landed_stun_reach_every_ally_but_the_caster() -> None:
+    from e7ac.predict.battle import _receivers, simulate
+    from tests.test_effects import unit
+
+    units = [unit("a", "you"), unit("m", "you"), unit("b", "them")]
+    assert _receivers(Effect("cr", False, 0.1, 0, 1.0, receivers="others"), 0, units, [1.0, 1.0, 1.0]) == [1]
+    stun = Effect("stun", True, 0.0, 1, 0.5)
+    boost = Effect("extra_turn", False, 0.0, 0, 1.0, receivers="others")
+    only_on_stun = dataclasses.replace(boost, condition="stun")
+
+    def win(*effects: Effect, boss: float = 40000) -> float:
+        a = unit("a", "you", Kit(on_use={1: list(effects)}))
+        return simulate([a, unit("m", "you"), unit("b", "them", hp=boss)], runs=300).win
+
+    assert win(only_on_stun, boss=30000) == win(boss=30000)  # no stun landed: the condition keeps the effect away
+    assert win(stun, only_on_stun) > win(stun) + 0.03  # the allies get their turn once the stun landed

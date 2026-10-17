@@ -13,7 +13,10 @@ stronger kept, MECH-BAR-01 `assumed`), resurrection, cleanse, dispel, invincibil
 the start of each of the caster's turns. Part 2 (SPEC D74): burn / bleed / poison tick at the start of the holder's
 turn (MECH-DOT-01), provoke (S1 at the provoker) and silence (S1 only), counterattacks (S1 back, no chain). Hand kits
 (SPEC D76): effects only when an enemy was defeated, health sacrifice, reflect, speed cap, no counterattacks, immune
-debuffs, revive given to allies, effects when hit down to a Health share. Not modelled: artifacts, combat set effects:
+debuffs, revive given to allies, effects when hit down to a Health share. SPEC D80: unable to counterattack / to be
+buffed, buff durations cut, debuffs on every enemy, no Combat Readiness increase on one hero's turn, immortality on
+lethal damage, effects only when a stun landed. Not modelled:
+artifacts, combat set effects:
 low confidence.
 """
 
@@ -117,6 +120,7 @@ def _battle(
             cr[i] += elapsed * speed[i]
         cr[actor] = 0.0
         unit, me = units[actor], state[actor]
+        frozen = list(cr) if unit.kit.cr_lock else None  # MECH-CRLOCK-01: Combat Readiness cannot go up on this turn
         for effect in unit.kit.on_turn:  # passive heals / barriers at the start of the turn
             _use(effect, actor, [], units, hp, cr, state, rng)
         if me.hots:  # continuous healing at the start of the turn
@@ -178,13 +182,19 @@ def _battle(
                     _after_hit(
                         j, actor, before - hp[j], slot not in unit.kit.uncounterable, units, hp, cr, state, hits, rng
                     )
+        stunned = {j: state[j].timers.get("stun", 0) for j in targets}
         for effect in unit.kit.on_use.get(slot, []):
             if effect.condition == "kill" and not killed:
+                continue
+            if effect.condition == "stun" and not any(state[j].timers.get("stun", 0) > stunned[j] for j in targets):
                 continue
             if effect.kind == "dual_attack":
                 _dual_attack(actor, targets, units, hp, cr, state, hits, rng)
                 continue
             _use(effect, actor, targets, units, hp, cr, state, rng)
+        if frozen is not None:
+            for i in range(n):
+                cr[i] = min(cr[i], frozen[i])
         me.tick()
         standing = {units[i].side for i in range(n) if hp[i] > 0}
         if len(standing) == 1:
@@ -258,11 +268,11 @@ class _State:
     def remove(self, debuffs: bool, count: int) -> None:
         """Cleanse (debuffs) or dispel (buffs): all when `count` is 0."""
         kinds = (
-            [("timer", k) for k in ("stun", "fear", "provoke", "silence", "redirect_provoke")]
+            [("timer", k) for k in _DEBUFF_TIMERS]
             + [("dot", "")] * len(self.dots)
             + [("debuff", k) for k in self.debuffs]
             if debuffs
-            else [("timer", k) for k in ("immortal", "invincible", "immunity", "counter", "revive_buff")]
+            else [("timer", k) for k in _BUFF_TIMERS]
             + [("hot", "")] * len(self.hots)
             + [("barrier", "")]
             + [("buff", k) for k in self.buffs]
@@ -287,6 +297,25 @@ class _State:
         had = self.barrier > 0
         self.barrier, self.barrier_turns = 0.0, 0
         return had
+
+    def shorten(self, turns: int) -> None:
+        """Every buff lasts `turns` fewer own turns, the ones with none left are gone (Harsetti S3, MECH-BUFF-02)."""
+        for kind, (value, left) in list(self.buffs.items()):
+            if left <= turns:
+                del self.buffs[kind]
+            else:
+                self.buffs[kind] = (value, left - turns)
+        for kind in _BUFF_TIMERS:
+            if kind in self.timers:
+                if self.timers[kind] <= turns:
+                    del self.timers[kind]
+                else:
+                    self.timers[kind] -= turns
+        self.hots = [(share, left - turns) for share, left in self.hots if left > turns]
+        if self.barrier_turns:
+            self.barrier_turns -= turns
+            if self.barrier_turns <= 0:
+                self.barrier, self.barrier_turns = 0.0, 0
 
     def tick(self) -> None:
         """End of the unit's own turn: every duration goes down by one."""
@@ -317,7 +346,24 @@ _TIMERS: Final = (
     "revive_buff",
     "redirect_provoke",
     "fear",
+    "unable_counter",
+    "unable_buff",
 )
+_BUFF_TIMERS: Final = ("immortal", "invincible", "immunity", "counter", "revive_buff")
+_DEBUFF_TIMERS: Final = (
+    "stun",
+    "fear",
+    "provoke",
+    "silence",
+    "redirect_provoke",
+    "unable_counter",
+    "unable_buff",
+)
+_BUFFS: Final = frozenset(
+    {"atk", "def", "spd", "immortal", "immunity", "invincible", "counter", "revive_buff", "hot", "barrier"}
+)
+"""What "unable to be buffed" blocks (MECH-BUFF-01 `assumed`): stat buffs, status buffs, continuous healing, barriers;
+not heals, Combat Readiness or cleanses."""
 
 
 def _allies(units: Sequence[Combatant], hp: Sequence[float], i: int) -> list[int]:
@@ -331,6 +377,10 @@ def _lethal(units: Sequence[Combatant], hp: list[float], cr: list[float], state:
         hp[j] = 1.0
     elif state[j].timers.pop("revive_buff", 0) > 0:  # a revive status given to an ally (Maid Chloe)
         hp[j] = units[j].stats[Stat.HP] * state[j].revive_hp
+    elif kit.lethal_immortal and not state[j].revived:  # immortal for a few turns, once (Blood Blade Karin S2)
+        state[j].revived = True
+        hp[j] = 1.0
+        state[j].timers["immortal"] = kit.lethal_immortal
     elif kit.revive is not None and not state[j].revived:
         state[j].revived = True
         hp[j] = units[j].stats[Stat.HP] * kit.revive
@@ -345,6 +395,8 @@ def _receivers(effect: Effect, actor: int, units: Sequence[Combatant], hp: Seque
     allies = _allies(units, hp, actor)
     if effect.receivers == "all" or (not effect.receivers and effect.all_allies):
         return allies
+    if effect.receivers == "others":
+        return [j for j in allies if j != actor]
     if effect.receivers.startswith("lowest:"):
         count = int(effect.receivers.split(":")[1])
         return sorted(allies, key=lambda j: hp[j] / units[j].stats[Stat.HP])[:count]
@@ -370,6 +422,11 @@ def _use(
     if effect.kind == "spirit":  # Fighting Spirit gained by the caster
         state[actor].spirit += effect.value
         return
+    if effect.kind == "shorten":  # buff durations cut: a guaranteed effect, not an effect chance (MECH-BUFF-02)
+        for j in targets:
+            if hp[j] > 0:
+                state[j].shorten(effect.turns)
+        return
     amount = (
         effect.scaling[0] * caster[Stat.HP]
         + effect.scaling[1] * caster[Stat.ATK]
@@ -383,6 +440,8 @@ def _use(
         return
     if not effect.debuff:
         for r in _receivers(effect, actor, units, hp):
+            if effect.kind in _BUFFS and state[r].timers.get("unable_buff", 0) > 0:
+                continue  # MECH-BUFF-01
             if effect.kind == "extra_turn":
                 cr[r] = 1.0
             elif effect.kind == "cr":
@@ -399,7 +458,12 @@ def _use(
                 state[r].apply(effect)
         return
     effectiveness = caster.get(Stat.EFFECTIVENESS, 0.0)
-    for j in targets:
+    hit = (
+        [j for j in range(len(units)) if units[j].side != units[actor].side and hp[j] > 0]
+        if effect.receivers == "enemies"
+        else targets
+    )
+    for j in hit:
         if hp[j] <= 0 or state[j].timers.get("immunity", 0) > 0 or effect.kind in units[j].kit.immune:
             continue
         resistance = units[j].stats.get(Stat.EFFECT_RESISTANCE, 0.0)
@@ -470,7 +534,8 @@ def _after_hit(
         mate = units[m]
         if m == j or mate.side != units[j].side or hp[m] <= 0 or not mate.kit.guard or 1 not in mate.skills:
             continue
-        if hp[attacker] > 0 and state[m].timers.get("stun", 0) == 0 and rng.random() < mate.kit.guard:
+        blocked = state[m].timers.get("stun", 0) > 0 or state[m].timers.get("unable_counter", 0) > 0
+        if hp[attacker] > 0 and not blocked and rng.random() < mate.kit.guard:
             _counterattack(m, attacker, units, hp, cr, state, hits, rng)
             if state[m].guard_wait == 0:
                 state[m].guard_wait = mate.kit.guard_cooldown
@@ -524,7 +589,7 @@ def _counters(
     """A counterattack (S1 back at the attacker): always with the counterattack buff, else the passive chance; never
     while stunned, nor while another hero's "nobody else counterattacks" holds (`assumed`)."""
     unit, me = units[j], state[j]
-    if me.timers.get("stun", 0) > 0 or 1 not in unit.skills:
+    if me.timers.get("stun", 0) > 0 or me.timers.get("unable_counter", 0) > 0 or 1 not in unit.skills:
         return False
     if any(units[i].kit.no_counter and hp[i] > 0 and i != j for i in range(len(units))):
         return False

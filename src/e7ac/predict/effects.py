@@ -82,11 +82,12 @@ class Effect:
     """heal / barrier: amount = these shares of the caster's max Health, Attack, Defense."""
     receivers: str = ""
     """heal / barrier / cleanse: "self", "all", or "lowest:N" (the N living allies with the lowest Health);
-    resurrect: "all" or "one" (dead allies)."""
+    resurrect: "all" or "one" (dead allies); "others": every living ally except the caster; a debuff: "enemies" =
+    every living enemy, not just the targets hit."""
     count: int = 0
     """cleanse / dispel: how many debuffs / buffs (0 = all)."""
     condition: str = ""
-    """"kill": only when the skill defeated an enemy (SPEC D76)."""
+    """"kill": only when the skill defeated an enemy (SPEC D76); "stun": only when it newly stunned a target."""
 
 
 @dataclass(slots=True)
@@ -100,6 +101,10 @@ class Kit:
     """Share of the Health lost to a hit that the attacker takes back (MECH-REFL-01 `assumed`; hand kits)."""
     speed_cap: float = 0.0
     """Own speed fixed, every other hero's capped at this share of it while alive (Harsetti's Law of Skuggiheim)."""
+    lethal_immortal: int = 0
+    """Turns of immortality granted once per battle on receiving lethal damage (Blood Blade Karin); 0 = none."""
+    cr_lock: bool = False
+    """No Combat Readiness increase of any hero sticks during this hero's own turn (Harsetti's Law of Skuggiheim)."""
     no_counter: bool = False
     """While alive, nobody else counterattacks (Mort)."""
     immune: tuple[str, ...] = ()

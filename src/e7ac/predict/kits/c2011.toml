@@ -1,17 +1,24 @@
 # Blood Blade Karin
 hero = "c2011"
-source = "S1 and S3 from the in-game skill screens (user screenshots, 2026-10-17: verified); S2 from epic7db skill text"
-status = "community"
+source = "S1, S2 and S3 from the in-game skill screens (user screenshots, 2026-10-17: verified)"
+status = "verified"
 replace = [1, 3]
 handles = ["Healing"]
-unmodelled = ["S1 life steal (the game says \"some of the damage dealt\", +15% healing at +2 and +4: no number)", "S2 stats grow as Health falls"]
+unmodelled = [
+    "S1 life steal (the game says \"some of the damage dealt\", +15% healing at +2 and +4: no number)",
+    "S2 Attack, Defense and Speed grow as Health falls (the screen gives no base number; enhancements add 5/10/10/10/15% to the increase)",
+]
 # S1 and S3 from the in-game skill screens (user screenshots, 2026-10-17: verified). epic7db's text was out of date for
 # S3 ("+50% Combat Readiness when an enemy is defeated"): the game says "when the target is defeated, grants an extra
 # turn", with a 4-turn cooldown at +5 (epic7db lists the cooldown without enhancements: 5).
 cooldowns = { 3 = 4 }
 
+# S2 Cursed Sword (in-game screen, +5): immortal for 1 turn at the start of the battle (read automatically) and, once per
+# battle, for 1 turn on receiving lethal damage.
+
 [passive]
 uncounterable = [3]  # "This skill cannot trigger a counterattack"
+lethal_immortal = 1
 
 [[effect]]
 slot = 1

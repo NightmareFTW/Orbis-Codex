@@ -1,13 +1,20 @@
 # Yulha
 hero = "c1131"
-source = "S1 from the in-game skill screen (user screenshot, 2026-10-17: verified); S2 and S3 from epic7db skill text and Fribbels skill options"
+source = "S1, S2 and S3 from the in-game skill screens (user screenshots, 2026-10-17: verified); the S2 barrier amount (35% of max Health) from Fribbels skill options"
 status = "community"
-replace = [2]
-handles = ["Redirected Provoke", "S2 cr", "S2 barrier", "S2 cleanse", "Penetrate"]
+replace = [2, 3]
+cooldowns = { 3 = 5 }  # "5 turns" on the screen at +5 (the -1 turn cooldown of +3 included)
+handles = ["Redirected Provoke", "S2 cr", "S2 barrier", "S2 cleanse", "Penetrate", "Healing"]
+unmodelled = ["S3 damage grows with her lost Health (the game gives no number; Fribbels has none)"]
 # S1 "redirected provoke" from the in-game screen (the user's screenshot, 2026-10-17: verified): 85% chance at +0, +5% at
 # +2 and +10% at +4 (100% at max enhancement), 1 turn; "at the start of the turn, forcibly uses basic skill on the enemy
 # with the highest max Health".
-# S3's 100% penetration comes from Fribbels (already in the damage), so "Penetrate" is handled.
+# S3's 100% penetration and its "cannot crit" come from Fribbels (already in the damage), so "Penetrate" is handled.
+# S3 does NOT heal: the in-game screen (2026-10-17) has no heal, Soulburn only "increases damage dealt"; the "S3 heal
+# 40%" read from epic7db / Fribbels options is dropped (replace = [.., 3]).
+# S2 from the screen: reflects 40% of the damage suffered (never above the caster's max Health), after being attacked at
+# 30% Health or less: dispels all debuffs and grants a barrier (proportional to max Health) for 3 turns and +20% Combat
+# Readiness (15% base +1% per enhancement level, 5 levels), every 5 turns. The earlier 25% came from epic7db: stale.
 
 [passive]
 reflect = 0.4
@@ -42,5 +49,5 @@ note = "S2 Murderous Intent: barrier for 3 turns (35% max Health: Fribbels)"
 slot = 2
 when = "low_hp"
 kind = "cr"
-value = 0.25
-note = "S2 Murderous Intent: +25% Combat Readiness"
+value = 0.20
+note = "S2 Murderous Intent: +20% Combat Readiness (in-game screen at +5)"

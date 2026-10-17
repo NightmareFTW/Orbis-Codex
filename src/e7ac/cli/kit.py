@@ -136,6 +136,10 @@ def _passives(kit: Kit) -> list[str]:
         found.append(f"reflect {kit.reflect:.0%} of Health lost")
     if kit.speed_cap:
         found.append(f"speed cap {kit.speed_cap:.0%} for everyone else")
+    if kit.lethal_immortal:
+        found.append(f"immortal for {kit.lethal_immortal} turn(s), once, on lethal damage")
+    if kit.cr_lock:
+        found.append("no Combat Readiness increase sticks during her turn")
     if kit.no_counter:
         found.append("nobody else counterattacks")
     if kit.immune:
@@ -173,6 +177,8 @@ def _passives(kit: Kit) -> list[str]:
 
 
 def _describe(effect: Effect) -> str:
+    if effect.kind == "shorten":
+        return f"buff durations -{effect.turns} turns {effect.receivers}".strip()
     parts = [effect.kind]
     if effect.kind == "spirit":
         parts.append(f"+{effect.value:g} Fighting Spirit")

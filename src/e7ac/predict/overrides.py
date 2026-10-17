@@ -14,6 +14,8 @@ One file per hero, named by its code (`c2049.toml`); every number carries where 
     [passive]                     # optional: kit-level passives
     reflect = 0.4                 # share of the Health lost to a hit that the attacker takes back
     speed_cap = 0.9               # own speed fixed; every other hero capped at this share of it
+    cr_lock = true                # no Combat Readiness increase sticks during this hero's own turn
+    lethal_immortal = 1           # immortal for N turns, once per battle, on receiving lethal damage
     no_counter = true             # nobody else counterattacks while this hero lives
     immune = ["stun"]             # debuff kinds that never land
     low_hp = 0.3                  # effects with when = "low_hp" trigger after a hit leaves this Health share or less
@@ -37,13 +39,17 @@ One file per hero, named by its code (`c2049.toml`); every number carries where 
 
 Optional effect fields: debuff (default: the kind's usual side), turns (2), chance (1.0; up to 2.0 for "200% chance"),
 all_allies (false), scaling ([hp, atk, def] shares of the caster's stats), count (0 = all), condition ("kill": only
-when the skill defeated an enemy). Extra kinds for hand kits: sacrifice (`value` = share of current Health paid by the
+when the skill defeated an enemy; "stun": only when it newly stunned a target). Receivers also: "others" (every ally but
+the caster). Extra kinds for hand kits: sacrifice (`value` = share of current Health paid by the
 caster), revive_buff (`value` = Health share restored when a hero holding it dies, for `turns`), redirect_provoke (at
 its turn the target uses its basic skill on the enemy with the highest max Health), fear (cannot act; 40% chance to be
 dispelled at the start of its turn), hot (continuous healing: `value` = share of the holder's max Health at the start of
 each of its turns, for `turns`; it stacks), dual_attack (a random ally attacks the same target with a basic attack),
-spirit (Fighting Spirit gained by the caster; `[passive]` spirit_* set the Young Senya mechanic). A malformed file is
-an error naming the file (never skipped silently).
+spirit (Fighting Spirit gained by the caster; `[passive]` spirit_* set the Young Senya mechanic), unable_counter
+(cannot counterattack for `turns`), unable_buff (receives no buffs for `turns`), shorten (every buff of the targets
+lasts `turns` fewer turns; always lands). `receivers = "enemies"` on a debuff hits every living enemy, not only the
+targets of the skill (an extra attack such as Harsetti's En Passant). A malformed file is an error naming the file
+(never skipped silently).
 """
 
 from __future__ import annotations
@@ -89,16 +95,34 @@ KINDS: Final = frozenset(
         "hot",
         "dual_attack",
         "spirit",
+        "unable_counter",
+        "unable_buff",
+        "shorten",
     }
 )
 _DEBUFFS: Final = frozenset(
-    {"stun", "dispel", "burn", "bleed", "poison", "provoke", "silence", "redirect_provoke", "fear"}
+    {
+        "stun",
+        "dispel",
+        "burn",
+        "bleed",
+        "poison",
+        "provoke",
+        "silence",
+        "redirect_provoke",
+        "fear",
+        "unable_counter",
+        "unable_buff",
+        "shorten",
+    }
 )
 WHEN: Final = frozenset({"use", "start", "turn", "revive", "low_hp", "guard", "spirit"})
 PASSIVES: Final = frozenset(
     {
         "reflect",
         "speed_cap",
+        "cr_lock",
+        "lethal_immortal",
         "no_counter",
         "immune",
         "low_hp",
@@ -226,6 +250,8 @@ def apply_override(kit: Kit, cooldowns: Mapping[int, int], override: KitOverride
     passive = override.passive
     out.reflect = float(passive.get("reflect", out.reflect))
     out.speed_cap = float(passive.get("speed_cap", out.speed_cap))
+    out.cr_lock = bool(passive.get("cr_lock", out.cr_lock))
+    out.lethal_immortal = int(passive.get("lethal_immortal", out.lethal_immortal))
     out.no_counter = bool(passive.get("no_counter", out.no_counter))
     out.immune = tuple(str(k) for k in passive.get("immune", out.immune))
     out.low_hp = float(passive.get("low_hp", out.low_hp))
@@ -275,8 +301,8 @@ def _placed(raw: Any, name: str, index: int) -> Placed:
         raise KitError(f"{where}: {exc}") from exc
     if not 0.0 <= effect.chance <= 2.0:
         raise KitError(f"{where}: 'chance' must be between 0 and 2")
-    if effect.condition not in ("", "kill"):
-        raise KitError(f"{where}: 'condition' must be \"kill\" or left out")
+    if effect.condition not in ("", "kill", "stun"):
+        raise KitError(f'{where}: \'condition\' must be "kill", "stun" or left out')
     return Placed(slot, str(when), effect, str(raw.get("note", "")))
 
 
