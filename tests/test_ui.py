@@ -764,6 +764,7 @@ def test_the_settings_page_makes_the_desktop_shortcut(
 
     from e7ac import shortcut
 
+    monkeypatch.setattr(shortcut, "on_windows", lambda: False)
     window, page = _settings_page(context)
     assert not page._shortcut.isEnabled()  # a Windows thing
     made: list[Any] = []

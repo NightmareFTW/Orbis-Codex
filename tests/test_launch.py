@@ -20,8 +20,9 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_the_shortcut_script_survives_any_path() -> None:
     target = Path("C:/Users/O'Brien/Orbis/.venv/Scripts/pythonw.exe")
     text = shortcut.script(target, Path("C:/Users/O'Brien/AppData/Local/OrbisCodex"), Path("C:/x/orbis.ico"))
-    assert "$s.TargetPath = 'C:/Users/O''Brien/Orbis/.venv/Scripts/pythonw.exe'" in text  # the quote is doubled
-    assert "$s.Arguments = '-m e7ac.ui'" in text and "$s.IconLocation = 'C:/x/orbis.ico,0'" in text
+    assert f"$s.TargetPath = '{str(target).replace(chr(39), chr(39) * 2)}'" in text  # the quote is doubled
+    assert "O''Brien" in text and "$s.Arguments = '-m e7ac.ui'" in text
+    assert f"$s.IconLocation = '{Path('C:/x/orbis.ico')},0'" in text
     assert "GetFolderPath('Desktop')" in text and "'Orbis Codex.lnk'" in text  # wherever Windows keeps the Desktop
     assert text.rstrip().endswith("Write-Output $link")
     assert base64.b64decode(shortcut.encoded(text)).decode("utf-16-le") == text  # what -EncodedCommand reads
@@ -30,7 +31,7 @@ def test_the_shortcut_script_survives_any_path() -> None:
 def test_a_shortcut_is_made_by_powershell_and_every_failure_says_why(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    assert not shortcut.on_windows() or sys.platform == "win32"
+    monkeypatch.setattr(shortcut, "on_windows", lambda: False)
     with pytest.raises(shortcut.ShortcutError, match="Windows only"):
         shortcut.create_desktop_shortcut(tmp_path, tmp_path / "orbis.ico")
     pythonw = tmp_path / "pythonw.exe"
@@ -145,6 +146,7 @@ def test_the_shortcut_command_writes_the_icon_file_and_refuses_off_windows(
 
     from e7ac.cli.app import app
 
+    monkeypatch.setattr(shortcut, "on_windows", lambda: False)
     result = CliRunner().invoke(app, ["shortcut"])
     assert result.exit_code == 2 and "Windows only" in result.stderr
     assert (isolated_home.home / "orbis.ico").is_file()  # the icon file is there for the day it can be used
