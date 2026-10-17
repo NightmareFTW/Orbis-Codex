@@ -36,6 +36,8 @@ class WatchController(QObject):
     """Opponent teams just recorded on the sightings file."""
     teams = Signal(list, list)
     """Your team and the opponent's (hero codes) behind the last prediction."""
+    sees = Signal(str)
+    """What the watch makes of the game picture now, in words."""
     failed = Signal(str)
     """The watch ended for a reason other than a stop."""
 
@@ -46,6 +48,7 @@ class WatchController(QObject):
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
         self._retry, self._share = threading.Event(), threading.Event()
+        self._snapshot = threading.Event()
         self._answers: queue.Queue[str] = queue.Queue()
         self._choices: queue.Queue[str | None] = queue.Queue()
         self._taught: queue.Queue[tuple[FaceQuestion, str]] = queue.Queue()
@@ -65,6 +68,7 @@ class WatchController(QObject):
         self._stop.clear()
         self._retry.clear()
         self._share.clear()
+        self._snapshot.clear()
         self._answers = queue.Queue()
         self._choices = queue.Queue()
         self._taught = queue.Queue()
@@ -75,6 +79,8 @@ class WatchController(QObject):
             choose=self._choose,
             unknown=self.unknown_faces.emit,
             taught=self._taught,
+            status=self.sees.emit,
+            snapshot=self._snapshot,
             recorded=self.recorded.emit,
             teams=self.teams.emit,
         )
@@ -119,6 +125,10 @@ class WatchController(QObject):
         relay = self._relay
         if relay is not None:
             relay.resize(size)
+
+    def keep_picture(self) -> None:
+        """Keep the picture the watch is looking at (local), to find out why it reads nothing."""
+        self._snapshot.set()
 
     def check_again(self) -> None:
         self._retry.set()

@@ -67,6 +67,9 @@ class ArenaPage(Page):
         self._again.clicked.connect(self._watch.check_again)
         self._picture = QPushButton("Save picture")
         self._picture.clicked.connect(self._watch.save_picture)
+        self._keep = QPushButton("Keep picture")
+        self._keep.setToolTip("Save the picture the watch is looking at on this PC, to find out why it reads nothing.")
+        self._keep.clicked.connect(self._watch.keep_picture)
         self._overlay = QCheckBox("Badge on the game")
         self._overlay.setChecked(sys.platform == "win32")
         self._overlay.setEnabled(sys.platform == "win32")
@@ -74,7 +77,7 @@ class ArenaPage(Page):
         self._offline = QCheckBox("Offline")
         self._offline.setToolTip("Use cached data only (no downloads).")
         self._size = BadgeSizeBox(context, lambda message: self._say("Settings", message, "#e0a020"))
-        for widget in (self._start, self._again, self._picture):
+        for widget in (self._start, self._again, self._picture, self._keep):
             controls.addWidget(widget)
         controls.addSpacing(12)
         controls.addWidget(self._overlay)
@@ -83,6 +86,10 @@ class ArenaPage(Page):
         controls.addStretch()
         layout.addLayout(controls)
 
+        self._sees = QLabel()
+        self._sees.setObjectName("muted")
+        self._sees.setWordWrap(True)
+        layout.addWidget(self._sees)
         self._card = QuestionCard(context)
         self._card.answered.connect(self._watch.respond)
         layout.addWidget(self._card)
@@ -97,9 +104,14 @@ class ArenaPage(Page):
         self._watch.state.connect(self._state)
         self._watch.question.connect(self._asked)
         self._watch.unknown_faces.connect(self._unknown)
+        self._watch.sees.connect(self._saw)
         self._watch.teams.connect(self._teams)
         self._watch.failed.connect(self._failed)
         self._state(STOPPED)
+
+    def _saw(self, text: str) -> None:
+        if self._watch.mode == ARENA:
+            self._sees.setText(f"The watch sees: {text}")
 
     def _failed(self, reason: str) -> None:
         self._say("The watch stopped", reason, "#d04040")
@@ -132,6 +144,9 @@ class ArenaPage(Page):
         self._start.setEnabled(state != STOPPING and not busy_elsewhere)
         self._again.setEnabled(state == RUNNING and mine)
         self._picture.setEnabled(state == RUNNING and mine)
+        self._keep.setEnabled(state == RUNNING and mine)
+        if state == STOPPED:
+            self._sees.clear()
         self._overlay.setEnabled(state == STOPPED and sys.platform == "win32")
         self._offline.setEnabled(state == STOPPED)
         if state == STOPPED:

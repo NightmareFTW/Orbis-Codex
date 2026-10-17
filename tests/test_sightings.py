@@ -110,7 +110,7 @@ def test_the_list_is_recorded_with_no_prediction_and_with_no_known_team(
         _badges(("fire", "ranger"), ("fire", "ranger"), ("fire", "ranger"), ("fire", "ranger")),
     ]
     context, match, said = _context(tmp_path, rows, shapes, collect_only, team)
-    monkeypatch.setattr(arena_cli, "list_rows", lambda image: [[(0.0, 0.0, 1.0)] * 4] * 2)
+    monkeypatch.setattr(arena_cli, "find_rows", lambda image: [[(0.0, 0.0, 1.0)] * 4] * 2)
     monkeypatch.setattr(arena_cli, "read_list_badges", lambda image, found, templates: context.shapes)
     arena_cli._opponents(cast(Any, None), match, context)
     found, _ = context.sightings.read()

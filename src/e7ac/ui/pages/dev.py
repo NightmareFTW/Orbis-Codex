@@ -124,7 +124,11 @@ class DevPage(Page):
         for label, _ in PERIODS:
             self._period.addItem(label)
         self._period.currentIndexChanged.connect(self.reload)
-        for widget in (self._start, self._now, self._overlay, self._size, self._offline):
+        self._keep = QPushButton("Keep picture")
+        self._keep.setToolTip("Save the picture the watch is looking at on this PC, to find out why it reads nothing.")
+        self._keep.clicked.connect(self._watch.keep_picture)
+        self._keep.setEnabled(False)
+        for widget in (self._start, self._now, self._keep, self._overlay, self._size, self._offline):
             controls.addWidget(widget)
         controls.addStretch()
         controls.addWidget(QLabel("Show"))
@@ -137,8 +141,12 @@ class DevPage(Page):
         self._status = QLabel()
         self._status.setObjectName("muted")
         self._status.setWordWrap(True)
+        self._sees = QLabel()
+        self._sees.setObjectName("muted")
+        self._sees.setWordWrap(True)
         summary_layout.addWidget(self._summary)
         summary_layout.addWidget(self._status)
+        summary_layout.addWidget(self._sees)
         layout.addWidget(summary)
 
         self._card = QuestionCard(context)
@@ -197,6 +205,7 @@ class DevPage(Page):
         self._watch.line.connect(self._on_line)
         self._watch.failed.connect(self._failed)
         self._watch.said.connect(self._said)
+        self._watch.sees.connect(self._saw)
         self._watch.question.connect(self._asked)
         self._watch.unknown_faces.connect(self._unknown)
         self._state(STOPPED)
@@ -265,6 +274,10 @@ class DevPage(Page):
         self._status.setText("Starting: reading the catalog and the hero icons...")
         self._watch.start(offline=self._offline.isChecked(), collect_only=True, overlay=self._overlay.isChecked())
 
+    def _saw(self, text: str) -> None:
+        if self._watch.mode == COLLECT:
+            self._sees.setText(f"The watch sees: {text}")
+
     def _kit_progress(self, done: int, total: int) -> None:
         self._kits.setText(f"Reading kits {done}/{total}...")
 
@@ -306,6 +319,9 @@ class DevPage(Page):
         self._overlay.setEnabled(state == STOPPED and sys.platform == "win32")
         self._offline.setEnabled(state == STOPPED)
         self._now.setEnabled(state == RUNNING and mine)
+        self._keep.setEnabled(state == RUNNING and mine)
+        if state == STOPPED:
+            self._sees.clear()
         if busy_elsewhere:
             self._status.setText("The Arena page is watching: stop it there first.")
             self._status.setStyleSheet(status_style("warn"))

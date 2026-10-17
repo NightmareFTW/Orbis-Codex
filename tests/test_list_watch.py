@@ -78,7 +78,7 @@ def _feed(monkeypatch: pytest.MonkeyPatch, frames: list[tuple[Any, list[Any]]]) 
         return current[0]
 
     reads: list[int] = []
-    monkeypatch.setattr(arena_cli, "list_rows", no_rows)
+    monkeypatch.setattr(arena_cli, "find_rows", no_rows)
     monkeypatch.setattr(arena_cli, "_opponents", lambda image, match, c, rows, signature: reads.append(len(rows)))
     match = arena_cli._Match()
     context = cast(
@@ -265,7 +265,125 @@ def test_collecting_never_reads_the_vs_screen_or_asks_anything(monkeypatch: pyte
     def boom(*args: Any, **kwargs: Any) -> Any:
         raise AssertionError("the VS screen was read while only collecting")
 
-    monkeypatch.setattr(arena_cli, "list_rows", lambda image: (_ for _ in ()).throw(ArenaScreenError("no list")))
+    monkeypatch.setattr(arena_cli, "find_rows", lambda image: (_ for _ in ()).throw(ArenaScreenError("no list")))
     monkeypatch.setattr(arena_cli, "read_badges", boom)
     context = SimpleNamespace(answers=queue.Queue(), templates={}, options=arena_cli.WatchOptions(collect_only=True))
     arena_cli._step(np.zeros((740, 1000, 3), np.uint8), arena_cli._Match(), cast(Any, context))
+
+
+def test_every_frame_is_read_at_one_height_whatever_its_size() -> None:
+    from e7ac.vision.arena_badges import MIN_HEIGHT, WORK_HEIGHT, normalise
+
+    for height in (300, 546, 700, 715, 733, 1080, 2160):
+        assert normalise(np.zeros((height, 1000, 3), np.uint8)).shape[0] == WORK_HEIGHT  # shrunk or enlarged
+    for height in (734, 740, 746):
+        assert normalise(np.zeros((height, 1000, 3), np.uint8)).shape[0] == height  # close enough: untouched
+    tiny = np.zeros((MIN_HEIGHT - 1, 100, 3), np.uint8)
+    assert normalise(tiny) is tiny  # a broken window is not stretched into something to read
+
+
+FIXTURES = Path(__file__).parent.parent / "fixtures"
+
+
+@pytest.mark.fixtures("screenshots/arena/list_2.webp")
+def test_golden_the_list_is_found_at_every_window_size() -> None:
+    """The user's list capture, resampled to window sizes from 260 to 2160 px high (SPEC D84): before, 715 and 700 px
+    found two rows and 546 px none (the circle detection depends on the circles' absolute size)."""
+    from e7ac.vision.arena_badges import normalise
+    from e7ac.vision.arena_list import find_rows
+    from e7ac.vision.image import load_image
+
+    raw = np.asarray(load_image(FIXTURES / "screenshots/arena/list_2.webp"), np.uint8)
+    for height in (*range(260, 1200, 40), 715, 820, 1440, 2160):
+        scale = height / raw.shape[0]
+        resized = cv2.resize(
+            raw, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA if scale < 1 else cv2.INTER_CUBIC
+        )
+        rows = find_rows(normalise(np.asarray(resized, np.uint8)))
+        assert [len(row) for row in rows] == [4, 4, 4], height
+
+
+@pytest.mark.fixtures(
+    "screenshots/arena/prep_1.webp", "screenshots/arena/guide_1.webp", "screenshots/arena/guide_2.webp"
+)
+def test_golden_other_arena_screens_are_never_taken_for_the_list() -> None:
+    from e7ac.vision.arena_badges import normalise
+    from e7ac.vision.arena_list import find_rows
+    from e7ac.vision.image import load_image
+
+    for name in ("prep_1", "guide_1", "guide_2"):
+        image = normalise(np.asarray(load_image(FIXTURES / f"screenshots/arena/{name}.webp"), np.uint8))
+        with pytest.raises(ArenaScreenError):
+            find_rows(image)
+
+
+def test_the_squares_place_the_faces_a_circle_detection_missed(monkeypatch: pytest.MonkeyPatch) -> None:
+    from e7ac.vision import arena_list
+
+    squares = [(int(x + 0.82 * R - 12), int(y - 0.57 * R - 11), 25, 22, Element.LIGHT, 1.0) for y in YS for x in XS]
+    monkeypatch.setattr(arena_list, "level_squares", lambda image: squares)
+    monkeypatch.setattr(arena_list, "list_rows", lambda image: (_ for _ in ()).throw(ArenaScreenError("none")))
+    rows = arena_list.find_rows(_list_image())
+    assert [len(r) for r in rows] == [4, 4, 4]
+    assert rows[0][0] == pytest.approx((XS[0], YS[0], R), abs=0.1 * R) and rows[2][3][1] == pytest.approx(
+        YS[2], abs=0.1 * R
+    )
+    monkeypatch.setattr(arena_list, "level_squares", lambda image: squares[:4] + squares[6:8])  # no grid: no rows
+    with pytest.raises(ArenaScreenError):
+        arena_list.find_rows(_list_image())
+    stray = [*squares, (5, 5, 25, 22, Element.DARK, 1.0)]  # a lone square elsewhere is not part of the grid: ignored
+    monkeypatch.setattr(arena_list, "level_squares", lambda image: stray)
+    assert [len(r) for r in arena_list.rows_from_squares(_list_image())] == [4, 4, 4]
+    between = [*squares, (int(XS[0] + 70), int(YS[0] - 0.57 * R - 11), 25, 22, Element.DARK, 1.0)]
+    monkeypatch.setattr(arena_list, "level_squares", lambda image: between)  # one between two columns: not faces
+    assert arena_list.rows_from_squares(_list_image()) == []
+
+
+def test_the_watch_says_what_it_sees_and_keeps_the_picture_when_nothing_is_found(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import threading
+
+    from e7ac.cli import arena as arena_cli
+    from e7ac.paths import default_paths
+
+    seen: list[str] = []
+    snapshot = threading.Event()
+    options = arena_cli.WatchOptions(collect_only=True, status=seen.append, snapshot=snapshot)
+    clock = [100.0]
+    monkeypatch.setattr(arena_cli, "arena_clock", lambda: clock[0])
+    retry = threading.Event()
+    picture = np.full((540, 960, 3), 30, np.uint8)  # a small window with nothing of the list on it
+    from e7ac.cli.arena import run_watch
+
+    said: list[tuple[str, str]] = []
+
+    class Badge:
+        def place(self, area: object) -> None: ...
+        def say(self, top: str, bottom: str, colour: str) -> None:
+            said.append((top, bottom))
+
+        def close(self) -> None: ...
+
+    def stream(client: Any, hwnd: Any) -> Any:
+        yield None
+        yield picture, None
+        retry.set()  # "Check again" / "Read now"
+        yield picture, None
+        clock[0] += arena_cli.HUNT_SECONDS + 1  # six seconds and nothing read
+        yield picture, None
+        snapshot.set()  # the user asks for the picture
+        yield picture, None
+
+    monkeypatch.setattr(arena_cli, "game_frames", stream)
+    monkeypatch.setattr(arena_cli, "_templates", lambda paths, offline: {})
+    monkeypatch.setattr(arena_cli, "_context", lambda: (_catalog(), set()))
+    monkeypatch.setattr(arena_cli, "_faces", lambda paths, heroes, offline, store: FaceMatcher.from_png({}))
+    run_watch(options, cast(Any, Badge()), queue.Queue(), retry, threading.Event(), threading.Event())
+    assert seen[0].startswith("the game window is not visible")
+    assert seen[1] == "no Opponents list in the game picture (open it in the game)"
+    kept = sorted((default_paths().captures_dir / "arena" / "debug").glob("*.png"), key=lambda p: p.stat().st_mtime_ns)
+    assert len(kept) == 2  # once by itself after the hunt, once on request
+    assert ("Opponents list not found", f"picture kept: {kept[0].name}") in said and said[-1][0] == "picture kept"
+    shape = getattr(cv2.imread(str(kept[0])), "shape", None)
+    assert shape == picture.shape  # the picture as the game gave it, full size

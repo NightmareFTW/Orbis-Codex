@@ -96,15 +96,25 @@ class Badge:
 
 
 WORK_HEIGHT: Final = 740
-"""Frames taller than this are shrunk before reading (the badges are measured at 0.5x-2.9x of a 740 px capture;
-faster, and crops get the same size from every capture)."""
+"""Every frame is brought to this height before reading (the badges are measured at 0.5x-2.9x of a 740 px capture;
+one size makes the detectors' thresholds mean the same on every capture, and crops get the same size)."""
+HEIGHT_SLACK: Final = 6
+"""A frame this close to `WORK_HEIGHT` (either way) is not resampled."""
+MIN_HEIGHT: Final = 240
+"""Frames shorter than this are left alone (a minimised or broken window, nothing to read)."""
 
 
 def normalise(image: BgrImage) -> BgrImage:
-    if image.shape[0] <= WORK_HEIGHT + 20:
+    """The frame at `WORK_HEIGHT`: larger ones shrunk, smaller ones enlarged (SPEC D84). The circle detection of the
+    Opponents list counts votes along each circle's edge, so its result depends on the absolute size: measured on the
+    user's list capture, 3 rows at 740 px high but 2 at 715 and 700 and none at 546; resampled to 740, all three from
+    300 px up to 2160 px."""
+    height = image.shape[0]
+    if height < MIN_HEIGHT or abs(height - WORK_HEIGHT) <= HEIGHT_SLACK:
         return image
-    scale = WORK_HEIGHT / image.shape[0]
-    return np.asarray(cv2.resize(image, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA), np.uint8)
+    scale = WORK_HEIGHT / height
+    interpolation = cv2.INTER_AREA if scale < 1 else cv2.INTER_CUBIC
+    return np.asarray(cv2.resize(image, None, fx=scale, fy=scale, interpolation=interpolation), np.uint8)
 
 
 def class_templates(sprite_png: bytes) -> dict[HeroClass, Template]:

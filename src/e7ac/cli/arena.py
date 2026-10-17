@@ -36,17 +36,19 @@ from e7ac.sources.assets import fetch_class_sprite, fetch_hero_icons, load_class
 from e7ac.storage.db import session_scope
 from e7ac.ui.watch_signal import AMBER, DEFAULT_SIZE, GREEN, LIGHT, RED, NoSignal, WatchSignal, open_signal
 from e7ac.vision.arena_badges import (
+    WORK_HEIGHT,
     ArenaScreenError,
     Badge,
     BgrImage,
     Template,
     class_templates,
     hero_crop,
+    level_squares,
     normalise,
     read_badges,
 )
 from e7ac.vision.arena_guide import Face, FaceMatcher, ListLayout, fit_rows, list_rows
-from e7ac.vision.arena_list import read_list_badges
+from e7ac.vision.arena_list import find_rows, read_list_badges
 from e7ac.vision.image import ImageError, load_image
 from e7ac.vision.window import Rect
 
@@ -100,6 +102,10 @@ class WatchOptions:
     on); the names come back through `taught`."""
     taught: queue.Queue[tuple[FaceQuestion, str]] | None = None
     """Faces named for `unknown`: (the question, the hero's code)."""
+    status: Callable[[str], None] | None = None
+    """Called with what the watch sees now, whenever it changes ("Opponents list: 3 rows, steady 1/2")."""
+    snapshot: threading.Event | None = None
+    """Set to keep the picture the watch is looking at (a window button), to find out why it reads nothing."""
     recorded: Callable[[int], None] | None = None
     """Called with the number of teams just recorded on the sightings file."""
     teams: Callable[[list[str], list[str]], None] | None = None
@@ -149,6 +155,7 @@ def run_watch(
     if options.collect_only:
         badge.say("Collecting opponents", "open the Opponents list in the game", LIGHT)
     typer.echo("Watching the game for the Arena VS screen and the Attack Guide (magnifier). Ctrl+C stops.")
+    shown = ""
     for item in game_frames(client, options.hwnd):
         if stop.is_set():
             typer.echo("Stopped.")
@@ -164,7 +171,21 @@ def run_watch(
             frame, area = item
             match.frame = frame
             badge.place(area)
+            if frame.shape[1::-1] != match.size:
+                match.size = (frame.shape[1], frame.shape[0])
+                typer.echo(f"  game picture: {match.size[0]}x{match.size[1]} (read at {WORK_HEIGHT} px high)")
             _step(normalise(frame), match, context)
+        else:
+            match.sees = "the game window is not visible (it must be on screen, not minimised or covered)"
+        if options.status is not None and match.sees != shown:
+            shown = match.sees
+            options.status(shown)
+        if options.snapshot is not None and options.snapshot.is_set():
+            options.snapshot.clear()
+            _keep_debug(match, paths, badge, "picture kept")
+        if match.hunting is not None and arena_clock() - match.hunting > HUNT_SECONDS:
+            match.hunting = None
+            _keep_debug(match, paths, badge, "Opponents list not found")
 
 
 @dataclass(slots=True)
@@ -192,6 +213,12 @@ class _Match:
     """Frames in a row in which the list looked the same (read once it has been calm for `CALM_FRAMES`)."""
     list_waited: int = 0
     """Calm frames spent waiting for the rows still missing."""
+    sees: str = ""
+    """What the watch makes of the last picture, in words."""
+    size: tuple[int, int] = (0, 0)
+    """The game picture's width and height."""
+    hunting: float | None = None
+    """When "Check again" was pressed and no list has been read since (`arena_clock`)."""
     list_recorded: list[npt.NDArray[np.float32]] = field(default_factory=list)
     """The faces of each row already recorded: a row that looks the same is not recorded twice."""
     guide_armed: bool = True
@@ -298,6 +325,7 @@ def _again(match: _Match, badge: WatchSignal, collect_only: bool = False) -> Non
     match.previous, match.seen_faces = [], ()
     match.list_read = None
     match.list_calm = match.list_waited = 0
+    match.hunting = arena_clock()
     where = "the Opponents list" if collect_only else "Opponents list, VS screen, then the magnifier"
     badge.say("Checking again...", where, AMBER)
     typer.echo("Check again: reading the screen anew.")
@@ -307,7 +335,7 @@ def _step(image: BgrImage, match: _Match, c: _Context) -> None:
     if match.pending and not c.answers.empty():
         _answer(c.answers.get(), match, c)
     try:
-        found = list_rows(image)
+        found = find_rows(image)
     except ArenaScreenError:
         found = []
     if found:  # the Opponents list: every opponent at once
@@ -317,7 +345,9 @@ def _step(image: BgrImage, match: _Match, c: _Context) -> None:
     match.list_signature = match.list_read = None
     match.list_calm = match.list_waited = 0
     if c.options.collect_only:  # only the list matters: no VS screen, no Attack Guide, no questions
+        match.sees = "no Opponents list in the game picture (open it in the game)"
         return
+    match.sees = "no Opponents list here: watching for the VS screen and the Attack Guide"
     try:
         badges = read_badges(image, c.templates)
     except ArenaScreenError:
@@ -388,6 +418,30 @@ def _step(image: BgrImage, match: _Match, c: _Context) -> None:
     _guide_done([n for n in names if n], match, c)
 
 
+HUNT_SECONDS: Final = 6.0
+"""After "Check again", the picture is kept for the user when no list has been read within this time."""
+arena_clock: Callable[[], float] = time.monotonic
+
+
+def _keep_debug(match: _Match, paths: AppPaths, badge: WatchSignal, title: str) -> None:
+    """Keep the picture the watch is looking at (local only) and say what the detectors made of it, so that a list that
+    is never found can be looked into (SPEC D84)."""
+    if match.frame is None:
+        badge.say(title, "there is no game picture to keep", RED)
+        typer.echo("  nothing to keep: the game window has not been seen")
+        return
+    path = _keep_capture(paths.captures_dir / "arena" / "debug", match.frame, "seen")
+    image = normalise(match.frame)
+    try:
+        rows = f"{len(list_rows(image))} rows of round faces"
+    except ArenaScreenError:
+        rows = "no rows of round faces"
+    squares = len(level_squares(image))
+    seen = f"{match.size[0]}x{match.size[1]} (read at {image.shape[0]} px high): {rows}, {squares} level squares"
+    badge.say(title, f"picture kept: {path.name}", RED)
+    typer.echo(f"  picture kept: {path}\n  the watch sees it as {seen}")
+
+
 CALM_FRAMES: Final = 2
 """A list is read once it has looked the same for this many frames in a row (about a second)."""
 EXPECTED_ROWS: Final = 3
@@ -404,15 +458,19 @@ def _list_frame(image: BgrImage, found: list[list[tuple[float, float, float]]], 
     match.list_calm = match.list_calm + 1 if alike else 0
     match.list_rows, match.list_signature = rows, signature
     if match.list_calm < CALM_FRAMES:
+        match.sees = f"Opponents list: {len(rows)} rows, waiting for it to be still ({match.list_calm}/{CALM_FRAMES})"
         return
     if not match.list_armed and _same_faces(signature, match.list_read):
+        match.sees = f"Opponents list: {len(rows)} rows, already read (refresh it, or press Read now)"
         return  # the list that was read is still there
     if len(rows) < EXPECTED_ROWS and match.list_waited < PARTIAL_WAIT:
         match.list_waited += 1  # the other rows may still be fading in
         if match.list_waited == 1:
             typer.echo(f"  Opponents list: {len(rows)} of {EXPECTED_ROWS} rows so far, waiting a moment...")
+        match.sees = f"Opponents list: {len(rows)} of {EXPECTED_ROWS} rows so far, waiting for the others"
         return
     match.list_armed, match.list_waited = False, 0
+    match.sees = f"Opponents list: reading {len(rows)} rows"
     match.list_read = signature
     _opponents(image, match, c, rows, signature)
 
@@ -618,7 +676,8 @@ def _opponents(
     (what the Arena stats page counts; a row recorded before is not recorded twice), the faces nobody could name offered
     to be taught, then the teams checked against yours; the badge names the best one."""
     typer.echo(f"{datetime.now().astimezone():%H:%M:%S} Opponents list")
-    rows = rows if rows is not None else list_rows(image)
+    match.hunting = None
+    rows = rows if rows is not None else find_rows(image)
     read = resolve_list(
         c.list_faces.read_rows(image, rows),
         read_list_badges(image, rows, c.templates),
