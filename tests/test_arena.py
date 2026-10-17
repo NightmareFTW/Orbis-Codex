@@ -348,7 +348,8 @@ def test_watch_reads_your_team_then_the_attack_guide_and_shows_the_odds(monkeypa
     monkeypatch.setattr(predict_cli, "win_odds", odds)
     result = CliRunner().invoke(app, ["arena", "watch"])
     assert result.exit_code == 0, result.output
-    assert predicted == [("c1001, c1002, c1003, c1004", "c1005, c1006, c1007, c1008")]  # once, no question asked
+    # once, no question asked; your side foremost first (the rightmost badge), theirs left to right
+    assert predicted == [("c1004, c1003, c1002, c1001", "c1005, c1006, c1007, c1008")]
     assert ("Tap the magnifier", "to read the opponent's team") in said
     assert said[-1] == ("Win chance 70%", "vs Foe One, Foe Two, Foe Three, Foe Four")
     learned = ReferenceStore(default_paths().home / "references" / "arena").codes()

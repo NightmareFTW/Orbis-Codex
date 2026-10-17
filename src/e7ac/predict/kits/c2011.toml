@@ -10,6 +10,9 @@ unmodelled = ["S1 life steal (the game says \"some of the damage dealt\", +15% h
 # turn", with a 4-turn cooldown at +5 (epic7db lists the cooldown without enhancements: 5).
 cooldowns = { 3 = 4 }
 
+[passive]
+uncounterable = [3]  # "This skill cannot trigger a counterattack"
+
 [[effect]]
 slot = 1
 kind = "cr"

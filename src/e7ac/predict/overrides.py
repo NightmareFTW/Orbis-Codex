@@ -18,6 +18,11 @@ One file per hero, named by its code (`c2049.toml`); every number carries where 
     immune = ["stun"]             # debuff kinds that never land
     low_hp = 0.3                  # effects with when = "low_hp" trigger after a hit leaves this Health share or less
     low_hp_cooldown = 5           # ... at most once every N own turns
+    guard = 0.2                   # chance to counterattack when an ally is attacked; `when = "guard"` effects follow
+    guard_cooldown = 3            # ... at most once every N own turns
+    uncounterable = [3]           # skill slots whose attacks trigger no counterattack
+    pierce_top = { 3 = 0.7 }      # slot -> penetration against the enemy with the highest max Health only
+    ignore_resist = true          # ignores the Effect Resistance of targets with less max Health than this hero
 
     [[effect]]
     slot = 3                      # 1-3
@@ -34,7 +39,10 @@ Optional effect fields: debuff (default: the kind's usual side), turns (2), chan
 all_allies (false), scaling ([hp, atk, def] shares of the caster's stats), count (0 = all), condition ("kill": only
 when the skill defeated an enemy). Extra kinds for hand kits: sacrifice (`value` = share of current Health paid by the
 caster), revive_buff (`value` = Health share restored when a hero holding it dies, for `turns`), redirect_provoke (at
-its turn the target uses its basic skill on the enemy with the highest max Health). A malformed file is
+its turn the target uses its basic skill on the enemy with the highest max Health), fear (cannot act; 40% chance to be
+dispelled at the start of its turn), hot (continuous healing: `value` = share of the holder's max Health at the start of
+each of its turns, for `turns`; it stacks), dual_attack (a random ally attacks the same target with a basic attack),
+spirit (Fighting Spirit gained by the caster; `[passive]` spirit_* set the Young Senya mechanic). A malformed file is
 an error naming the file (never skipped silently).
 """
 
@@ -77,11 +85,36 @@ KINDS: Final = frozenset(
         "sacrifice",
         "revive_buff",
         "redirect_provoke",
+        "fear",
+        "hot",
+        "dual_attack",
+        "spirit",
     }
 )
-_DEBUFFS: Final = frozenset({"stun", "dispel", "burn", "bleed", "poison", "provoke", "silence", "redirect_provoke"})
-WHEN: Final = frozenset({"use", "start", "turn", "revive", "low_hp"})
-PASSIVES: Final = frozenset({"reflect", "speed_cap", "no_counter", "immune", "low_hp", "low_hp_cooldown"})
+_DEBUFFS: Final = frozenset(
+    {"stun", "dispel", "burn", "bleed", "poison", "provoke", "silence", "redirect_provoke", "fear"}
+)
+WHEN: Final = frozenset({"use", "start", "turn", "revive", "low_hp", "guard", "spirit"})
+PASSIVES: Final = frozenset(
+    {
+        "reflect",
+        "speed_cap",
+        "no_counter",
+        "immune",
+        "low_hp",
+        "low_hp_cooldown",
+        "guard",
+        "guard_cooldown",
+        "uncounterable",
+        "pierce_top",
+        "ignore_resist",
+        "spirit_full",
+        "spirit_start",
+        "spirit_bonus",
+        "spirit_hit",
+        "spirit_share",
+    }
+)
 
 
 class KitError(ValueError):
@@ -167,6 +200,8 @@ def apply_override(kit: Kit, cooldowns: Mapping[int, int], override: KitOverride
         revive_effects=[] if dropped else list(kit.revive_effects),
         unmodelled=[n for n in kit.unmodelled if n not in override.handles] + list(override.unmodelled),
         low_hp_effects=[],
+        guard_effects=[],
+        spirit_effects=[],
     )
     revive_effects: list[Effect] = []
     for placed in override.effects:
@@ -178,6 +213,10 @@ def apply_override(kit: Kit, cooldowns: Mapping[int, int], override: KitOverride
             out.on_turn.append(placed.effect)
         elif placed.when == "low_hp":
             out.low_hp_effects.append(placed.effect)
+        elif placed.when == "guard":
+            out.guard_effects.append(placed.effect)
+        elif placed.when == "spirit":
+            out.spirit_effects.append(placed.effect)
         elif placed.effect.kind in ("heal", "resurrect"):  # revive: `value` = Health fraction regained
             out.revive = placed.effect.value
         else:
@@ -191,6 +230,16 @@ def apply_override(kit: Kit, cooldowns: Mapping[int, int], override: KitOverride
     out.immune = tuple(str(k) for k in passive.get("immune", out.immune))
     out.low_hp = float(passive.get("low_hp", out.low_hp))
     out.low_hp_cooldown = int(passive.get("low_hp_cooldown", out.low_hp_cooldown))
+    out.guard = float(passive.get("guard", out.guard))
+    out.guard_cooldown = int(passive.get("guard_cooldown", out.guard_cooldown))
+    out.uncounterable = tuple(int(slot) for slot in passive.get("uncounterable", out.uncounterable))
+    out.pierce_top = {int(slot): float(v) for slot, v in dict(passive.get("pierce_top", out.pierce_top)).items()}
+    out.ignore_resist = bool(passive.get("ignore_resist", out.ignore_resist))
+    out.spirit_full = int(passive.get("spirit_full", out.spirit_full))
+    out.spirit_start = int(passive.get("spirit_start", out.spirit_start))
+    out.spirit_bonus = int(passive.get("spirit_bonus", out.spirit_bonus))
+    out.spirit_hit = int(passive.get("spirit_hit", out.spirit_hit))
+    out.spirit_share = float(passive.get("spirit_share", out.spirit_share))
     return out, {**cooldowns, **override.cooldowns}
 
 

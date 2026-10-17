@@ -1,9 +1,44 @@
 # Mort
 hero = "c1104"
-source = "epic7db skill text (the in-game description) and Fribbels skill options, read by hand 2026-10-17"
+source = "S2 and S3 from the in-game skill screens (user screenshots, 2026-10-17: verified); S1 from epic7db skill text"
 status = "community"
-unmodelled = ["S2 ally counterattack 20% + Sacred Blessing (barrier to all allies, speed)", "S3 fear"]
+handles = ["Fury", "Increase Critical Hit Resistance", "S2 spd"]
+cooldowns = { 3 = 4 }
+# S2 (+5): immune to Stun, Sleep and Fear; nobody else counterattacks; when an ally is attacked, 20% chance to
+# counterattack, which activates Sacred Blessing (cooldown 3 turns): a barrier (proportional to max Health) to all allies
+# for 2 turns and Increase Speed by 30% to the caster for 2 turns. The barrier amount is Fribbels' 12% of max Health;
+# the +5% ... +15% barrier strength enhancements (+50% at +5) are not added (NV-42).
+# S3 (+5): cooldown 4; fear for 2 turns on all enemies; recovers Health (Fribbels: 30% of max Health, already read);
+# penetrates 70% of the Defense of the enemy with the highest max Health; ignores the Effect Resistance of targets
+# with less max Health than Mort. epic7db listed "Fury" for the fear icon and a spurious Critical Hit Resistance.
 
 [passive]
 no_counter = true
-immune = ["stun"]
+immune = ["stun", "fear"]
+guard = 0.2
+guard_cooldown = 3
+ignore_resist = true
+pierce_top = { 3 = 0.7 }
+
+[[effect]]
+slot = 2
+when = "guard"
+kind = "barrier"
+scaling = [0.12, 0, 0]
+turns = 2
+receivers = "all"
+note = "Sacred Blessing: a barrier to all allies for 2 turns"
+
+[[effect]]
+slot = 2
+when = "guard"
+kind = "spd"
+value = 0.30
+turns = 2
+note = "Sacred Blessing: Increase Speed by 30% for the caster, 2 turns"
+
+[[effect]]
+slot = 3
+kind = "fear"
+turns = 2
+note = "S3: inflicts fear for 2 turns on all enemies"

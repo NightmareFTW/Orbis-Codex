@@ -146,3 +146,9 @@ def test_damage_over_time_counters_and_silence_change_battles() -> None:
     state.dots.append((100.0, 2))
     state.remove(debuffs=True, count=0)
     assert not state.timers and not state.dots  # cleanse takes silence and damage over time too
+
+
+def test_a_counterattack_for_an_ally_is_not_the_heros_own_counterattack() -> None:
+    own = kit_from({2: SkillInfo(2, None, {}, "When attacked, has a 30% chance to counterattack.")})
+    guard = kit_from({2: SkillInfo(2, None, {}, "When an ally is attacked, has a 20% chance to counterattack.")})
+    assert own.counter == 0.3 and guard.counter == 0.0

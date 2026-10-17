@@ -76,7 +76,7 @@ def watch(
     badge, why = signal_factory(retry.set, share.set) if signal else (NoSignal(), "")
     if why:
         typer.echo(f"note: {why}", err=True)
-    match = _Match(team=store.last_team())
+    match = _Match(team=list(reversed(store.last_team())))  # the foremost first (the VS screen lists left to right)
     badge.say("Arena: open a match", "the VS screen, before the battle", LIGHT)
     typer.echo("Watching the game for the Arena VS screen and the Attack Guide (magnifier). Ctrl+C stops.")
     try:
@@ -239,7 +239,7 @@ def _step(image: BgrImage, match: _Match, c: _Context) -> None:
         theirs = [s.code for s in slots if s.badge.side == "them" and s.code]
         match.vs_theirs = theirs if len(theirs) == 4 else []
         if len(team) == 4:
-            match.team = team
+            match.team = list(reversed(team))  # your side faces right: the foremost hero is the rightmost
         if len(team) == 4 and len(theirs) == 4:  # the opponent's VS models were learned before
             _predict(match.team, theirs, c)
         elif len(team) == 4:
@@ -524,7 +524,7 @@ def scan(
     if unresolved:
         typer.echo(f"Not identified: slot(s) {', '.join(map(str, unresolved))}", err=True)
         raise typer.Exit(code=1)
-    you = ", ".join(s.code for s in slots if s.badge.side == "you" and s.code)
+    you = ", ".join(reversed([s.code for s in slots if s.badge.side == "you" and s.code]))  # the foremost first
     them = ", ".join(s.code for s in slots if s.badge.side == "them" and s.code)
     typer.echo(f'Run: e7 predict win --team "{you}" --vs "{them}"')
     if win:

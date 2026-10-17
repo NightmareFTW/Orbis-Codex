@@ -108,6 +108,27 @@ class Kit:
     """Health share at or below which `low_hp_effects` trigger after a hit (every `low_hp_cooldown` own turns)."""
     low_hp_cooldown: int = 0
     low_hp_effects: list[Effect] = field(default_factory=list)
+    guard: float = 0.0
+    """Chance to counterattack when an ally is attacked (Mort); `guard_effects` then trigger every `guard_cooldown`
+    own turns (Sacred Blessing)."""
+    guard_cooldown: int = 0
+    guard_effects: list[Effect] = field(default_factory=list)
+    uncounterable: tuple[int, ...] = ()
+    """Skill slots whose attacks trigger no counterattack ("This skill cannot trigger a counterattack")."""
+    pierce_top: dict[int, float] = field(default_factory=dict)
+    """Slot -> defense penetration against the enemy with the highest max Health only (Mort S3: 70%)."""
+    ignore_resist: bool = False
+    """Ignores the Effect Resistance of targets with less max Health than this hero (Mort)."""
+    spirit_full: int = 0
+    """Fighting Spirit needed to trigger `spirit_effects` and the area damage (Young Senya's Help! Help!); 0 = none."""
+    spirit_start: int = 0
+    spirit_bonus: int = 0
+    """Extra starting Fighting Spirit when the foremost ally except the caster is an Earth hero."""
+    spirit_hit: int = 0
+    """Fighting Spirit gained each time the hero is attacked."""
+    spirit_share: float = 0.0
+    """Area damage on trigger: this share of the max Health of the caster and the foremost ally, to every enemy."""
+    spirit_effects: list[Effect] = field(default_factory=list)
     """Passive heals / barriers acting on each of the caster's turns."""
     revive: float | None = None
     """HP fraction restored once on lethal damage."""
@@ -129,9 +150,9 @@ def kit_from(skills: dict[int, SkillInfo], amounts: Mapping[int, Mapping[str, Sc
         if slot == 2 and not info.cooldown:  # a passive
             revive = _revive(info.text)
             lowered = info.text.lower()
-            counter = re.search(r"(\d+)% chance to counterattack", lowered)
-            if counter is not None:
-                kit.counter = int(counter.group(1)) / 100
+            counter = re.search(r"([^.]*?)(\d+)% chance to counterattack", lowered)
+            if counter is not None and not re.search(r"\b(?:ally|allies)\b", counter.group(1)):
+                kit.counter = int(counter.group(2)) / 100  # not "when an ally is attacked" (Mort: a guard, hand kit)
                 effects = [e for e in effects if e.kind != "counter"]
             if revive is not None:
                 kit.revive, kit.revive_effects = revive, [e for e in effects if not e.debuff]

@@ -22,7 +22,7 @@ from __future__ import annotations
 import math
 import random
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Final
 
 from e7ac.domain.codes import Stat
@@ -34,6 +34,9 @@ RUNS: Final = 10_000
 SEED: Final = 7
 LAND_CAP: Final = 0.85
 """MECH-EFF-01: at most 85% for a debuff to land (15% minimum resist)."""
+FEAR_DISPEL: Final = 0.4
+"""MECH-FEAR-01 (`verified`, in-game text): a feared hero cannot act; at the start of its turn it has a 40% chance to
+be dispelled."""
 MAX_ACTIONS: Final = 200
 """A battle still going after this many actions is a draw (nobody can defeat anybody with the modelled skills)."""
 
@@ -49,6 +52,8 @@ class Combatant:
     """Skill slot -> cooldown in turns (epic7db); missing: unknown."""
     kit: Kit = field(default_factory=Kit)
     """Skill effects (epic7db icons and text, SPEC D63)."""
+    element: str = ""
+    """Catalog element ("wind" = Earth): for what depends on the foremost ally (SPEC D79)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,6 +101,10 @@ def _battle(
     for i, unit in enumerate(units):
         for effect in unit.kit.at_start:
             _use(effect, i, [], units, hp, cr, state, rng)
+        if unit.kit.spirit_full:  # Fighting Spirit at the start of the battle (Young Senya S2)
+            front = _foremost(units, hp, i)
+            earth = front is not None and units[front].element == "wind"
+            state[i].spirit = unit.kit.spirit_start + (unit.kit.spirit_bonus if earth else 0)
     for actions in range(1, MAX_ACTIONS + 1):
         alive = [i for i in range(n) if hp[i] > 0]
         speed = [speeds[i] * (1.0 if units[i].kit.speed_cap else state[i].factor("spd")) for i in range(n)]
@@ -110,6 +119,11 @@ def _battle(
         unit, me = units[actor], state[actor]
         for effect in unit.kit.on_turn:  # passive heals / barriers at the start of the turn
             _use(effect, actor, [], units, hp, cr, state, rng)
+        if me.hots:  # continuous healing at the start of the turn
+            maximum = unit.stats[Stat.HP]
+            for share, _ in me.hots:
+                hp[actor] = min(maximum, hp[actor] + share * maximum)
+            me.hots = [(share, turns - 1) for share, turns in me.hots if turns > 1]
         if me.dots:  # damage over time at the start of the turn (MECH-DOT-01)
             for damage, _ in me.dots:
                 me.hurt(hp, actor, damage)
@@ -121,12 +135,15 @@ def _battle(
                 if len(standing) == 1:
                     return standing.pop(), actions
                 continue
-        if me.timers.get("stun", 0) > 0:
+        if me.timers.get("fear", 0) > 0 and rng.random() < FEAR_DISPEL:
+            del me.timers["fear"]
+        if me.timers.get("stun", 0) > 0 or me.timers.get("fear", 0) > 0:
             me.tick()
             continue
         for ready in waiting[actor]:
             waiting[actor][ready] = max(0, waiting[actor][ready] - 1)
         me.low_wait = max(0, me.low_wait - 1)
+        me.guard_wait = max(0, me.guard_wait - 1)
         dead_ally = any(hp[j] <= 0 and units[j].side == unit.side for j in range(n))
         held = any(me.timers.get(kind, 0) > 0 for kind in ("silence", "provoke", "redirect_provoke"))
         slot = 1 if held else _choose(unit, waiting[actor], acted[actor], dead_ally)
@@ -149,14 +166,23 @@ def _battle(
             for j in targets:
                 guard = {**units[j].stats, Stat.DEF: units[j].stats[Stat.DEF] * state[j].factor("def")}
                 before = hp[j]
-                state[j].hurt(hp, j, base_hit(attack, skill, guard) * factor)
+                used = skill
+                top = unit.kit.pierce_top.get(slot)
+                if top and j == max(enemies, key=lambda e: units[e].stats[Stat.HP]):
+                    used = replace(skill, penetration=max(skill.penetration, top))
+                state[j].hurt(hp, j, base_hit(attack, used, guard) * factor)
                 if hp[j] <= 0:
                     _lethal(units, hp, cr, state, j)
                     killed = killed or hp[j] <= 0
                 else:
-                    _after_hit(j, actor, before - hp[j], units, hp, cr, state, hits, rng)
+                    _after_hit(
+                        j, actor, before - hp[j], slot not in unit.kit.uncounterable, units, hp, cr, state, hits, rng
+                    )
         for effect in unit.kit.on_use.get(slot, []):
             if effect.condition == "kill" and not killed:
+                continue
+            if effect.kind == "dual_attack":
+                _dual_attack(actor, targets, units, hp, cr, state, hits, rng)
                 continue
             _use(effect, actor, targets, units, hp, cr, state, rng)
         me.tick()
@@ -201,6 +227,11 @@ class _State:
     """Health share restored by a revive status (kind "revive_buff")."""
     low_wait: int = 0
     """Own turns until the low-Health trigger works again."""
+    guard_wait: int = 0
+    """Own turns until the "ally attacked" effects work again."""
+    hots: list[tuple[float, int]] = field(default_factory=list)
+    """Continuous healing: (share of max Health at the start of each own turn, turns left); it stacks."""
+    spirit: float = 0.0
 
     def factor(self, kind: str) -> float:
         return max(0.0, 1 + self.buffs.get(kind, (0.0, 0))[0] + self.debuffs.get(kind, (0.0, 0))[0])
@@ -227,11 +258,12 @@ class _State:
     def remove(self, debuffs: bool, count: int) -> None:
         """Cleanse (debuffs) or dispel (buffs): all when `count` is 0."""
         kinds = (
-            [("timer", k) for k in ("stun", "provoke", "silence", "redirect_provoke")]
+            [("timer", k) for k in ("stun", "fear", "provoke", "silence", "redirect_provoke")]
             + [("dot", "")] * len(self.dots)
             + [("debuff", k) for k in self.debuffs]
             if debuffs
             else [("timer", k) for k in ("immortal", "invincible", "immunity", "counter", "revive_buff")]
+            + [("hot", "")] * len(self.hots)
             + [("barrier", "")]
             + [("buff", k) for k in self.buffs]
         )
@@ -250,6 +282,8 @@ class _State:
             return self.buffs.pop(kind, None) is not None
         if table == "dot":
             return bool(self.dots) and self.dots.pop(0) is not None
+        if table == "hot":
+            return bool(self.hots) and self.hots.pop(0) is not None
         had = self.barrier > 0
         self.barrier, self.barrier_turns = 0.0, 0
         return had
@@ -282,6 +316,7 @@ _TIMERS: Final = (
     "counter",
     "revive_buff",
     "redirect_provoke",
+    "fear",
 )
 
 
@@ -332,6 +367,9 @@ def _use(
     if effect.kind == "sacrifice":  # health paid by the caster, never to death
         hp[actor] = max(1.0, hp[actor] * (1 - effect.value))
         return
+    if effect.kind == "spirit":  # Fighting Spirit gained by the caster
+        state[actor].spirit += effect.value
+        return
     amount = (
         effect.scaling[0] * caster[Stat.HP]
         + effect.scaling[1] * caster[Stat.ATK]
@@ -351,6 +389,8 @@ def _use(
                 cr[r] = min(1.0, cr[r] + effect.value)
             elif effect.kind == "heal":
                 hp[r] = min(units[r].stats[Stat.HP], hp[r] + amount)
+            elif effect.kind == "hot":
+                state[r].hots.append((effect.value, effect.turns))
             elif effect.kind == "barrier":
                 state[r].barrier, state[r].barrier_turns = max(state[r].barrier, amount), effect.turns
             elif effect.kind == "cleanse":
@@ -363,6 +403,8 @@ def _use(
         if hp[j] <= 0 or state[j].timers.get("immunity", 0) > 0 or effect.kind in units[j].kit.immune:
             continue
         resistance = units[j].stats.get(Stat.EFFECT_RESISTANCE, 0.0)
+        if units[actor].kit.ignore_resist and units[j].stats[Stat.HP] < caster[Stat.HP]:
+            resistance = 0.0  # ignores the Effect Resistance of weaker (less max Health) targets
         land = effect.chance * min(max(1 + effectiveness - resistance, 0.0), LAND_CAP)  # MECH-EFF-01
         if rng.random() >= land:
             continue
@@ -388,6 +430,7 @@ def _after_hit(
     j: int,
     attacker: int,
     lost: float,
+    counterable: bool,
     units: Sequence[Combatant],
     hp: list[float],
     cr: list[float],
@@ -398,6 +441,21 @@ def _after_hit(
     """What a hero does after a hit it survives (SPEC D76): reflect part of the Health lost, trigger its low-Health
     effects, counterattack."""
     kit = units[j].kit
+    if kit.spirit_full:  # Fighting Spirit: Help! Help! when full (Young Senya S2)
+        state[j].spirit += kit.spirit_hit
+        if state[j].spirit >= kit.spirit_full:
+            state[j].spirit -= kit.spirit_full
+            for effect in kit.spirit_effects:
+                _use(effect, j, [], units, hp, cr, state, rng)
+            front = _foremost(units, hp, j)
+            extra = kit.spirit_share * (
+                units[j].stats[Stat.HP] + (units[front].stats[Stat.HP] if front is not None else 0)
+            )
+            for e in range(len(units)):
+                if units[e].side != units[j].side and hp[e] > 0:
+                    state[e].hurt(hp, e, extra)
+                    if hp[e] <= 0:
+                        _lethal(units, hp, cr, state, e)
     if kit.reflect and lost > 0:
         state[attacker].hurt(hp, attacker, min(kit.reflect * lost, units[j].stats[Stat.HP]))
         if hp[attacker] <= 0:
@@ -406,8 +464,58 @@ def _after_hit(
         state[j].low_wait = kit.low_hp_cooldown
         for effect in kit.low_hp_effects:
             _use(effect, j, [], units, hp, cr, state, rng)
+    if not counterable:  # a skill that cannot trigger a counterattack (BBK S3)
+        return
+    for m in range(len(units)):  # an ally was attacked: a guard (Mort) may counterattack for it
+        mate = units[m]
+        if m == j or mate.side != units[j].side or hp[m] <= 0 or not mate.kit.guard or 1 not in mate.skills:
+            continue
+        if hp[attacker] > 0 and state[m].timers.get("stun", 0) == 0 and rng.random() < mate.kit.guard:
+            _counterattack(m, attacker, units, hp, cr, state, hits, rng)
+            if state[m].guard_wait == 0:
+                state[m].guard_wait = mate.kit.guard_cooldown
+                for effect in mate.kit.guard_effects:
+                    _use(effect, m, [], units, hp, cr, state, rng)
     if hp[attacker] > 0 and _counters(units, hp, j, state, rng):
         _counterattack(j, attacker, units, hp, cr, state, hits, rng)
+
+
+def _foremost(units: Sequence[Combatant], hp: Sequence[float], i: int) -> int | None:
+    """The foremost ally except `i`: the first other living hero of its side in the order the team was given (the
+    convention: front first; `assumed`, NV-43)."""
+    return next((m for m in range(len(units)) if m != i and units[m].side == units[i].side and hp[m] > 0), None)
+
+
+def _dual_attack(
+    actor: int,
+    targets: Sequence[int],
+    units: Sequence[Combatant],
+    hp: list[float],
+    cr: list[float],
+    state: list[_State],
+    hits: Mapping[tuple[int, int, int], float],
+    rng: random.Random,
+) -> None:
+    """Dual Attack: a random ally able to act attacks the same target with a basic attack (never by counterattacks)."""
+    target = next((j for j in targets if hp[j] > 0), None)
+    mates = [
+        m
+        for m in range(len(units))
+        if m != actor
+        and units[m].side == units[actor].side
+        and hp[m] > 0
+        and 1 in units[m].skills
+        and state[m].timers.get("stun", 0) == 0
+        and state[m].timers.get("fear", 0) == 0
+    ]
+    if target is None or not mates:
+        return
+    m = rng.choice(mates)
+    crit = units[m].skills[1].can_crit and rng.random() < min(units[m].stats[Stat.CRIT_CHANCE], 1.0)
+    factor = min(units[m].stats[Stat.CRIT_DAMAGE], CD_CAP) if crit else 1.0
+    state[target].hurt(hp, target, hits[(m, target, 1)] * state[m].factor("atk") * factor)
+    if hp[target] <= 0:
+        _lethal(units, hp, cr, state, target)
 
 
 def _counters(

@@ -33,7 +33,7 @@ for the heroes the user meets most in Arena: ask the user for that list first, ~
 heroes (above): ready since D73 — run `e7 kit todo` on the user's PC (they paste the output), then for each hero
 `e7 kit show HERO` and write `src/e7ac/predict/kits/<code>.toml` (format in `predict/overrides.py`); (2) effects part 2 done
 (D74); six hand kits done 2026-10-17 (D76: c1162, c2011, c1153, c1104, c1131, c2049) — next: the user's `e7 kit todo`
-list, one hero at a time, best from the user's in-game skill-screen screenshots (verified; epic7db can be stale, D77); model gaps: artifacts, combat set effects, lifesteal, ally-attacked triggers (Mort S2); (3) the main window (PySide6, ~150–200 MB: confirm the dependency with
+list, one hero at a time, best from the user's in-game skill-screen screenshots (verified; epic7db can be stale, D77); model gaps: artifacts, combat set effects, lifesteal (BBK S1: no number in the game text); skills still to read from the game: Harsetti S1-S3, Yulha S2-S3, BBK S2, Maid Chloe S1-S2 (the user sends the skill screens hero by hero); (3) the main window (PySide6, ~150–200 MB: confirm the dependency with
 the user first), overlay later.
 
 ## Golden rules

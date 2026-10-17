@@ -182,3 +182,89 @@ def test_the_screen_verified_kits_say_so() -> None:
     yulha, _ = apply_override(Kit(), {}, kits["c1131"])
     assert [e.kind for e in yulha.on_use[1]] == ["redirect_provoke"]
     assert "verified" in kits["c1131"].source and "verified" in kits["c2011"].source
+
+
+def test_guard_fear_uncounterable_pierce_and_resistance_in_battle() -> None:
+    from e7ac.predict.battle import Combatant, simulate
+    from tests.test_effects import unit
+
+    def win(side: list[Combatant]) -> float:
+        return simulate(side, runs=300).win
+
+    fear = Kit(on_use={1: [Effect("fear", True, 0.0, 2, 1.0)]})
+    duel = [unit("a", "you", fear), unit("b", "them")]
+    immune = [unit("a", "you", fear), unit("b", "them", Kit(immune=("fear",)))]
+    assert win(duel) > win([unit("a", "you"), unit("b", "them")]) + 0.2  # the feared one loses turns
+    assert win(immune) < win(duel) - 0.2  # ... unless it is immune to fear
+    counter = Kit(counter=1.0)
+    assert win([unit("a", "you", Kit(uncounterable=(1,))), unit("b", "them", counter)]) > win(
+        [unit("a", "you"), unit("b", "them", counter)]
+    )  # a skill that cannot trigger a counterattack
+    stun = Kit(on_use={1: [Effect("stun", True, 0.0, 1, 1.0)]})
+    ignoring = Kit(on_use=stun.on_use, ignore_resist=True)
+    weaker_resistant = unit("b", "them", hp=10000, resist=1.0)
+    assert win([unit("a", "you", ignoring, hp=10100), weaker_resistant]) > win(
+        [unit("a", "you", stun, hp=10100), weaker_resistant]
+    )  # ignores the resistance of a target with less max Health
+    assert win([unit("a", "you", Kit(pierce_top={1: 0.9})), unit("b", "them", hp=20000)]) > win(
+        [unit("a", "you"), unit("b", "them", hp=20000)]
+    )
+    guard = Kit(
+        guard=1.0,
+        guard_cooldown=3,
+        guard_effects=[Effect("barrier", False, 0.0, 2, 1.0, scaling=(0.5, 0.0, 0.0), receivers="all")],
+    )
+    boss = unit("b", "them", hp=30000)
+    assert (
+        win([unit("a", "you"), unit("m", "you", guard), boss]) > win([unit("a", "you"), unit("m", "you"), boss]) + 0.2
+    )
+
+
+def test_continuous_healing_dual_attack_and_fighting_spirit_in_battle() -> None:
+    from e7ac.predict.battle import Combatant, simulate
+    from tests.test_effects import unit
+
+    def win(side: list[Combatant]) -> float:
+        return simulate(side, runs=300).win
+
+    hot = Kit(on_use={1: [Effect("hot", False, 0.15, 2, 1.0, receivers="all")]})
+    assert win([unit("a", "you", hot), unit("b", "them")]) > win([unit("a", "you"), unit("b", "them")]) + 0.2
+    dual = Kit(on_use={1: [Effect("dual_attack", False, 0.0, 0, 1.0)]})
+    boss = unit("b", "them", hp=30000)
+    assert win([unit("a", "you", dual), unit("m", "you"), boss]) > win([unit("a", "you"), unit("m", "you"), boss]) + 0.2
+    spirit = Kit(
+        spirit_full=100,
+        spirit_start=80,
+        spirit_hit=20,
+        spirit_share=0.3,
+        spirit_effects=[Effect("extra_turn", False, 0.0, 0, 1.0)],
+    )
+    assert win([unit("a", "you", spirit), unit("b", "them")]) > win([unit("a", "you"), unit("b", "them")]) + 0.2
+    # the foremost ally except the caster: an Earth one ("wind") adds the starting Fighting Spirit (the only source)
+    bonus = Kit(spirit_full=100, spirit_start=0, spirit_bonus=100, spirit_hit=0, spirit_share=1.0)
+    stats = unit("x", "you").stats
+    caster = Combatant("a", "you", stats, 200, unit("a", "you").skills, {}, bonus, "light")
+    earth = Combatant("e", "you", stats, 200, {}, {}, Kit(), "wind")
+    plain = Combatant("p", "you", stats, 200, {}, {}, Kit(), "fire")
+    boss = unit("b", "them", hp=30000)
+    assert win([caster, earth, boss]) > win([caster, plain, boss])
+
+
+def test_mort_and_karin_kits_carry_the_screen_verified_passives() -> None:
+    kits = load_overrides()
+    mort, cooldowns = apply_override(Kit(), {3: 5}, kits["c1104"])
+    assert cooldowns[3] == 4 and mort.guard == 0.2 and mort.guard_cooldown == 3 and mort.pierce_top == {3: 0.7}
+    assert mort.immune == ("stun", "fear") and mort.ignore_resist and len(mort.guard_effects) == 2
+    assert [e.kind for e in mort.on_use[3]] == ["fear"]
+    karin, _ = apply_override(Kit(), {}, kits["c2011"])
+    assert karin.uncounterable == (3,)
+
+
+def test_young_senya_kit_carries_the_screen_verified_numbers() -> None:
+    kits = load_overrides()
+    senya, cooldowns = apply_override(Kit(), {3: 5}, kits["c1162"])
+    assert cooldowns[3] == 4 and senya.spirit_full == 100 and senya.spirit_start == 50 and senya.spirit_bonus == 40
+    kinds = {e.kind: e for e in senya.on_use[3]}
+    assert kinds["cr"].value == 0.20 and kinds["hot"].value == 0.15 and kinds["hot"].turns == 2
+    assert kinds["spirit"].value == 20 and [e.kind for e in senya.spirit_effects] == ["cleanse", "extra_turn"]
+    assert {e.kind for e in senya.on_use[1]} == {"cr", "dual_attack"}

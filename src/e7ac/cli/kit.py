@@ -140,6 +140,30 @@ def _passives(kit: Kit) -> list[str]:
         found.append("nobody else counterattacks")
     if kit.immune:
         found.append("immune to " + "/".join(kit.immune))
+    if kit.guard:
+        found.append(
+            f"{kit.guard:.0%} to counterattack when an ally is attacked (every {kit.guard_cooldown} turns: "
+            + ", ".join(_describe(e) for e in kit.guard_effects)
+            + ")"
+        )
+    if kit.uncounterable:
+        found.append("S" + "/S".join(str(slot) for slot in kit.uncounterable) + " triggers no counterattack")
+    if kit.pierce_top:
+        found.append(
+            ", ".join(
+                f"S{slot} pierces {v:.0%} Defense of the highest-Health enemy" for slot, v in kit.pierce_top.items()
+            )
+        )
+    if kit.ignore_resist:
+        found.append("ignores Effect Resistance of weaker targets")
+    if kit.spirit_full:
+        found.append(
+            f"Fighting Spirit {kit.spirit_start}"
+            + (f" (+{kit.spirit_bonus} with an Earth foremost ally)" if kit.spirit_bonus else "")
+            + f", +{kit.spirit_hit} per hit taken; at {kit.spirit_full}: "
+            + ", ".join(_describe(e) for e in kit.spirit_effects)
+            + f" and {kit.spirit_share:.0%} of the max Health of her and the foremost ally to every enemy"
+        )
     if kit.low_hp:
         found.append(
             f"at {kit.low_hp:.0%} Health or less (every {kit.low_hp_cooldown} turns): "
@@ -150,7 +174,9 @@ def _passives(kit: Kit) -> list[str]:
 
 def _describe(effect: Effect) -> str:
     parts = [effect.kind]
-    if effect.value:
+    if effect.kind == "spirit":
+        parts.append(f"+{effect.value:g} Fighting Spirit")
+    elif effect.value:
         parts.append(f"{effect.value:+.0%}")
     if any(effect.scaling):
         hp, atk, df = effect.scaling

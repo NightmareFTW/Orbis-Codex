@@ -34,7 +34,7 @@ from e7ac.storage.db import session_scope
 predict_app = typer.Typer(help="Arena predictions: turn order, hits to defeat.", no_args_is_help=True)
 
 
-_TEAM = typer.Option(help='Your heroes, comma separated: "Kawerik, Estelle, c1159".')
+_TEAM = typer.Option(help='Your heroes, comma separated, the foremost first: "Kawerik, Estelle, c1159".')
 _VS = typer.Option(help='Opponents, comma separated; add "=SPEED" when you know it: "c2011, Arbiter Vildred=231".')
 _WORLD = typer.Option(help="Stove region for opponents (default: your setting).")
 _OFFLINE = typer.Option("--offline", help="Use cached Stove data only.")
@@ -53,6 +53,7 @@ class _Fighter:
     skills: dict[int, SkillPower] = field(default_factory=dict)
     name: str = ""
     """Catalog name (epic7db pages are found by it)."""
+    element: str = ""
     cooldowns: dict[int, int] = field(default_factory=dict)
     kit: Kit = field(default_factory=Kit)
     amounts: dict[int, dict[str, Scaling]] = field(default_factory=dict)
@@ -121,7 +122,7 @@ def win_odds(team: str, vs: str, world: World | None, offline: bool) -> BattleOd
     missing = [f.label for f in fighters if not f.stats]
     if missing:
         _fail(f"no stats for {', '.join(missing)} (Stove has no data: only the speed was given)")
-    units = [Combatant(f.label, f.side, f.stats, f.speed, f.skills, f.cooldowns, f.kit) for f in fighters]
+    units = [Combatant(f.label, f.side, f.stats, f.speed, f.skills, f.cooldowns, f.kit, f.element) for f in fighters]
     skipped = sorted({name for f in fighters for name in f.kit.unmodelled})
     if skipped:
         typer.echo(f"note: effects not simulated yet: {', '.join(skipped)}", err=True)
@@ -196,6 +197,7 @@ def _fighters(team: str, vs: str, world: World | None, offline: bool) -> list[_F
             fighters.append(_Fighter(label, "them", _resolve_hero_code(session, label), speed=given or None))
         for fighter in fighters:
             fighter.name = heroes[fighter.code].name if fighter.code in heroes else ""
+            fighter.element = str(heroes[fighter.code].value("element") or "") if fighter.code in heroes else ""
             if is_hero_code(fighter.label) and fighter.name:
                 fighter.label = fighter.name  # codes given (e7 arena scan): show names
             if snapshot is not None:

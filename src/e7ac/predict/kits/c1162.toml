@@ -1,25 +1,72 @@
 # Young Senya
 hero = "c1162"
-source = "epic7db skill text (the in-game description) and Fribbels skill options, read by hand 2026-10-17"
+source = "S1, S2 and S3 from the in-game skill screens (the user's screenshots, 2026-10-17: verified); the foremost-ally convention and the Help! Help! damage reading are assumptions (NV-43)"
 status = "community"
-unmodelled = ["S1 Dual Attack from a random ally", "S2 Fighting Spirit / Help! Help!", "S3 soulburn healing"]
+cooldowns = { 3 = 4 }
+unmodelled = [
+    "S1 soulburn: the Combat Readiness increase reaches all allies",
+    "S2 Special Friendship on the foremost ally (extra damage on its critical hits)",
+    "S2 Help! Help! base attack (rate not shown; only the additional damage is simulated)",
+]
+# The in-game texts are at +5 (orange numbers are the enhanced ones): epic7db's S3 said 40% Combat Readiness, the game
+# says 20% (15% + 1+1+1+2), and no cooldown change besides -1 turn at +3 (4 turns).
+
+[passive]
+spirit_full = 100     # Fighting Spirit needed for Help! Help!
+spirit_start = 50     # 40 at the start of the first battle (+10 from the enhancements: 1+2+2+2+3)
+spirit_bonus = 40     # 40 more when the foremost ally except Senya is an Earth hero
+spirit_hit = 20       # gained each time she is attacked
+spirit_share = 0.2    # additional damage: 20% of the max Health of Senya and of the foremost ally, to every enemy
+
+[[effect]]
+slot = 2
+when = "spirit"
+kind = "cleanse"
+receivers = "self"
+count = 0
+note = "S2 Help! Help!: dispels all debuffs from the caster"
+
+[[effect]]
+slot = 2
+when = "spirit"
+kind = "extra_turn"
+note = "S2 Help! Help!: grants an extra turn"
 
 [[effect]]
 slot = 1
 kind = "cr"
 value = 0.15
-note = "S1: increases the caster's Combat Readiness by 15%"
+note = "S1 Oopsie!: increases the caster's Combat Readiness by 15% (at +5)"
+
+[[effect]]
+slot = 1
+kind = "dual_attack"
+note = "S1 Oopsie!: triggers a Dual Attack from a random ally (a basic attack on the same target)"
 
 [[effect]]
 slot = 3
 kind = "cleanse"
 receivers = "all"
 count = 0
-note = "S3: dispels all debuffs from all allies"
+note = "S3 Snack Time!: dispels all debuffs from all allies"
+
+[[effect]]
+slot = 3
+kind = "hot"
+value = 0.15
+turns = 2
+receivers = "all"
+note = "S3: continuous healing for 2 turns (Continuous Heal: at the start of the turn, recovers 15% of max Health; stacks)"
 
 [[effect]]
 slot = 3
 kind = "cr"
-value = 0.40
+value = 0.20
 all_allies = true
-note = "S3: increases the Combat Readiness of all allies by 40%"
+note = "S3: increases Combat Readiness (of all allies) by 20% (at +5)"
+
+[[effect]]
+slot = 3
+kind = "spirit"
+value = 20
+note = "S3: acquires 20 Fighting Spirit"
