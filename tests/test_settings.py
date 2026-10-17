@@ -157,3 +157,13 @@ def test_failed_save_keeps_previous_file_and_no_temp(isolated_home: AppPaths, mo
     monkeypatch.undo()
     assert load_settings(isolated_home.settings_file).world is World.EUROPE
     assert [p.name for p in isolated_home.home.iterdir()] == ["settings.json"]
+
+
+def test_the_badge_size_defaults_to_large_and_is_a_known_choice(isolated_home: AppPaths) -> None:
+    from e7ac.settings import BadgeSize, Settings, SettingsError, allowed_values, with_value
+
+    assert Settings().badge_size is BadgeSize.LARGE  # "normal" was unreadable on a high-resolution screen (D82)
+    assert allowed_values("badge_size") == ["normal", "large", "huge"]
+    assert with_value(Settings(), "badge_size", "huge").badge_size is BadgeSize.HUGE
+    with pytest.raises(SettingsError):
+        with_value(Settings(), "badge_size", "tiny")

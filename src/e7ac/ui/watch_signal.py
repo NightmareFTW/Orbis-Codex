@@ -21,6 +21,11 @@ from e7ac.vision.window import Rect
 
 WIDTH: Final = 300
 HEIGHT: Final = 58
+"""The badge at "normal" size on a 96-dpi screen, in pixels; fonts below in pixels too."""
+FONT_TITLE, FONT_LINE, FONT_BUTTON = 16, 13, 11
+SIZES: Final = {"normal": 1.0, "large": 1.6, "huge": 2.2}
+"""Badge size name -> factor over the "normal" size (SPEC D82: "normal" was unreadable on a high-resolution screen)."""
+DEFAULT_SIZE: Final = "large"
 GREY, AMBER, GREEN, RED, LIGHT = "#5a5a5a", "#e0a020", "#2fa84f", "#d04040", "#bbbbbb"
 BACKGROUND: Final = "#1e1e1e"
 RESULTS: Final = {  # outcome -> text, colour (outcomes without a hero name: "not_hero", "incomplete")
@@ -39,6 +44,7 @@ class WatchSignal(Protocol):
     def result(self, name: str, outcome: str, waiting: int) -> None: ...
     def say(self, top: str, bottom: str, colour: str) -> None: ...
     def capturable(self, on: bool) -> bool: ...
+    def resize(self, size: str) -> None: ...
     def close(self) -> None: ...
 
 
@@ -53,18 +59,34 @@ class NoSignal:
     def capturable(self, on: bool) -> bool:
         return False
 
+    def resize(self, size: str) -> None: ...
+
     def close(self) -> None: ...
 
 
-def open_signal(beep: bool, buttons: list[tuple[str, Callable[[], None]]] | None = None) -> tuple[WatchSignal, str]:
+def metrics(size: str, dpi_scale: float) -> tuple[int, int, int, int, int]:
+    """(width, height, title font, line font, button font) in pixels for a size name on a screen of this scale."""
+    factor = SIZES.get(size, SIZES[DEFAULT_SIZE]) * max(1.0, min(dpi_scale, 4.0))
+    return (
+        round(WIDTH * factor),
+        round(HEIGHT * factor),
+        round(FONT_TITLE * factor),
+        round(FONT_LINE * factor),
+        round(FONT_BUTTON * factor),
+    )
+
+
+def open_signal(
+    beep: bool, buttons: list[tuple[str, Callable[[], None]]] | None = None, size: str = DEFAULT_SIZE
+) -> tuple[WatchSignal, str]:
     """The badge, or the console only with the reason. `buttons`: labels and what a click on each does (the badge then
-    takes clicks, on its own area only; it still never takes the focus from the game)."""
+    takes clicks, on its own area only; it still never takes the focus from the game). `size`: a key of `SIZES`."""
     if sys.platform == "win32":
         try:
             import tkinter  # noqa: F401
         except ImportError:
             return NoSignal(), "tkinter is missing from this Python: console only"
-        badge = TkBadge(beep, buttons or [])
+        badge = TkBadge(beep, buttons or [], size)
         if not badge.ready.wait(5):
             return NoSignal(), "the visual signal did not start: console only"
         return badge, ""
@@ -75,9 +97,12 @@ def open_signal(beep: bool, buttons: list[tuple[str, Callable[[], None]]] | None
 class TkBadge:
     """The badge, run by its own thread (tkinter calls stay on that thread; the others only post messages)."""
 
-    def __init__(self, beep: bool, buttons: list[tuple[str, Callable[[], None]]] | None = None) -> None:
+    def __init__(
+        self, beep: bool, buttons: list[tuple[str, Callable[[], None]]] | None = None, size: str = DEFAULT_SIZE
+    ) -> None:
         self.beep = beep
         self.buttons = buttons or []
+        self.size = size
         self._affinity = threading.Event()
         self.ready = threading.Event()
         self.excluded = False
@@ -116,6 +141,10 @@ class TkBadge:
         self._messages.put(("affinity", on))
         return self._affinity.wait(1.0)
 
+    def resize(self, size: str) -> None:
+        """Another size, at once (the window's size choice)."""
+        self._messages.put(("size", size))
+
     def close(self) -> None:
         self._messages.put(("close", None))
 
@@ -128,23 +157,39 @@ class TkBadge:
     def _run(self) -> None:
         import tkinter as tk
 
+        _make_dpi_aware()  # before any window: sizes and places are then physical pixels, like the capture's
         root = tk.Tk()
         root.overrideredirect(True)
         root.attributes("-topmost", True)
         root.attributes("-alpha", 0.92)
+        dpi_scale = float(root.winfo_fpixels("1i")) / 96.0
+        size = [self.size]
         box = tk.Frame(root, bg=BACKGROUND, highlightthickness=3, highlightbackground=GREY)
         box.pack(fill="both", expand=True)
-        top = tk.Label(box, text="Watching the game...", fg="white", bg=BACKGROUND, font=("Segoe UI", 12, "bold"))
-        bottom = tk.Label(box, text="", fg="#bbbbbb", bg=BACKGROUND, font=("Segoe UI", 10))
+        top = tk.Label(box, text="Watching the game...", fg="white", bg=BACKGROUND, anchor="w")
+        bottom = tk.Label(box, text="", fg="#bbbbbb", bg=BACKGROUND, anchor="w")
+        presses: list[tk.Label] = []
         if self.buttons:
             column = tk.Frame(box, bg=BACKGROUND)
             column.pack(side="right", fill="y", padx=(0, 4), pady=3)
             for label, action in self.buttons:
-                press = tk.Label(column, text=label, fg="white", bg=GREY, font=("Segoe UI", 8, "bold"), cursor="hand2")
+                press = tk.Label(column, text=label, fg="white", bg=GREY, cursor="hand2", padx=6)
                 press.pack(fill="both", expand=True, pady=1)
                 press.bind("<Button-1>", _on_click(action))
+                presses.append(press)
         top.pack(fill="x", padx=8, pady=(4, 0))
         bottom.pack(fill="x", padx=8)
+
+        def fit() -> tuple[int, int]:
+            """Fonts and size for the current size name (sizes in pixels: negative font sizes)."""
+            width, height, title, line, button = metrics(size[0], dpi_scale)
+            top.config(font=("Segoe UI", -title, "bold"))
+            bottom.config(font=("Segoe UI", -line))
+            for press in presses:
+                press.config(font=("Segoe UI", -button, "bold"))
+            return width, height
+
+        fitted = [fit()]
         root.withdraw()
         root.update_idletasks()
         hwnd = int(root.wm_frame(), 16)
@@ -158,12 +203,20 @@ class TkBadge:
                 return False
             if kind == "place" and (not placed or placed[-1] != value):
                 placed[:] = [value]
-                spot = _spot(value, self.excluded, root.winfo_screenheight())
+                spot = _spot(value, self.excluded, root.winfo_screenheight(), *fitted[0])
                 if spot is None:
                     root.withdraw()
                 else:
-                    root.geometry(f"{WIDTH}x{HEIGHT}+{spot[0]}+{spot[1]}")
+                    root.geometry(f"{fitted[0][0]}x{fitted[0][1]}+{spot[0]}+{spot[1]}")
                     root.deiconify()
+            elif kind == "size":
+                size[0] = value
+                fitted[0] = fit()
+                if placed:
+                    apply("place_again", placed[-1])
+            elif kind == "place_again":
+                placed.clear()
+                apply("place", value)
             elif kind == "top":
                 text, colour = value
                 top.config(text=text, fg=colour)
@@ -214,16 +267,26 @@ def result_line(name: str, outcome: str, waiting: int) -> tuple[str, str]:
     return f"{head}{more}", colour
 
 
-def _spot(area: Rect, excluded: bool, screen_height: int) -> tuple[int, int] | None:
+def _spot(
+    area: Rect, excluded: bool, screen_height: int, width: int = WIDTH, height: int = HEIGHT
+) -> tuple[int, int] | None:
     """Top centre of the game when the badge is invisible to capture; else just above or below the game window."""
-    x = area.left + max(0, (area.width - WIDTH) // 2)
+    x = area.left + max(0, (area.width - width) // 2)
     if excluded:
         return x, area.top + 8
-    if area.top - HEIGHT - 6 >= 0:
-        return x, area.top - HEIGHT - 6
-    if area.top + area.height + 6 + HEIGHT <= screen_height:
+    if area.top - height - 6 >= 0:
+        return x, area.top - height - 6
+    if area.top + area.height + 6 + height <= screen_height:
         return x, area.top + area.height + 6
     return None
+
+
+def _make_dpi_aware() -> None:
+    """Per-monitor DPI awareness for this process (a no-op where it is already set or not on Windows)."""
+    if sys.platform == "win32":
+        from e7ac.vision._win32 import set_dpi_aware
+
+        set_dpi_aware()
 
 
 def _exclude_from_capture(hwnd: int) -> bool:

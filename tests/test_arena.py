@@ -81,8 +81,7 @@ def test_badges_give_side_element_and_class_at_any_size(scale: float) -> None:
         ("them", Element.FIRE, HeroClass.WARRIOR),
         ("them", Element.ICE, HeroClass.RANGER),
     ]
-    by_element = {b.element: b for b in badges}
-    assert by_element[Element.DARK].element_confidence > by_element[Element.FIRE].element_confidence  # fire unseen
+    assert all(b.element_confidence >= 0.9 for b in badges)  # fire and ice colours are measured (the list, 2026-10-18)
 
 
 def test_squares_without_class_icon_are_not_badges() -> None:

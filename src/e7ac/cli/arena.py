@@ -20,6 +20,7 @@ import numpy.typing as npt
 import typer
 
 from e7ac.arena.identify import Slot, identify
+from e7ac.arena.list_read import ListHero, resolve_list
 from e7ac.arena.references import ReferenceStore
 from e7ac.arena.sightings import Sighting, SightingStore, sightings_path
 from e7ac.catalog.resolve import ResolvedEntity
@@ -32,7 +33,7 @@ from e7ac.roster.store import list_owned
 from e7ac.settings import SettingsError, load_settings
 from e7ac.sources.assets import fetch_class_sprite, fetch_hero_icons, load_class_sprite, load_hero_icons
 from e7ac.storage.db import session_scope
-from e7ac.ui.watch_signal import AMBER, GREEN, LIGHT, RED, NoSignal, WatchSignal, open_signal
+from e7ac.ui.watch_signal import AMBER, DEFAULT_SIZE, GREEN, LIGHT, RED, NoSignal, WatchSignal, open_signal
 from e7ac.vision.arena_badges import (
     ArenaScreenError,
     Badge,
@@ -44,6 +45,7 @@ from e7ac.vision.arena_badges import (
     read_badges,
 )
 from e7ac.vision.arena_guide import Face, FaceMatcher, list_rows
+from e7ac.vision.arena_list import read_list_badges
 from e7ac.vision.image import ImageError, load_image
 from e7ac.vision.window import Rect
 
@@ -91,6 +93,8 @@ class WatchOptions:
     None: the question is asked in the terminal (the keyboard is read in the background)."""
     recorded: Callable[[int], None] | None = None
     """Called with the number of teams just recorded on the sightings file."""
+    teams: Callable[[list[str], list[str]], None] | None = None
+    """Called with your team and the opponent's (hero codes, foremost first) when a prediction is made."""
 
 
 def run_watch(
@@ -124,7 +128,7 @@ def run_watch(
             break
         if retry.is_set():
             retry.clear()
-            _again(match, badge)
+            _again(match, badge, options.collect_only)
         if share.is_set():
             share.clear()
             _share(match.frame, last[0], paths, badge, client, options.hwnd)
@@ -231,26 +235,50 @@ def _share(
 
 
 def _with_badge(frame: BgrImage, result: tuple[str, str, str]) -> BgrImage:
-    """A copy of the badge drawn where it stands on the game (top centre)."""
+    """A copy of the badge drawn where it stands on the game (top centre), as large as the badge is on a screen of
+    this picture's height (the "large" size at 740 px, scaled with the picture)."""
     picture = frame.copy()
-    width, height = 300, 58
-    x0, y0 = max(0, (picture.shape[1] - width) // 2), 8
+    k = 1.6 * picture.shape[0] / 740
+    width, height = round(300 * k), round(58 * k)
+    x0, y0 = max(0, (picture.shape[1] - width) // 2), round(8 * k)
     colour = tuple(int(result[2][i : i + 2], 16) for i in (5, 3, 1))  # "#rrggbb" -> BGR
     cv2.rectangle(picture, (x0, y0), (x0 + width, y0 + height), (30, 30, 30), -1)
-    cv2.rectangle(picture, (x0, y0), (x0 + width, y0 + height), colour, 3)
-    cv2.putText(picture, result[0], (x0 + 12, y0 + 24), cv2.FONT_HERSHEY_DUPLEX, 0.6, colour, 1, cv2.LINE_AA)
+    cv2.rectangle(picture, (x0, y0), (x0 + width, y0 + height), colour, max(2, round(3 * k)))
+    thin = max(1, round(k))
+    cv2.putText(
+        picture,
+        result[0],
+        (x0 + round(12 * k), y0 + round(24 * k)),
+        cv2.FONT_HERSHEY_DUPLEX,
+        0.6 * k,
+        colour,
+        thin,
+        cv2.LINE_AA,
+    )
     line = result[1] if len(result[1]) <= 44 else result[1][:43] + "..."
-    cv2.putText(picture, line, (x0 + 12, y0 + 46), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (187, 187, 187), 1, cv2.LINE_AA)
+    cv2.putText(
+        picture,
+        line,
+        (x0 + round(12 * k), y0 + round(46 * k)),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.42 * k,
+        (187, 187, 187),
+        thin,
+        cv2.LINE_AA,
+    )
     return np.asarray(picture, np.uint8)
 
 
-def _again(match: _Match, badge: WatchSignal) -> None:
-    """The "Check again" button (another opponent, or another team of yours): read the VS screen and the Attack Guide
-    anew. The opponent is never carried over: only the Attack Guide or its learned VS models name it."""
-    match.vs_armed = match.guide_armed = True
+def _again(match: _Match, badge: WatchSignal, collect_only: bool = False) -> None:
+    """The "Check again" button: read what is on the screen anew, at the Opponents list (every opponent), the VS screen
+    and the Attack Guide (another opponent, or another team of yours). The opponent is never carried over: only the
+    list, the Attack Guide or its learned VS models name it."""
+    match.vs_armed = match.guide_armed = match.list_armed = True
     match.previous, match.seen_faces = [], ()
-    badge.say("Checking again...", "VS screen, then the magnifier", AMBER)
-    typer.echo("Check again: reading the VS screen anew.")
+    match.list_read = None
+    where = "the Opponents list" if collect_only else "Opponents list, VS screen, then the magnifier"
+    badge.say("Checking again...", where, AMBER)
+    typer.echo("Check again: reading the screen anew.")
 
 
 def _step(image: BgrImage, match: _Match, c: _Context) -> None:
@@ -499,15 +527,25 @@ def _learn(
 
 
 def _opponents(image: BgrImage, match: _Match, c: _Context) -> None:
-    """The Opponents list (SPEC D75, D81): each opponent's defence read from its faces and recorded (what the Dev page
-    counts), then checked against your team; the badge names the best one."""
+    """The Opponents list (SPEC D75, D81, D82): each opponent's defence read from its faces and badges and recorded
+    (what the Arena stats page counts), then checked against your team; the badge names the best one."""
     typer.echo(f"{datetime.now().astimezone():%H:%M:%S} Opponents list")
-    read = c.list_faces.read_list(image)
+    rows = list_rows(image)
+    read = resolve_list(
+        c.list_faces.read_rows(image, rows),
+        read_list_badges(image, rows, c.templates),
+        c.heroes,
+        c.list_faces.among,
+        lambda code: _name(c.heroes, code),
+    )
     for number, row in enumerate(read, 1):
-        typer.echo(f"  opponent {number}: " + ", ".join(_face_line(f, c.heroes) for f in row))
-    _record(c, [[f.code for f in row] for row in read])
+        typer.echo(f"  opponent {number}: " + ", ".join(_list_hero_line(h, c.heroes) for h in row))
+        for hero in row:
+            if hero.note:
+                typer.echo(f"    note: {hero.note}")
+    _record(c, read)
     if c.options.collect_only:
-        known = sum(f.code is not None for row in read for f in row)
+        known = sum(h.code is not None for row in read for h in row)
         c.badge.say(f"Saved {len(read)} opponents", f"{known} of {4 * len(read)} heroes recognised", GREEN)
         return
     if len(match.team) != 4:
@@ -517,7 +555,7 @@ def _opponents(image: BgrImage, match: _Match, c: _Context) -> None:
     chances: list[str] = []
     best: tuple[float, int] | None = None
     for number, row in enumerate(read, 1):
-        codes = [f.code for f in row]
+        codes = [h.code for h in row]
         if None in codes:
             chances.append(f"{number}: ?")
             continue
@@ -535,14 +573,26 @@ def _opponents(image: BgrImage, match: _Match, c: _Context) -> None:
     colour = GREEN if best[0] >= 0.6 else RED if best[0] <= 0.4 else AMBER
     c.badge.say(f"Best: opponent {best[1]} ({best[0]:.0%})", "  ".join(chances), colour)
     c.last[0] = (f"Best: opponent {best[1]} ({best[0]:.0%})", "  ".join(chances), colour)
+    if c.options.teams is not None:
+        c.options.teams(list(match.team), [h.code for h in read[best[1] - 1] if h.code])
 
 
-def _record(c: _Context, teams: list[list[str | None]]) -> None:
+def _list_hero_line(hero: ListHero, heroes: dict[str, ResolvedEntity]) -> str:
+    kind = f" ({hero.shape[0]} {hero.shape[1]})" if hero.shape else ""
+    if hero.code is not None:
+        return _name(heroes, hero.code) + kind
+    return f"?{kind} (closest {_name(heroes, hero.face.candidate)} {hero.face.score:.2f})"
+
+
+def _record(c: _Context, teams: list[list[ListHero]]) -> None:
     """The teams of one reading of the Opponents list, on the sightings file (one instant for all of them)."""
     if c.sightings is None or not teams:
         return
     when = datetime.now(UTC)
-    c.sightings.add(Sighting(when, "list", row, tuple(codes)) for row, codes in enumerate(teams, 1))
+    c.sightings.add(
+        Sighting(when, "list", row, tuple(h.code for h in heroes), tuple(h.shape for h in heroes))
+        for row, heroes in enumerate(teams, 1)
+    )
     if c.options.recorded is not None:
         c.options.recorded(len(teams))
 
@@ -557,6 +607,8 @@ def _predict(team: list[str], theirs: list[str], c: _Context) -> None:
     colour = GREEN if odds.win >= 0.6 else RED if odds.win <= 0.4 else AMBER
     c.badge.say(f"Win chance {odds.win:.0%}", f"vs {names}"[:48], colour)
     c.last[0] = (f"Win chance {odds.win:.0%}", f"vs {names}", colour)
+    if c.options.teams is not None:
+        c.options.teams(list(team), list(theirs))
     typer.echo("Watching for the next Arena match... (Ctrl+C stops)")
 
 
@@ -680,7 +732,11 @@ grab_frame: Callable[[Any, int | None], tuple[BgrImage, Rect] | None] = _grab
 
 
 def _open_badge(on_retry: Callable[[], None], on_share: Callable[[], None]) -> tuple[WatchSignal, str]:
-    return open_signal(False, [("Check again", on_retry), ("Save picture", on_share)])
+    try:
+        size = load_settings(default_paths().settings_file).badge_size.value
+    except SettingsError:
+        size = DEFAULT_SIZE
+    return open_signal(False, [("Check again", on_retry), ("Save picture", on_share)], size)
 
 
 def _shape(codes: list[str], heroes: dict[str, ResolvedEntity]) -> list[tuple[str, str]]:

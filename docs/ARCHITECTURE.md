@@ -86,8 +86,10 @@ src/e7ac/
   ui/            # PySide6 main window, review screen, overlay, hotkey. Window (SPEC D81): `shell` (sidebar + stack),
                  # `pages/` (registry `PAGES` of `PageSpec`: add a page = write a `Page`, add one entry), `context`
                  # (what pages share), `watch_controller` (the one Arena watch on a thread, as Qt signals), `tasks`
-                 # (background commands, output captured), `theme` (colour tokens + stylesheet); the small badge over the
-                 # game is still tkinter (`watch_signal`) until the Qt overlay
+                 # (background commands, output captured), `theme` (the game's colours as tokens + stylesheet), `art` (round
+                 # hero portraits from the cached face icons, never fetched or committed), `widgets` (ornament, hero row,
+                 # featured hero, badge size); the sidebar has folders (`PageSpec.group`); the small badge over the game is
+                 # still tkinter (`watch_signal`, sized from the screen's scale and `badge_size`) until the Qt overlay
   appdata.py     # database + catalog heroes, shared by the CLI and the window
   cli/           # Typer app: e7 catalog|roster|import|predict|sim|data …
 kits/            # hero/artifact kit files (YAML), each citing sources, with tests

@@ -41,6 +41,14 @@ class GameLanguage(StrEnum):
     PT = "pt"
 
 
+class BadgeSize(StrEnum):
+    """Size of the small badge over the game (what to do next, and the result)."""
+
+    NORMAL = "normal"
+    LARGE = "large"
+    HUGE = "huge"
+
+
 class DisplayMode(StrEnum):
     BORDERLESS = "borderless"
     WINDOWED = "windowed"
@@ -56,6 +64,7 @@ class Settings(BaseModel):
     client: ClientKind = ClientKind.STOVE_PC
     world: World = World.GLOBAL
     display_mode: DisplayMode = DisplayMode.BORDERLESS
+    badge_size: BadgeSize = BadgeSize.LARGE
     resolution: str | None = None
     """`WIDTHxHEIGHT` of the game window, or None to auto-detect it from the window (default)."""
     game_language: GameLanguage = GameLanguage.EN

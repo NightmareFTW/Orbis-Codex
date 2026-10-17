@@ -12,7 +12,8 @@ Status: Phase 1 in progress — see [`docs/ROADMAP.md`](docs/ROADMAP.md).
    (lines starting with `[OK  ]`) and waits for a key. Later starts are instant.
 3. **Double-click `Orbis.cmd` for the main window**: Home (what the app has, sync the catalog), Arena (leave it
    running and play: the chance to win, with the small badge over the game) and Arena stats (a dev tool: refresh the
-   Opponents list in the game as often as you like and see the heroes met most).
+   Opponents list in the game as often as you like and see the heroes met most). The badge over the game has a size
+   (normal, large, huge) next to the Start button.
 
 From a terminal opened in that folder (cmd or PowerShell), run commands as `.\OrbisCodex.cmd <command>`
 (developers: `uv run e7 <command>`):

@@ -7,7 +7,7 @@ import threading
 
 from PySide6.QtCore import QObject, Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, QVBoxLayout
+from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, QVBoxLayout, QWidget
 
 from e7ac.appdata import open_engine
 from e7ac.arena.sightings import SightingStore, sightings_path
@@ -19,6 +19,7 @@ from e7ac.ui.context import AppContext
 from e7ac.ui.pages.base import Page, card, heading
 from e7ac.ui.tasks import Task
 from e7ac.ui.theme import status_style
+from e7ac.ui.widgets import HeroRow
 
 _STATUS_KIND = {CheckStatus.OK: "ok", CheckStatus.WARN: "warn", CheckStatus.FAIL: "bad"}
 
@@ -44,6 +45,22 @@ class HomePage(Page):
             heading("Orbis Codex", "Everything stays on this PC. The game is only ever looked at, never touched.")
         )
 
+        banner, banner_layout = card()
+        self._banner = HeroRow(context, size=68, spacing=10)
+        banner_layout.addWidget(self._banner)
+        self._icons = QWidget()
+        icons_row = QHBoxLayout(self._icons)
+        icons_row.setContentsMargins(0, 0, 0, 0)
+        self._icons_note = QLabel()
+        self._icons_note.setObjectName("muted")
+        self._icons_note.setWordWrap(True)
+        self._icons_button = QPushButton("Download hero portraits")
+        self._icons_button.clicked.connect(self._download_icons)
+        icons_row.addWidget(self._icons_note, 1)
+        icons_row.addWidget(self._icons_button)
+        banner_layout.addWidget(self._icons)
+        layout.addWidget(banner)
+
         data, data_layout = card("What the app has")
         self._facts = QGridLayout()
         self._facts.setHorizontalSpacing(24)
@@ -51,7 +68,7 @@ class HomePage(Page):
         data_layout.addLayout(self._facts)
         row = QHBoxLayout()
         sync = QPushButton("Sync catalog")
-        sync.setObjectName("primary")
+        sync.setObjectName("go")
         sync.clicked.connect(self._sync)
         self._sync_button = sync
         folder = QPushButton("Open data folder")
@@ -82,13 +99,59 @@ class HomePage(Page):
         self._task = Task()
         self._task.line.connect(self._log.appendPlainText)
         self._task.finished.connect(self._synced)
+        self._icons_task = Task()
+        self._icons_task.line.connect(self._log.appendPlainText)
+        self._icons_task.finished.connect(self._icons_done)
         self._runner = _Checks()
         self._runner.done.connect(self._show_checks)
         context.watch.state.connect(lambda _state: self._sync_button.setEnabled(not context.watch.running))
 
     def shown(self) -> None:
         self._show_facts()
+        self._show_banner()
         self._run_checks()
+
+    def _show_banner(self) -> None:
+        self._banner.set_codes(self.context.featured(8))
+        heroes = self.context.heroes()
+        missing = sum(not self.context.portraits.has(code) for code in heroes)
+        self._icons.setVisible(bool(heroes) and missing > 0)
+        self._icons_note.setText(
+            f"{missing} hero portraits are not on this PC yet. They are downloaded once (one a second) and kept; the "
+            "Arena watch needs them too."
+        )
+
+    def _download_icons(self) -> None:
+        from e7ac.cli import catalog as catalog_cli
+        from e7ac.sources.assets import fetch_hero_icons
+
+        codes = list(self.context.heroes())
+        paths = self.context.paths
+        self._log.clear()
+        self._log.show()
+        self._icons_button.setEnabled(False)
+        self._log.appendPlainText("Downloading hero portraits, politely: one a second, only the ones missing...")
+
+        def work() -> None:
+            import typer
+
+            with catalog_cli.http_factory(paths, False) as http:
+                failed = fetch_hero_icons(
+                    http,
+                    codes,
+                    progress=lambda done, total: typer.echo(f"  {done}/{total}") if done % 25 == 0 else None,
+                )
+            if failed:
+                typer.echo(f"{len(failed)} portraits could not be downloaded (those heroes show an empty ring).")
+
+        if not self._icons_task.start(work):
+            self._icons_button.setEnabled(True)
+
+    def _icons_done(self, problem: str) -> None:
+        self._icons_button.setEnabled(True)
+        self._log.appendPlainText(f"Failed: {problem}" if problem else "Done.")
+        self.context.portraits.reset()
+        self._show_banner()
 
     def _show_facts(self) -> None:
         paths = self.context.paths
@@ -135,6 +198,7 @@ class HomePage(Page):
         self._log.appendPlainText(f"Failed: {problem}" if problem else "Done.")
         self.context.heroes(reload=True)
         self._show_facts()
+        self._show_banner()
         self._run_checks()
 
     def _run_checks(self) -> None:

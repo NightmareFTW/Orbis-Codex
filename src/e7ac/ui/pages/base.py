@@ -34,7 +34,9 @@ def card(title: str = "") -> tuple[QFrame, QVBoxLayout]:
 
 
 def heading(text: str, hint: str = "") -> QWidget:
-    """The title of a page and, under it, a line saying what it is for."""
+    """The title of a page, the game's gold ornament, and under it a line saying what the page is for."""
+    from e7ac.ui.widgets import Ornament
+
     box = QWidget()
     layout = QVBoxLayout(box)
     layout.setContentsMargins(0, 0, 0, 4)
@@ -42,6 +44,7 @@ def heading(text: str, hint: str = "") -> QWidget:
     title = QLabel(text)
     title.setObjectName("title")
     layout.addWidget(title)
+    layout.addWidget(Ornament())
     if hint:
         sub = QLabel(hint)
         sub.setObjectName("muted")

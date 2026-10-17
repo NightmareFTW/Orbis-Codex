@@ -10,8 +10,8 @@ import threading
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from PySide6.QtCore import QObject, Qt, QTimer, Signal
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtCore import QObject, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QGuiApplication, QIcon
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -34,6 +34,7 @@ from e7ac.ui.context import AppContext
 from e7ac.ui.pages.base import Page, card, heading
 from e7ac.ui.theme import status_style
 from e7ac.ui.watch_controller import COLLECT, RUNNING, STOPPED, STOPPING
+from e7ac.ui.widgets import BadgeSizeBox
 
 PERIODS = (("All time", None), ("Last 24 hours", timedelta(hours=24)), ("Last 7 days", timedelta(days=7)))
 KIT_HEROES = 30
@@ -106,17 +107,22 @@ class DevPage(Page):
 
         controls = QHBoxLayout()
         self._start = QPushButton("Start collecting")
-        self._start.setObjectName("primary")
+        self._start.setObjectName("go")
         self._start.clicked.connect(self._toggle)
+        self._now = QPushButton("Read now")
+        self._now.setToolTip("Read the Opponents list on the screen again, even if it did not change.")
+        self._now.clicked.connect(self._watch.check_again)
+        self._now.setEnabled(False)
         self._overlay = QCheckBox("Badge on the game")
         self._overlay.setChecked(sys.platform == "win32")
         self._overlay.setEnabled(sys.platform == "win32")
         self._offline = QCheckBox("Offline")
+        self._size = BadgeSizeBox(context, lambda message: self._status.setText(message))
         self._period = QComboBox()
         for label, _ in PERIODS:
             self._period.addItem(label)
         self._period.currentIndexChanged.connect(self.reload)
-        for widget in (self._start, self._overlay, self._offline):
+        for widget in (self._start, self._now, self._overlay, self._size, self._offline):
             controls.addWidget(widget)
         controls.addStretch()
         controls.addWidget(QLabel("Show"))
@@ -151,6 +157,8 @@ class DevPage(Page):
         self._table.setAlternatingRowColors(True)
         self._table.horizontalHeader().setSortIndicator(0, Qt.SortOrder.AscendingOrder)  # the rank, best first
         self._table.setSortingEnabled(True)
+        self._table.setIconSize(QSize(32, 32))
+        self._table.verticalHeader().setDefaultSectionSize(40)
         self._table.verticalHeader().hide()
         self._table.horizontalHeader().setStretchLastSection(True)
         layout.addWidget(self._table, 3)
@@ -159,6 +167,10 @@ class DevPage(Page):
         self._pairs.setObjectName("muted")
         self._pairs.setWordWrap(True)
         layout.addWidget(self._pairs)
+        self._mix = QLabel()
+        self._mix.setObjectName("muted")
+        self._mix.setWordWrap(True)
+        layout.addWidget(self._mix)
 
         self._log = QPlainTextEdit()
         self._log.setReadOnly(True)
@@ -196,6 +208,12 @@ class DevPage(Page):
             f"faces not recognised: {unknown}" + (f"  |  {skipped} unreadable lines in the file" if skipped else "")
         )
         self._fill()
+        self._mix.setText(
+            "Elements: "
+            + (", ".join(f"{name} {n}" for name, n in stats.elements) or "-")
+            + "   |   Classes: "
+            + (", ".join(f"{name} {n}" for name, n in stats.classes) or "-")
+        )
         self._pairs.setText(
             "Most common pairs: "
             + (
@@ -216,7 +234,9 @@ class DevPage(Page):
             kit = "-" if work is None else ("hand-refined" if work.refined else "automatic")
             cells: list[QTableWidgetItem] = [
                 _Number(str(row + 1), row + 1),
-                QTableWidgetItem(self.context.hero_name(hero.code)),
+                QTableWidgetItem(
+                    QIcon(self.context.portraits.pixmap(hero.code, 32)), self.context.hero_name(hero.code)
+                ),
                 QTableWidgetItem(hero.code),
                 _Number(str(hero.teams), hero.teams),
                 _Number(f"{hero.share:.0%}", hero.share),
@@ -254,12 +274,13 @@ class DevPage(Page):
             if mine
             else "Start collecting"
         )
-        self._start.setObjectName("danger" if state == RUNNING and mine else "primary")
+        self._start.setObjectName("danger" if state == RUNNING and mine else "go")
         self._start.style().unpolish(self._start)
         self._start.style().polish(self._start)
         self._start.setEnabled(state != STOPPING and not busy_elsewhere)
         self._overlay.setEnabled(state == STOPPED and sys.platform == "win32")
         self._offline.setEnabled(state == STOPPED)
+        self._now.setEnabled(state == RUNNING and mine)
         if busy_elsewhere:
             self._status.setText("The Arena page is watching: stop it there first.")
             self._status.setStyleSheet(status_style("warn"))

@@ -3,10 +3,13 @@ of the hero's model under it (M17a, SPEC D64).
 
 The screen shows no names: a badge gives only element and class, which narrows the catalog to 6-23 heroes; the hero
 itself is identified by `arena.identify`. Facts and measurements (prep_1 capture, 2026-10-12; study in SPEC D64):
-- level square: hue bands measured for wind (green), light (yellow) and dark (purple); fire (red) and ice (blue) not
-  seen yet (`assumed`, lower confidence); a square is 2-9% of the image height, nearly square, holds 1-3 white digits;
+- level square: hue bands measured for wind (green), light (yellow) and dark (purple) on the VS screen, and for fire
+  (red) and ice (blue) on the Opponents list (2026-10-18: 12 of 12 squares agree with the heroes the faces named; the
+  VS screen with a fire or ice hero is still to be seen, NV-34); a square is 2-9% of the image height, nearly
+  square, holds 1-3 white digits;
 - class icon: left of the square, 1.05-1.65 square heights tall; matched against the six class icons of the Stove
-  guide sprite (`sources.assets`, verified for knight, mage, thief, soul weaver; ranger and warrior not seen yet);
+  guide sprite (`sources.assets`, verified for knight, mage, thief, soul weaver and, on the Opponents list, ranger;
+  warrior not seen yet);
   a square without a recognised icon is not a badge (buttons with white text on other screens look like squares);
 - side: left of the image centre = your team, right = the opponent's.
 Deterministic OpenCV only; every length is in level-square heights, so any capture size works.
@@ -34,12 +37,13 @@ ELEMENT_BANDS: Final[dict[Element, tuple[tuple[tuple[int, int], ...], bool]]] = 
     # OpenCV hue 0..179 -> (bands, measured?)
     Element.LIGHT: (((14, 30),), True),
     Element.EARTH: (((31, 52),), True),
-    Element.ICE: (((92, 125),), False),
+    Element.ICE: (((92, 125),), True),
     Element.DARK: (((127, 168),), True),
-    Element.FIRE: (((0, 8), (171, 179)), False),
+    Element.FIRE: (((0, 8), (171, 179)), True),
 }
 UNSEEN_FACTOR: Final = 0.6
-"""Confidence factor of an element whose colour has not been seen on a capture yet (`assumed` band)."""
+"""Confidence factor of an element whose colour has not been seen on a capture yet (`assumed` band); every element has
+been seen now, so the factor is only used if a band is ever marked unmeasured again."""
 SAT_MIN, VAL_MIN = 100, 55
 HUE_SPREAD_MAX: Final = 14.0
 """Circular hue spread inside a square (the purple one is a violet-to-magenta gradient, ~8.7)."""
@@ -276,6 +280,19 @@ def _hero_class(
     cy = square.y + s / 2
     x1, y1 = max(0, round(square.x - 1.75 * s)), max(0, round(cy - 0.95 * s))
     x2, y2 = min(grey.shape[1], round(square.x + 0.05 * s)), min(grey.shape[0], round(cy + 0.95 * s))
+    return class_in_region(grey, (x1, y1, x2, y2), s, templates)
+
+
+def class_in_region(
+    grey: npt.NDArray[np.float32],
+    region: tuple[int, int, int, int],
+    square_height: int,
+    templates: Mapping[HeroClass, Template],
+) -> tuple[HeroClass, float] | None:
+    """The class icon inside `region` (x1, y1, x2, y2), whose size is judged against the level square's height; None
+    unless one icon clearly wins (`CLASS_MIN_SCORE`, `CLASS_MIN_MARGIN`)."""
+    s = square_height
+    x1, y1, x2, y2 = region
     roi = grey[y1:y2, x1:x2]
     scores: dict[HeroClass, float] = {}
     for hero_class, (icon, footprint) in templates.items():
@@ -299,6 +316,28 @@ def _hero_class(
         return None
     confidence = min(1.0, (first - CLASS_MIN_SCORE) / 0.25) * min(1.0, (first - second - CLASS_MIN_MARGIN) / 0.2)
     return top, round(max(confidence, 0.0), 3)
+
+
+def level_squares(image: BgrImage) -> list[tuple[int, int, int, int, Element, float]]:
+    """Every level square on the screen (x, y, w, h, element, element confidence), whatever the layout."""
+    out = []
+    for square in _squares(image):
+        crop = image[square.y : square.y + square.h, square.x : square.x + square.w]
+        hsv = np.asarray(cv2.cvtColor(crop, cv2.COLOR_BGR2HSV), np.uint8)
+        saturated = (hsv[:, :, 1] >= SAT_MIN) & (hsv[:, :, 2] >= VAL_MIN)
+        bands, measured = ELEMENT_BANDS[square.element]
+        share = float(_in_bands(hsv, bands)[saturated].mean()) if saturated.any() else 0.0
+        out.append(
+            (
+                square.x,
+                square.y,
+                square.w,
+                square.h,
+                square.element,
+                round(share * (1.0 if measured else UNSEEN_FACTOR), 3),
+            )
+        )
+    return out
 
 
 def _badge(image: BgrImage, square: _Square, hero_class: HeroClass, class_confidence: float) -> Badge:

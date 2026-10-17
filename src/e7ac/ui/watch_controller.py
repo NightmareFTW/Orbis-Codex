@@ -31,6 +31,8 @@ class WatchController(QObject):
     """An opponent hero (face 1-4) needs a name: `answer` it."""
     recorded = Signal(int)
     """Opponent teams just recorded on the sightings file."""
+    teams = Signal(list, list)
+    """Your team and the opponent's (hero codes) behind the last prediction."""
     failed = Signal(str)
     """The watch ended for a reason other than a stop."""
 
@@ -42,6 +44,7 @@ class WatchController(QObject):
         self._stop = threading.Event()
         self._retry, self._share = threading.Event(), threading.Event()
         self._answers: queue.Queue[str] = queue.Queue()
+        self._relay: _Relay | None = None
 
     @property
     def running(self) -> bool:
@@ -63,6 +66,7 @@ class WatchController(QObject):
             collect_only=collect_only,
             ask=self.question.emit,
             recorded=self.recorded.emit,
+            teams=self.teams.emit,
         )
         self._set_state(RUNNING)
 
@@ -73,12 +77,14 @@ class WatchController(QObject):
                 if why:
                     self.line.emit(f"note: {why}")
             relay = _Relay(self, badge)
+            self._relay = relay
             relay.say("Arena: starting", "reading the catalog and the hero icons", LIGHT)
             reason = run_captured(
                 lambda: arena_cli.run_watch(options, relay, self._answers, self._retry, self._share, self._stop),
                 self.line.emit,
             )
             relay.close()
+            self._relay = None
             self._set_state(STOPPED)
             if reason and not self._stop.is_set():
                 self.failed.emit(reason)
@@ -97,6 +103,12 @@ class WatchController(QObject):
         if self._thread is not None:
             self._thread.join(seconds)
         return not self.running
+
+    def set_badge_size(self, size: str) -> None:
+        """The badge over the game, at once, when one is showing."""
+        relay = self._relay
+        if relay is not None:
+            relay.resize(size)
 
     def check_again(self) -> None:
         self._retry.set()
@@ -138,6 +150,9 @@ class _Relay:
 
     def capturable(self, on: bool) -> bool:
         return self._overlay.capturable(on)
+
+    def resize(self, size: str) -> None:
+        self._overlay.resize(size)
 
     def close(self) -> None:
         self._overlay.close()

@@ -17,6 +17,7 @@ from typer.testing import CliRunner
 from e7ac.arena.sightings import Sighting, SightingStore, popularity, sightings_path
 from e7ac.vision.arena_badges import ArenaScreenError
 from e7ac.vision.arena_guide import Face
+from e7ac.vision.arena_list import ListBadge
 
 T0 = datetime(2026, 10, 18, 12, 0, tzinfo=UTC)
 
@@ -59,39 +60,112 @@ def _faces(*codes: str | None) -> list[Face]:
     return [Face(0.0, 0.0, 10.0, c, 0.9, 0.5, c or "c1001") for c in codes]
 
 
-def _context(tmp_path: Path, rows: list[list[Face]], collect_only: bool, team: list[str]) -> tuple[Any, Any, list[Any]]:
+def _badges(*shapes: tuple[str, str] | None) -> list[ListBadge]:
+    from e7ac.domain.codes import Element, HeroClass
+
+    return [
+        ListBadge(Element(s[0]), 1.0, HeroClass(s[1]), 1.0) if s else ListBadge(None, 0.0, None, 0.0) for s in shapes
+    ]
+
+
+def _catalog() -> dict[str, Any]:
+    """Heroes c1001..c1009 with shapes: c1001-c1003 light knight, c1004 dark mage, c1005.. fire ranger."""
+    shapes = {"c1001": ("light", "knight"), "c1002": ("light", "knight"), "c1003": ("light", "knight")}
+    shapes["c1004"] = ("dark", "mage")
+    for i in range(5, 10):
+        shapes[f"c100{i}"] = ("fire", "ranger")
+    return {
+        code: SimpleNamespace(name=f"Hero {code[-1]}", value=lambda key, s=shape: s[0] if key == "element" else s[1])
+        for code, shape in shapes.items()
+    }
+
+
+def _context(
+    tmp_path: Path, rows: list[list[Face]], shapes: list[list[ListBadge]], collect_only: bool, team: list[str]
+) -> tuple[Any, Any, list[Any]]:
     from e7ac.cli.arena import WatchOptions
 
     said: list[Any] = []
-    heroes = {f"c100{i}": SimpleNamespace(name=f"Hero {i}") for i in range(1, 10)}
     context = SimpleNamespace(
-        list_faces=SimpleNamespace(read_list=lambda image: rows),
-        heroes=heroes,
+        list_faces=SimpleNamespace(read_rows=lambda image, found: rows, among=lambda face, group: (None, 0.0, 0.0)),
+        templates={},
+        heroes=_catalog(),
         sightings=SightingStore(sightings_path(tmp_path)),
         options=WatchOptions(collect_only=collect_only),
         badge=SimpleNamespace(say=lambda top, bottom, colour: said.append((top, bottom))),
         last=[("", "", "")],
         offline=True,
+        shapes=shapes,
     )
     return context, SimpleNamespace(team=team), said
 
 
 @pytest.mark.parametrize(("collect_only", "team"), [(True, ["c1001", "c1002", "c1003", "c1004"]), (False, [])])
 def test_the_list_is_recorded_with_no_prediction_and_with_no_known_team(
-    tmp_path: Path, collect_only: bool, team: list[str]
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, collect_only: bool, team: list[str]
 ) -> None:
-    from e7ac.cli.arena import _opponents
+    from e7ac.cli import arena as arena_cli
 
     rows = [_faces("c1001", "c1002", "c1003", "c1004"), _faces("c1005", None, "c1006", "c1007")]
-    context, match, said = _context(tmp_path, rows, collect_only, team)
-    _opponents(cast(Any, None), match, context)
+    shapes = [
+        _badges(("light", "knight"), ("light", "knight"), ("light", "knight"), ("dark", "mage")),
+        _badges(("fire", "ranger"), ("fire", "ranger"), ("fire", "ranger"), ("fire", "ranger")),
+    ]
+    context, match, said = _context(tmp_path, rows, shapes, collect_only, team)
+    monkeypatch.setattr(arena_cli, "list_rows", lambda image: [[(0.0, 0.0, 1.0)] * 4] * 2)
+    monkeypatch.setattr(arena_cli, "read_list_badges", lambda image, found, templates: context.shapes)
+    arena_cli._opponents(cast(Any, None), match, context)
     found, _ = context.sightings.read()
     assert [(s.row, s.codes) for s in found] == [
         (1, ("c1001", "c1002", "c1003", "c1004")),
         (2, ("c1005", None, "c1006", "c1007")),
     ]
+    assert found[1].shapes == (("fire", "ranger"),) * 4  # the unknown face still has its element and class
     assert len({s.when for s in found}) == 1  # one instant for the whole refresh
     assert said[0][0] == ("Saved 2 opponents" if collect_only else "Your team is not known")
+
+
+def test_a_face_and_its_badge_check_each_other() -> None:
+    from e7ac.arena.list_read import resolve_list
+
+    heroes = _catalog()
+    seen: list[tuple[str, list[str]]] = []
+
+    def among(face: Face, group: Any) -> tuple[str | None, float, float]:
+        group = list(group)
+        seen.append((face.candidate, group))
+        return ("c1003", 0.8, 0.3) if face.candidate == "c1009" and "c1003" in group else (None, 0.4, 0.0)
+
+    knight, mage, fire = ("light", "knight"), ("dark", "mage"), ("fire", "ranger")
+    faces = [
+        _faces("c1001", "c1005", "c1005", None),  # agree, disagree (a light knight, not a fire ranger), agree, unknown
+        [Face(0.0, 0.0, 10.0, "c1009", 0.9, 0.5, "c1009"), *_faces("c1004", None, "c1002")],
+    ]
+    badges = [_badges(knight, knight, fire, mage), _badges(knight, mage, None, None)]
+    first, second = resolve_list(faces, badges, heroes, among, lambda code: heroes[code].name)
+    assert [h.code for h in first] == ["c1001", None, "c1005", None]  # the wrong face is left unknown, never kept
+    assert "badge says light knight" in first[1].note and first[0].note == "" and first[3].shape == mage
+    assert second[0].code == "c1003" and "Hero 3" in second[0].note  # corrected from among the light knights
+    assert second[1].code == "c1004" and second[2].code is None and second[2].shape is None  # no badge: as read
+    assert seen[0][1] == ["c1001", "c1002", "c1003"]  # the group is the badge's shape, nothing else
+    low = ListBadge(None, 0.2, None, 0.0)  # an unclear badge never overrules a face
+    assert resolve_list([faces[0][:1]], [[low]], heroes, among)[0][0].code == "c1001"
+
+
+def test_sightings_keep_shapes_and_popularity_counts_them(tmp_path: Path) -> None:
+    store = SightingStore(sightings_path(tmp_path))
+    first = Sighting(T0, "list", 1, ("c1001", None, None, None), (("light", "knight"), ("dark", "mage"), None, None))
+    store.add([first, _team("c1001", None, None, None)])  # the second has no shapes (older line / Attack Guide)
+    found, skipped = store.read()
+    assert found[0] == first and found[1].shapes == () and skipped == 0
+    assert '"shapes"' not in found[1].to_json()
+    with store.path.open("a", encoding="utf-8") as handle:
+        handle.write(
+            '{"when":"2026-10-18T12:00:00+00:00","source":"list","row":1,"codes":[null,null,null,null],"shapes":[1]}\n'
+        )
+    assert store.read()[1] == 1
+    stats = popularity(found)
+    assert stats.elements == (("dark", 1), ("light", 1)) and stats.classes == (("knight", 1), ("mage", 1))
 
 
 def _screen(seed: int, shift: int = 0) -> tuple[np.ndarray[Any, Any], list[list[tuple[float, float, float]]]]:
@@ -177,3 +251,37 @@ def test_kit_todo_counts_the_teams_the_watch_recorded(
     assert result.exit_code == 0, result.output
     lines = [line for line in result.output.splitlines() if "x  " in line]
     assert "Test Hero" in lines[0] and " 2x" in lines[0] and "Blood Blade Karin" in lines[1] and " 1x" in lines[1]
+
+
+def test_check_again_reads_the_opponents_list_again() -> None:
+    from e7ac.cli import arena as arena_cli
+
+    said: list[tuple[str, str]] = []
+    badge = SimpleNamespace(say=lambda top, bottom, colour: said.append((top, bottom)))
+    match = arena_cli._Match(list_armed=False, list_read=np.zeros((12, 144), np.float32))
+    arena_cli._again(match, cast(Any, badge), collect_only=True)
+    assert match.list_armed and match.list_read is None and said == [("Checking again...", "the Opponents list")]
+    arena_cli._again(match, cast(Any, badge))
+    assert "VS screen" in said[1][1]
+
+
+@pytest.mark.fixtures("screenshots/arena/list_2.webp", "stove/class_icons/icon_spr.png")
+def test_golden_opponents_list_badges() -> None:
+    """The user's full-screen Opponents list (2026-10-18): 12 faces, read by their badges. The expected shapes agree,
+    face by face, with the 12 heroes the Stove face icons gave independently (Boss Arunka ... Notos): 12 of 12."""
+    from e7ac.vision.arena_badges import class_templates, normalise
+    from e7ac.vision.arena_guide import list_rows
+    from e7ac.vision.arena_list import read_list_badges
+    from e7ac.vision.image import load_image
+
+    root = Path(__file__).parent.parent / "fixtures"
+    image = normalise(np.asarray(load_image(root / "screenshots/arena/list_2.webp"), np.uint8))
+    read = read_list_badges(
+        image, list_rows(image), class_templates((root / "stove/class_icons/icon_spr.png").read_bytes())
+    )
+    assert [[b.shape for b in row] for row in read] == [
+        [("light", "knight"), ("dark", "assassin"), ("dark", "mage"), ("light", "knight")],
+        [("ice", "assassin"), ("ice", "ranger"), ("fire", "ranger"), ("dark", "mage")],
+        [("fire", "assassin"), ("dark", "assassin"), ("light", "manauser"), ("light", "knight")],
+    ]
+    assert all(min(b.element_confidence, b.class_confidence) >= 0.9 for row in read for b in row)

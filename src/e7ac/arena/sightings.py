@@ -42,6 +42,9 @@ class Sighting:
     """Position on the Opponents list, top to bottom from 1 (always 1 for the Attack Guide)."""
     codes: tuple[str | None, ...]
     """The four heroes left to right; None for a face that was not recognised."""
+    shapes: tuple[tuple[str, str] | None, ...] = ()
+    """(element, class) of each of the four, as their badges show (also for a face that was not recognised); empty when
+    the reading had no badges (older lines, the Attack Guide)."""
 
     def to_json(self) -> str:
         return json.dumps(
@@ -50,6 +53,7 @@ class Sighting:
                 "source": self.source,
                 "row": self.row,
                 "codes": self.codes,
+                **({"shapes": self.shapes} if self.shapes else {}),
             },
             separators=(",", ":"),
         )
@@ -66,7 +70,15 @@ class Sighting:
             raise ValueError("bad source or row")
         if len(codes) != TEAM_SIZE or not all(c is None or (isinstance(c, str) and is_hero_code(c)) for c in codes):
             raise ValueError("a team is four hero codes or null")
-        return cls(when, data["source"], data["row"], tuple(codes))
+        shapes = data.get("shapes") or []
+        if shapes and (
+            len(shapes) != TEAM_SIZE
+            or not all(s is None or (len(s) == 2 and all(isinstance(v, str) for v in s)) for s in shapes)
+        ):
+            raise ValueError("shapes are four (element, class) pairs or null")
+        return cls(
+            when, data["source"], data["row"], tuple(codes), tuple(None if s is None else (s[0], s[1]) for s in shapes)
+        )
 
 
 class SightingStore:
@@ -118,6 +130,9 @@ class Popularity:
     """Faces that were not recognised: the heroes above are an undercount by about this share."""
     pairs: tuple[tuple[tuple[str, str], int], ...]
     """The pairs of heroes seen together most often, with their number of teams."""
+    elements: tuple[tuple[str, int], ...] = ()
+    """Heroes shown per element and per class (faces with a readable badge, recognised or not), most first."""
+    classes: tuple[tuple[str, int], ...] = ()
 
 
 def popularity(sightings: Sequence[Sighting], since: datetime | None = None, pairs: int = 10) -> Popularity:
@@ -126,8 +141,14 @@ def popularity(sightings: Sequence[Sighting], since: datetime | None = None, pai
     kept = [s for s in sightings if since is None or s.when >= since]
     seen: Counter[str] = Counter()
     together: Counter[tuple[str, str]] = Counter()
+    elements: Counter[str] = Counter()
+    classes: Counter[str] = Counter()
     unknown = 0
     for sighting in kept:
+        for shape in sighting.shapes:
+            if shape is not None:
+                elements[shape[0]] += 1
+                classes[shape[1]] += 1
         team = sorted({c for c in sighting.codes if c is not None})
         seen.update(team)
         together.update(itertools.combinations(team, 2))
@@ -137,4 +158,17 @@ def popularity(sightings: Sequence[Sighting], since: datetime | None = None, pai
         HeroSeen(code, count, count / total) for code, count in sorted(seen.items(), key=lambda kv: (-kv[1], kv[0]))
     )
     top_pairs = tuple(sorted(together.items(), key=lambda kv: (-kv[1], kv[0]))[:pairs])
-    return Popularity(heroes, total, len({s.when for s in kept}), total * TEAM_SIZE, unknown, top_pairs)
+    return Popularity(
+        heroes,
+        total,
+        len({s.when for s in kept}),
+        total * TEAM_SIZE,
+        unknown,
+        top_pairs,
+        _ranked(elements),
+        _ranked(classes),
+    )
+
+
+def _ranked(counts: Counter[str]) -> tuple[tuple[str, int], ...]:
+    return tuple(sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])))

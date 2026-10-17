@@ -22,6 +22,7 @@ from e7ac.ui.pages.base import Page, card, heading
 from e7ac.ui.theme import status_style
 from e7ac.ui.watch_controller import ARENA, COLLECT, RUNNING, STOPPED, STOPPING
 from e7ac.ui.watch_signal import LIGHT
+from e7ac.ui.widgets import BadgeSizeBox, HeroRow
 
 
 class ArenaPage(Page):
@@ -40,18 +41,28 @@ class ArenaPage(Page):
         )
 
         result, result_layout = card()
+        match = QHBoxLayout()
+        self._yours = HeroRow(context, size=60)
+        self._theirs = HeroRow(context, size=60)
+        middle = QVBoxLayout()
         self._top = QLabel("Not watching")
-        self._top.setStyleSheet("font-size: 20pt; font-weight: 600; background: transparent;")
+        self._top.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._top.setStyleSheet("font-size: 22pt; font-weight: 600; background: transparent;")
         self._bottom = QLabel("Press Start")
         self._bottom.setObjectName("muted")
+        self._bottom.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._bottom.setWordWrap(True)
-        result_layout.addWidget(self._top)
-        result_layout.addWidget(self._bottom)
+        middle.addWidget(self._top)
+        middle.addWidget(self._bottom)
+        match.addWidget(self._yours)
+        match.addLayout(middle, 1)
+        match.addWidget(self._theirs)
+        result_layout.addLayout(match)
         layout.addWidget(result)
 
         controls = QHBoxLayout()
         self._start = QPushButton("Start")
-        self._start.setObjectName("primary")
+        self._start.setObjectName("go")
         self._start.clicked.connect(self._toggle)
         self._again = QPushButton("Check again")
         self._again.clicked.connect(self._watch.check_again)
@@ -63,10 +74,12 @@ class ArenaPage(Page):
         self._overlay.setToolTip("A small badge over the game window: what to do next, and the result (Windows).")
         self._offline = QCheckBox("Offline")
         self._offline.setToolTip("Use cached data only (no downloads).")
+        self._size = BadgeSizeBox(context, lambda message: self._say("Settings", message, "#e0a020"))
         for widget in (self._start, self._again, self._picture):
             controls.addWidget(widget)
         controls.addSpacing(12)
         controls.addWidget(self._overlay)
+        controls.addWidget(self._size)
         controls.addWidget(self._offline)
         controls.addStretch()
         layout.addLayout(controls)
@@ -99,6 +112,7 @@ class ArenaPage(Page):
         self._watch.line.connect(self._on_line)
         self._watch.state.connect(self._state)
         self._watch.question.connect(self._asked)
+        self._watch.teams.connect(self._teams)
         self._watch.failed.connect(lambda reason: self._say("The watch stopped", reason, "#d04040"))
         self._state(STOPPED)
 
@@ -117,14 +131,14 @@ class ArenaPage(Page):
         if self._watch.mode != ARENA and self._watch.running:
             return
         self._top.setText(top)
-        self._top.setStyleSheet(f"font-size: 20pt; font-weight: 600; background: transparent; color: {colour};")
+        self._top.setStyleSheet(f"font-size: 22pt; font-weight: 600; background: transparent; color: {colour};")
         self._bottom.setText(bottom)
 
     def _state(self, state: str) -> None:
         mine = self._watch.mode == ARENA or state == STOPPED
         busy_elsewhere = self._watch.running and self._watch.mode == COLLECT
         self._start.setText({STOPPED: "Start", RUNNING: "Stop", STOPPING: "Stopping..."}[state] if mine else "Start")
-        self._start.setObjectName("danger" if state == RUNNING and mine else "primary")
+        self._start.setObjectName("danger" if state == RUNNING and mine else "go")
         self._start.style().unpolish(self._start)
         self._start.style().polish(self._start)
         self._start.setEnabled(state != STOPPING and not busy_elsewhere)
@@ -135,8 +149,15 @@ class ArenaPage(Page):
         if state == STOPPED:
             self._ask.hide()
             self._say("Not watching", "Press Start", LIGHT)
+            self._yours.set_codes([])
+            self._theirs.set_codes([])
         elif busy_elsewhere:
             self._bottom.setText("The Arena stats page is collecting: stop it there first.")
+
+    def _teams(self, yours: list[str], theirs: list[str]) -> None:
+        if self._watch.mode == ARENA:
+            self._yours.set_codes(yours)
+            self._theirs.set_codes(theirs)
 
     def _asked(self, number: int) -> None:
         self._question.setText(f"Opponent hero {number} not recognised:")

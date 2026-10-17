@@ -261,3 +261,24 @@ def test_the_badge_starts_and_closes_on_windows() -> None:
     badge.result("Blood Blade Karin", "doubtful", 0)
     badge.result("", "not_hero", 0)
     badge.close()
+
+
+def test_the_badge_grows_with_its_size_and_with_the_screen() -> None:
+    from e7ac.ui.watch_signal import DEFAULT_SIZE, HEIGHT, SIZES, WIDTH, metrics
+
+    assert DEFAULT_SIZE == "large" and set(SIZES) == {"normal", "large", "huge"}
+    assert metrics("normal", 1.0) == (WIDTH, HEIGHT, 16, 13, 11)  # the old badge, unchanged
+    large, huge = metrics("large", 1.0), metrics("huge", 1.0)
+    assert large[0] == round(WIDTH * 1.6) and huge[0] > large[0] > WIDTH and huge[2] > large[2] > 16
+    assert metrics("large", 1.5)[0] == round(WIDTH * 1.6 * 1.5)  # a 150% screen
+    assert metrics("large", 9.0) == metrics("large", 4.0) and metrics("large", 0.5) == large  # sane limits
+    assert metrics("nonsense", 1.0) == large  # an unknown name is the default, never an error
+
+
+def test_the_badge_is_placed_by_its_own_size() -> None:
+    from e7ac.ui.watch_signal import _spot
+
+    area = Rect(100, 40, 1000, 600)
+    assert _spot(area, True, 1080, 480, 93) == (100 + (1000 - 480) // 2, 48)  # centred, whatever its width
+    assert _spot(area, False, 1080, 480, 93) == (360, 40 + 600 + 6)  # no room above: below, by its own height
+    assert _spot(Rect(100, 40, 1000, 1040), False, 1080, 480, 93) is None  # no room anywhere outside the game

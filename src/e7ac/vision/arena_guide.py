@@ -13,7 +13,7 @@ or by elimination against the VS screen) are learned and matched like the icons 
 from __future__ import annotations
 
 import itertools
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Final
 
@@ -86,7 +86,11 @@ class FaceMatcher:
 
     def read_list(self, image: BgrImage) -> list[list[Face]]:
         """Each opponent's defence team on the Opponents list, top to bottom (rows of four faces)."""
-        return [[self._face(image, x, y, r) for x, y, r in row] for row in list_rows(image)]
+        return self.read_rows(image, list_rows(image))
+
+    def read_rows(self, image: BgrImage, rows: Sequence[Sequence[tuple[float, float, float]]]) -> list[list[Face]]:
+        """The faces of rows already found (`list_rows`)."""
+        return [[self._face(image, x, y, r) for x, y, r in row] for row in rows]
 
     @classmethod
     def from_png(
