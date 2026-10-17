@@ -20,6 +20,11 @@ ARUNKA_S1 = (
     "Attacks the enemy with a road sign and has a 60% chance to inflict decreased Defense for 1 turn. Damage dealt "
     "increases proportional to the caster's Defense ."
 )
+ILYNAV_S1 = (
+    "Attacks the enemy with a sword, inflicting injuries . Damage dealt increases proportional to the caster's max "
+    "Health . The severity of injuries increases proportional to damage dealt. Injuries decrease max Health of the "
+    "target by up to 10% every time this skill is used."
+)
 BYBLIS_S3 = (
     "After granting increased Effectiveness to the caster for 3 turns, spreads the scent of death, with a 100% chance "
     "to inflict two venom effects on all enemies for 2 turns. At the end of the turn, detonates venom effects."
@@ -38,20 +43,21 @@ def test_a_skill_that_only_hits_harder_with_a_stat_has_no_effects_to_read() -> N
 
 def test_skills_with_effects_in_the_text_and_none_read_are_not_read() -> None:
     skills = {
-        1: SkillInfo(1, 0, {}, ARUNKA_S1),  # a newer hero: epic7db shows no icons at all
+        1: SkillInfo(1, 0, {}, ILYNAV_S1),  # a newer hero: epic7db shows no icons at all
         2: SkillInfo(2, None, {}, "Attacks with a road sign."),
         3: SkillInfo(3, 4, {}, BYBLIS_S3),
     }
     assert kit_from(skills).unread == [1, 3]
-    read = {1: SkillInfo(1, 0, {"Decrease Defense": 0.7}, ARUNKA_S1)}
+    read = {1: SkillInfo(1, 0, {"Decrease Defense": 0.7}, ILYNAV_S1)}
     assert kit_from(read).unread == []  # its effect was read: whatever else is in the text is not guessed at
+    assert kit_from({1: SkillInfo(1, 0, {}, ARUNKA_S1)}).unread == []  # a plain sentence the text reader understands
     counter = kit_from({2: SkillInfo(2, None, {}, "When attacked, has a 30% chance to counterattack.")})
     assert counter.counter == 0.3 and counter.unread == []
     assert kit_from({}).unread == []
 
 
 def test_a_hand_kit_covers_the_hero_and_a_missing_page_leaves_all_three_skills_unread() -> None:
-    kit = kit_from({1: SkillInfo(1, 0, {}, ARUNKA_S1)})
+    kit = kit_from({1: SkillInfo(1, 0, {}, ILYNAV_S1)})
     assert kit.unread == [1]
     done, _ = apply_override(dataclasses.replace(kit), {}, _hand())
     assert done.unread == []
@@ -129,7 +135,7 @@ def test_the_badge_does_not_promise_what_the_model_cannot_see(monkeypatch: Any) 
 
 
 def test_the_worklist_lists_what_was_never_read() -> None:
-    skills = {1: SkillInfo(1, 0, {}, ARUNKA_S1), 3: SkillInfo(3, 3, {}, BYBLIS_S3)}
+    skills = {1: SkillInfo(1, 0, {}, ILYNAV_S1), 3: SkillInfo(3, 3, {}, BYBLIS_S3)}
     heroes = {"c2124": SimpleNamespace(name="Boss Arunka")}
     rows = worklist([("c2124", 5)], cast(Any, heroes), {}, {}, cast(Any, None), lambda http, name: skills)
     assert rows[0].unmodelled == ("S1: effects in its text, none read", "S3: effects in its text, none read")
@@ -142,7 +148,7 @@ def test_a_hand_kit_can_keep_a_skill_flagged_as_not_read() -> None:
 
     head = 'hero = "c5154"\nsource = "test"\nstatus = "community"\nreplace = [1]\n'
     hand = parse_override(head + "unread = [3]\n")
-    kit = kit_from({1: SkillInfo(1, 0, {}, ARUNKA_S1), 3: SkillInfo(3, 4, {}, BYBLIS_S3)})
+    kit = kit_from({1: SkillInfo(1, 0, {}, ILYNAV_S1), 3: SkillInfo(3, 4, {}, BYBLIS_S3)})
     assert kit.unread == [1, 3]
     done, _ = apply_override(kit, {}, hand)
     assert done.unread == [3]  # S1 is written by hand, the venom of S3 is not: the hero stays flagged

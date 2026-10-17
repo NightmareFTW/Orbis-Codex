@@ -21,6 +21,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Final
 
+from e7ac.predict.textkit import read_text
 from e7ac.sources.epic7db import SkillInfo
 
 DEFAULT_TURNS: Final = 2
@@ -40,6 +41,7 @@ _KINDS: Final = (  # effect name (epic7db) -> kind, debuff?
     ("decrease speed", "spd", True),
     ("stun", "stun", True),
     ("sleep", "stun", True),
+    ("fear", "fear", True),
     ("increase combat readiness", "cr", False),
     ("decrease combat readiness", "cr", True),
     ("extra turn", "extra_turn", False),
@@ -146,7 +148,7 @@ class Kit:
 
 
 _EFFECT_WORDS: Final = re.compile(
-    r"\b(?:inflict\w*|dispel\w*|heal\w*|recover\w*|barrier|stun\w*|fear\w*|provok\w*|silenc\w*|sleep\w*|venom\w*|"
+    r"\b(?:inflict\w*|dispel\w*|heal(?:s|ing|ed)?|recover\w*|barrier|stun\w*|fear\w*|provok\w*|silenc\w*|sleep\w*|venom\w*|"
     r"burn\w*|bleed\w*|poison\w*|grant\w*|immun\w*|immortal\w*|reviv\w*|resurrect\w*|steal\w*|invincib\w*|"
     r"extra turn|combat readiness|reflect\w*|decreas\w*|increas\w*|seal\w*|cleans\w*|restor\w*|absorb\w*)\b",
     re.IGNORECASE,
@@ -173,6 +175,17 @@ def kit_from(skills: dict[int, SkillInfo], amounts: Mapping[int, Mapping[str, Sc
                 kit.unmodelled.append(name)
             else:
                 effects.append(effect)
+        if not info.effects and (slot != 2 or info.cooldown):  # no icons: the plain sentences of an active skill (D88)
+            sums = (amounts or {}).get(slot, {})
+
+            def build(name: str, sentence: str, sums: Mapping[str, Scaling] = sums) -> Effect | None:
+                return _effect(name, None, sentence, sums)
+
+            found = read_text(info.text, build)
+            effects.extend(found.effects)
+            kit.unmodelled.extend(found.unmodelled)
+            if not found.leftover and slot in kit.unread:
+                kit.unread.remove(slot)
         if slot == 2 and not info.cooldown:  # a passive
             revive = _revive(info.text)
             lowered = info.text.lower()
@@ -228,7 +241,9 @@ def _effect(name: str, value: float | None, text: str, amounts: Mapping[str, Sca
             return None
         count = _COUNTS[found.group(1).lower()]
         receivers = _receivers(text, "debuff") if kind == "cleanse" else ""
-        return Effect(kind, debuff, 0.0, 0, 1.0, receivers=receivers, count=count)
+        chance = re.search(r"(\d+)% chance to dispel", text, re.IGNORECASE)  # "a 65% chance to dispel one buff"
+        landing = int(chance.group(1)) / 100 if chance and kind == "dispel" else 1.0
+        return Effect(kind, debuff, 0.0, 0, landing, receivers=receivers, count=count)
     amount = value
     if kind in ("atk", "def"):
         greater = "greater" in lowered or "(greater)" in lowered

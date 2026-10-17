@@ -32,6 +32,8 @@ only: newer ones have none) or by hand (`src/e7ac/predict/kits/<code>.toml`, fro
 | 4 | Maid Chloe (c2049) | S1, S3 done | S2 |
 | 2-3 | Mort, Young Senya, Celine, Frieren, School Nurse Yulha, Tactical Archetype Coli, Afternoon Soak Flan, ... | Mort, Young Senya done | the rest, in this order |
 
+Since SPEC D88 the plain unconditional sentences of an active skill's text are read for heroes without icons (fear, Defense / Attack changes, dispel, Combat Readiness, extra turn ...); what stays "not read" is what needs an amount or a mechanic the text does not give (heals, barriers, venom, offering, possession, focus, ...), so the table below is what is still missing after that.
+
 What settles it: the in-game skill screens, S1 / S2 / S3 at the enhancement the hero is assumed to have (opponents:
 fully enhanced), plus the description of each named effect (tap the highlighted word). Cost: three screens per hero.
 A partly written kit keeps the hero flagged for the skills it leaves out (`unread = [3]` in the file).
