@@ -53,7 +53,8 @@ def effective_kit(
     """The kit as the simulation sees it: read automatically (epic7db icons and text), corrected by the hand file."""
     skills = fetch(http, name)
     kit = kit_from(skills, amounts)
-    cooldowns = {s: k.cooldown for s, k in skills.items() if k.cooldown is not None}
+    # the cooldown of a fully enhanced skill (the steps that shorten it applied; skills assumed complete, NV-32)
+    cooldowns = {s: k.max_cooldown for s, k in skills.items() if k.max_cooldown is not None}
     if not skills:
         kit.unmodelled.append("(no epic7db page)")
         kit.unread = [1, 2, 3]  # nothing is known of its skills

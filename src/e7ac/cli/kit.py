@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Annotated
 
@@ -13,10 +14,11 @@ from e7ac.arena.sightings import SightingStore, popularity, sightings_path
 from e7ac.cli import catalog as catalog_cli
 from e7ac.cli.roster import _catalog_heroes, _engine, _fail, _resolve_hero_code
 from e7ac.paths import default_paths
+from e7ac.predict.audit import audit_hero, screens_needed, summarize, to_json, vocabulary
 from e7ac.predict.effects import Effect, Kit, Scaling
 from e7ac.predict.overrides import KitError, KitOverride, load_overrides
 from e7ac.predict.worklist import effective_kit, kit_amounts, worklist
-from e7ac.sources.epic7db import fetch_kit
+from e7ac.sources.epic7db import fetch_kit, fetch_library
 from e7ac.sources.http import CachedHttp
 from e7ac.storage.db import session_scope
 
@@ -88,6 +90,59 @@ def todo(
         mark = "refined" if row.refined else "auto"
         missing = ", ".join(row.unmodelled) or "-"
         typer.echo(f"  {row.seen:>3}x  {row.name:<28} {row.code:<7} [{mark}]  not simulated: {missing}")
+
+
+@kit_app.command("audit")
+def audit(
+    limit: Annotated[int, typer.Option(min=0, help="Only the first N heroes of the catalog (0: all).")] = 0,
+    top: Annotated[int, typer.Option(min=1, help="How many unknown mechanics to list.")] = 40,
+    out: Annotated[Path | None, typer.Option("--out", help="Where to write the full audit (JSON).")] = None,
+    offline: Annotated[bool, _OFFLINE] = False,
+) -> None:
+    """Every hero of the catalog: what the program knows of its skills and what only the game can still tell (SPEC D90).
+    Reads epic7db's page of each hero (cached; the first run fetches one page a second), so it takes a while."""
+    paths = default_paths()
+    overrides = _overrides()
+    seen = dict(_met(paths.home))
+    with session_scope(_engine()) as session:
+        heroes = _catalog_heroes(session) or {}
+        names = sorted((h.name, code) for code, h in heroes.items() if h.name)
+        if limit:
+            names = names[:limit]
+        amounts = {code: _amounts(session, code) for _, code in names}
+    audits = []
+    with catalog_cli.http_factory(paths, offline) as http:
+        for index, (name, code) in enumerate(names, 1):
+            skills = fetch_kit(http, name)
+            library = fetch_library(http, name) if skills else None
+            audits.append(audit_hero(code, name, skills, amounts[code], overrides.get(code), library))
+            if index % 25 == 0 or index == len(names):
+                typer.echo(f"  {index}/{len(names)} heroes read", err=True)
+    total = summarize(audits)
+    typer.echo(f"{total.heroes} heroes; epic7db has a page for {total.heroes - len(total.no_page)}")
+    typer.echo(
+        f"  every skill read: {total.done}; with a skill still not read: {total.unread} "
+        f"({total.skills_unread} of {total.skills} skills); hand kits: {total.hand}"
+    )
+    typer.echo(f"  Fribbels library data (average stats, sets, builds): {total.library} heroes")
+    typer.echo(f"  skills with a shorter cooldown when fully enhanced: {total.cooldown_cuts}")
+    typer.echo("  enhancement steps: " + ", ".join(f"{k} {n}" for k, n in total.steps.most_common()))
+    if total.no_page:
+        typer.echo(f"  no epic7db page: {', '.join(total.no_page[:15])}" + (" ..." if len(total.no_page) > 15 else ""))
+    words = vocabulary(audits, seen)
+    typer.echo(f"Named mechanics no reader knows ({len(words)}; the most met / widespread first):")
+    for row in words[:top]:
+        typer.echo(
+            f"  {row.keyword:<34} heroes {row.heroes:>3}  met {row.weight:>3}  e.g. {', '.join(row.examples[:3])}"
+        )
+    needs = screens_needed(audits, seen=seen)
+    typer.echo(f"The fewest skill popups that describe all of them: {len(needs)}")
+    for need in needs[:top]:
+        typer.echo(f"  {need.name} S{need.slot}: {', '.join(need.why)}")
+    target = out or paths.home / "audit" / "skills_audit.json"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(to_json(audits), indent=1, ensure_ascii=False), encoding="utf-8")
+    typer.echo(f"Written {target}")
 
 
 def _effective(

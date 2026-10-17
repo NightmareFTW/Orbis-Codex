@@ -52,7 +52,7 @@ receivers = "all"
 note = "S2: when the ally granted offering dies, recovers the Health of all allies by 50% (of the caster's max Health, Fribbels)"
 
 # S3 The Caress of Mercy (4 turns at +5): dispels all debuffs from all allies and increases Combat Readiness by 25%
-# (assumed: of all allies, like the dispel before it), consumes 20% of the current Health of the ally granted offering,
+# (all allies: confirmed by the user 2026-10-18), consumes 20% of the current Health of the ally granted offering,
 # granting abundance (after attacking, 2,000 additional damage on the target) to all other allies for 2 turns.
 [[effect]]
 slot = 3
@@ -66,7 +66,7 @@ slot = 3
 kind = "cr"
 value = 0.25
 receivers = "all"
-note = "S3: Combat Readiness +25% (assumed: all allies)"
+note = "S3: Combat Readiness +25% to all allies (confirmed by the user, 2026-10-18)"
 
 [[effect]]
 slot = 3
