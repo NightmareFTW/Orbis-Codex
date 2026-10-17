@@ -155,6 +155,9 @@ def win_odds(
         f"  {odds.runs:,} simulated battles, {odds.mean_actions:.0f} actions on average; confidence: low "
         "(skill effects read automatically; no counters, DoTs, artifacts or combat set effects yet)"
     )
+    typer.echo("  per hero, one average battle (the game's Battle Results): damage / Health restored / barrier granted")
+    for h in odds.heroes:
+        typer.echo(f"    {h.side:<4} {h.label:<24} {h.damage:>10,.0f} {h.healed:>10,.0f} {h.shielded:>10,.0f}")
     for warning in odds.warnings:
         typer.echo(f"  warning: {warning}", err=True)
     if odds.blind:

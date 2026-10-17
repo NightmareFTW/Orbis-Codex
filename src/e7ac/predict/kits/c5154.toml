@@ -1,0 +1,89 @@
+# Perfumer Byblis
+hero = "c5154"
+source = "in-game skill screens read by hand 2026-10-17: Rose Breeze +5, Elixir de Belle Nuit +5, Aura de la Mort +5 (max enhancement) with the Lingering Fragrance, Barrier, Increase Effectiveness, Redirected Provoke, Venom and Detonate descriptions; heal and barrier amounts from Fribbels' skill options (community)"
+status = "verified"
+replace = [1, 2, 3]
+cooldowns = { 3 = 3 }  # "3 turns" on the screen at +5
+unmodelled = [
+    "Soulburn (S1 triggers a Dual Attack from the ally with the highest Attack; Souls are not simulated)",
+    "Lingering Fragrance: max Health +5% of its bearers; the stack count (up to 5) is not simulated",
+    "Venom: the injuries it inflicts",
+]
+
+[passive]
+fragrance = 0.08
+ally_low = 0.5
+ally_low_cooldown = 3
+
+# S1 Rose Breeze: 75% chance to decrease Defense for 1 turn (+2 and +4 effect chance included); Defense down 70%.
+[[effect]]
+slot = 1
+kind = "def"
+value = -0.7
+chance = 0.75
+turns = 1
+note = "S1: 75% chance to decrease Defense by 70% for 1 turn"
+
+# S2 Elixir de Belle Nuit (passive): at the start of an enemy's turn grants lingering fragrance to all allies for 1
+# turn (always up while she lives: [passive] fragrance reflects 8% of the damage suffered back to the attacker, never
+# more than the bearer's max Health). When an ally's Health is 50% or less after being attacked, activates La Vie en
+# Rose (every 3 turns): dispels two debuffs from all allies, recovers Health, then a barrier for 2 turns; both amounts
+# in proportion to the caster's max Health (Fribbels: 23% and 10%; the heal grows with the enhancements). Assumed: the
+# ally can be the caster herself.
+[[effect]]
+slot = 2
+when = "ally_low"
+kind = "cleanse"
+receivers = "all"
+count = 2
+note = "La Vie en Rose: dispels two debuffs from all allies"
+
+[[effect]]
+slot = 2
+when = "ally_low"
+kind = "heal"
+scaling = [0.299, 0.0, 0.0]
+receivers = "all"
+note = "La Vie en Rose: recovers Health of all allies (Fribbels' 23% of the caster's max Health x 1.30 for the five healing enhancements +5 +5 +5 +5 +10%, assumed to multiply like the damage ones, NV-54)"
+
+[[effect]]
+slot = 2
+when = "ally_low"
+kind = "barrier"
+scaling = [0.10, 0.0, 0.0]
+receivers = "all"
+turns = 2
+note = "La Vie en Rose: barrier for 2 turns (10% of the caster's max Health, Fribbels)"
+
+# S3 Aura de la Mort (3 turns): increases Effectiveness (50%) of the caster for 3 turns, then redirected provoke on all
+# enemies for 1 turn and a 100% chance each to inflict two venom effects for 2 turns (+1, +2, +4, +5 effect chance
+# included); at the end of the turn detonates the venom on the target. Venom: 10% of max Health at the start of the
+# turn; Detonate: the damage is proportional to the turns left and the stacks (the bomb itself unaffected by turns).
+[[effect]]
+slot = 3
+kind = "eff"
+value = 0.5
+turns = 3
+note = "S3: increase Effectiveness (50%) to the caster for 3 turns"
+
+[[effect]]
+slot = 3
+kind = "redirect_provoke"
+turns = 1
+receivers = "enemies"
+note = "S3: redirected provoke on all enemies for 1 turn (their basic skill goes to the enemy with the highest max Health)"
+
+[[effect]]
+slot = 3
+kind = "venom"
+value = 0.1
+turns = 2
+count = 2
+receivers = "enemies"
+note = "S3: 100% chance each to inflict two venom effects for 2 turns on all enemies (10% of max Health per turn each)"
+
+[[effect]]
+slot = 3
+kind = "detonate"
+receivers = "enemies"
+note = "S3: at the end of the turn detonates the venom: 10% x turns left x stacks of every enemy's max Health"

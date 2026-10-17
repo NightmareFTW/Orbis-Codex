@@ -169,6 +169,23 @@ def _passives(kit: Kit) -> list[str]:
             f"at {kit.low_hp:.0%} Health or less (every {kit.low_hp_cooldown} turns): "
             + ", ".join(_describe(e) for e in kit.low_hp_effects)
         )
+    if kit.taunt:
+        found.append("taunt while in front: enemies' single-target skills can only pick it")
+    if kit.hit_cr:
+        found.append(f"+{kit.hit_cr:.0%} Combat Readiness each time it is attacked")
+    if kit.fragrance:
+        found.append(f"reflects {kit.fragrance:.0%} of the Health an ally loses back to the attacker")
+    if kit.cr_mirror:
+        found.append(f"gains {kit.cr_mirror:.0%} of every Combat Readiness increase of an enemy")
+    if kit.ally_low:
+        found.append(
+            f"an ally left at {kit.ally_low:.0%} Health or less after a hit (every {kit.ally_low_cooldown} turns): "
+            + ", ".join(_describe(e) for e in kit.ally_low_effects)
+        )
+    if kit.offering_death_effects:
+        found.append(
+            "when the ally granted offering dies: " + ", ".join(_describe(e) for e in kit.offering_death_effects)
+        )
     return found
 
 
@@ -178,19 +195,25 @@ def _describe(effect: Effect) -> str:
     parts = [effect.kind]
     if effect.kind == "spirit":
         parts.append(f"+{effect.value:g} Fighting Spirit")
+    elif effect.kind in ("fixed_damage", "abundance"):
+        parts.append(f"{effect.value:,.0f} damage")
     elif effect.value:
         parts.append(f"{effect.value:+.0%}")
     if any(effect.scaling):
         hp, atk, df = effect.scaling
         parts.append("+".join(f"{v:.0%} {s}" for v, s in ((hp, "HP"), (atk, "ATK"), (df, "DEF")) if v))
+    if effect.of_target:
+        parts.append("of the target's max Health")
     if effect.receivers:
         parts.append(effect.receivers)
     if effect.kind in ("cleanse", "dispel"):
         parts.append(f"x{effect.count or 'all'}")
+    if effect.kind == "venom":
+        parts.append(f"x{max(1, effect.count)} stacks")
     if effect.debuff and effect.chance != 1:
         parts.append(f"{effect.chance:.0%} chance")
     if effect.condition:
         parts.append(f"if {effect.condition}")
-    if effect.kind not in ("heal", "resurrect", "cleanse", "dispel", "cr", "extra_turn"):
+    if effect.kind not in ("heal", "resurrect", "cleanse", "dispel", "cr", "extra_turn", "detonate", "fixed_damage"):
         parts.append(f"{effect.turns}t")
     return " ".join(parts)

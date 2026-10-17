@@ -25,6 +25,12 @@ One file per hero, named by its code (`c2049.toml`); every number carries where 
     uncounterable = [3]           # skill slots whose attacks trigger no counterattack
     pierce_top = { 3 = 0.7 }      # slot -> penetration against the enemy with the highest max Health only
     ignore_resist = true          # ignores the Effect Resistance of targets with less max Health than this hero
+    taunt = true                  # in front (first living hero of the side): enemies' single-target skills pick it
+    hit_cr = 0.25                 # Combat Readiness gained each time it is attacked and survives
+    fragrance = 0.08              # share of the Health an ally loses to a hit that the attacker takes back
+    cr_mirror = 0.5               # share of an enemy's Combat Readiness increase this hero gains too
+    ally_low = 0.5                # an ally left at this Health share or less after a hit triggers `when = "ally_low"`
+    ally_low_cooldown = 3         # ... at most once every N own turns
 
     [[effect]]
     slot = 3                      # 1-3
@@ -48,8 +54,20 @@ each of its turns, for `turns`; it stacks), dual_attack (a random ally attacks t
 spirit (Fighting Spirit gained by the caster; `[passive]` spirit_* set the Young Senya mechanic), unable_counter
 (cannot counterattack for `turns`), unable_buff (receives no buffs for `turns`), shorten (every buff of the targets
 lasts `turns` fewer turns; always lands). `receivers = "enemies"` on a debuff hits every living enemy, not only the
-targets of the skill (an extra attack such as Harsetti's En Passant). A malformed file is an error naming the file
-(never skipped silently).
+targets of the skill (an extra attack such as Harsetti's En Passant); `receivers = "self"` on a debuff or dispel
+makes it hit the caster, always landing (Rinak's Clumsy Finish: the 1-turn self stun is `turns = 2`, the end-of-turn
+count being included). SPEC D89: eff (Effectiveness up by `value` for `turns`, added to the Effectiveness of the
+debuffs the caster inflicts), venom (`value` = share of the target's max Health per turn, `turns`, `count` stacks each
+with its own chance; they tick at the start of the holder's turn and a cleanse removes them), detonate (every venom of
+the targets, or of every enemy with `receivers = "enemies"`, hits at once: share x turns left x stacks; always
+lands), fixed_damage (`value` damage to the targets or to every enemy, ignoring Defense, always lands), offering
+(`value` = share of the damage allies take that the holder takes instead, `turns` = immortality turns once per battle
+on lethal damage; given to the foremost ally; `when = "offering_death"` effects follow when the holder dies),
+offering_cost (`value` = share of the holder's current Health paid, never to death), abundance (`value` additional
+damage after each attack of the holder, `turns`; `receivers = "not_offering"` skips the offering holder), pilfer (the
+target's Attack and Defense down 20% and the caster gains a Spoils stack, 20% Attack and Defense each, up to 4; a
+dispel of the caster's Spoils lifts the pilfers). `of_target = true` on a heal takes its scaling from the target's max
+Health (Lady's Divine Punishment). A malformed file is an error naming the file (never skipped silently).
 """
 
 from __future__ import annotations
@@ -98,6 +116,14 @@ KINDS: Final = frozenset(
         "unable_counter",
         "unable_buff",
         "shorten",
+        "eff",
+        "venom",
+        "detonate",
+        "fixed_damage",
+        "offering",
+        "offering_cost",
+        "abundance",
+        "pilfer",
     }
 )
 _DEBUFFS: Final = frozenset(
@@ -114,9 +140,11 @@ _DEBUFFS: Final = frozenset(
         "unable_counter",
         "unable_buff",
         "shorten",
+        "venom",
+        "pilfer",
     }
 )
-WHEN: Final = frozenset({"use", "start", "turn", "revive", "low_hp", "guard", "spirit"})
+WHEN: Final = frozenset({"use", "start", "turn", "revive", "low_hp", "guard", "spirit", "ally_low", "offering_death"})
 PASSIVES: Final = frozenset(
     {
         "reflect",
@@ -137,6 +165,12 @@ PASSIVES: Final = frozenset(
         "spirit_bonus",
         "spirit_hit",
         "spirit_share",
+        "taunt",
+        "hit_cr",
+        "fragrance",
+        "cr_mirror",
+        "ally_low",
+        "ally_low_cooldown",
     }
 )
 
@@ -238,6 +272,8 @@ def apply_override(kit: Kit, cooldowns: Mapping[int, int], override: KitOverride
         low_hp_effects=[],
         guard_effects=[],
         spirit_effects=[],
+        ally_low_effects=[],
+        offering_death_effects=[],
     )
     revive_effects: list[Effect] = []
     for placed in override.effects:
@@ -253,6 +289,10 @@ def apply_override(kit: Kit, cooldowns: Mapping[int, int], override: KitOverride
             out.guard_effects.append(placed.effect)
         elif placed.when == "spirit":
             out.spirit_effects.append(placed.effect)
+        elif placed.when == "ally_low":
+            out.ally_low_effects.append(placed.effect)
+        elif placed.when == "offering_death":
+            out.offering_death_effects.append(placed.effect)
         elif placed.effect.kind in ("heal", "resurrect"):  # revive: `value` = Health fraction regained
             out.revive = placed.effect.value
         else:
@@ -278,6 +318,12 @@ def apply_override(kit: Kit, cooldowns: Mapping[int, int], override: KitOverride
     out.spirit_bonus = int(passive.get("spirit_bonus", out.spirit_bonus))
     out.spirit_hit = int(passive.get("spirit_hit", out.spirit_hit))
     out.spirit_share = float(passive.get("spirit_share", out.spirit_share))
+    out.taunt = bool(passive.get("taunt", out.taunt))
+    out.hit_cr = float(passive.get("hit_cr", out.hit_cr))
+    out.fragrance = float(passive.get("fragrance", out.fragrance))
+    out.cr_mirror = float(passive.get("cr_mirror", out.cr_mirror))
+    out.ally_low = float(passive.get("ally_low", out.ally_low))
+    out.ally_low_cooldown = int(passive.get("ally_low_cooldown", out.ally_low_cooldown))
     return out, {**cooldowns, **override.cooldowns}
 
 
@@ -308,6 +354,7 @@ def _placed(raw: Any, name: str, index: int) -> Placed:
             receivers=str(raw.get("receivers", "")),
             count=int(raw.get("count", 0)),
             condition=str(raw.get("condition", "")),
+            of_target=bool(raw.get("of_target", False)),
         )
     except (TypeError, ValueError) as exc:
         raise KitError(f"{where}: {exc}") from exc

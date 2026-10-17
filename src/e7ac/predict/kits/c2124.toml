@@ -1,0 +1,58 @@
+# Boss Arunka
+hero = "c2124"
+source = "in-game skill screens read by hand 2026-10-17: Road Sign Smash +6, Vanguard of the Silent Expanse +3, Coruscated Trajectory +6 (max enhancement) with the Decrease Defense, Increase Defense, Barrier and Ferocious Stand descriptions; the barrier amount from Fribbels' skill options (community)"
+status = "verified"
+replace = [1, 3]
+cooldowns = { 3 = 3 }  # "3 turns" on the screen at +6
+unmodelled = [
+    "Soulburn (S1 triggers a Dual Attack from the ally with the highest Attack; Souls are not simulated)",
+    "Ferocious Stand is always up while she is in front (granted at the start and at the end of each turn, undispellable)",
+]
+
+[passive]
+taunt = true
+hit_cr = 0.25
+
+# S1 Road Sign Smash: 75% chance to decrease Defense for 1 turn (+2 and +5 effect chance included); Defense down 70%.
+# Damage grows with the caster's Defense (in the skill data).
+[[effect]]
+slot = 1
+kind = "def"
+value = -0.7
+chance = 0.75
+turns = 1
+note = "S1: 75% chance to decrease Defense by 70% for 1 turn"
+
+# S2 Vanguard of the Silent Expanse (passive): at the start of the battle and at the end of the turn, when in the front
+# row, Ferocious Stand for 1 turn (enemies cannot select allies except the bearer as a skill target: [passive] taunt);
+# after being attacked, +25% Combat Readiness ([passive] hit_cr, +3 included).
+
+# S3 Coruscated Trajectory (3 turns): dispels all buffs, then decreased Defense for 2 turns, increased Defense and a
+# barrier to the caster for 2 turns; damage and barrier strength grow with the caster's Defense (Fribbels: barrier 1.2 x
+# her Defense; the Defense it is computed on is the displayed one, not the one with the buff just granted: assumed).
+[[effect]]
+slot = 3
+kind = "dispel"
+count = 0
+note = "S3: dispels all buffs of the target"
+
+[[effect]]
+slot = 3
+kind = "def"
+value = -0.7
+turns = 2
+note = "S3: decrease Defense (70%) for 2 turns"
+
+[[effect]]
+slot = 3
+kind = "def"
+value = 0.6
+turns = 2
+note = "S3: increase Defense (60%) to the caster for 2 turns"
+
+[[effect]]
+slot = 3
+kind = "barrier"
+scaling = [0.0, 0.0, 1.2]
+turns = 2
+note = "S3: barrier to the caster for 2 turns (1.2 x Defense, Fribbels)"

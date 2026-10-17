@@ -90,6 +90,8 @@ class Effect:
     """cleanse / dispel: how many debuffs / buffs (0 = all)."""
     condition: str = ""
     """"kill": only when the skill defeated an enemy (SPEC D76); "stun": only when it newly stunned a target."""
+    of_target: bool = False
+    """heal: the amount is these shares of the *target's* max Health (Lady of the Scales S1), not the caster's."""
 
 
 @dataclass(slots=True)
@@ -137,6 +139,22 @@ class Kit:
     """Area damage on trigger: this share of the max Health of the caster and the foremost ally, to every enemy."""
     spirit_effects: list[Effect] = field(default_factory=list)
     """Passive heals / barriers acting on each of the caster's turns."""
+    taunt: bool = False
+    """While in front (the first living hero of its side) enemies' single-target skills can only pick it (Ferocious
+    Stand, Boss Arunka; MECH-TAUNT-01)."""
+    hit_cr: float = 0.0
+    """Combat Readiness gained each time the hero is attacked and survives (Boss Arunka: 25%)."""
+    fragrance: float = 0.0
+    """Share of the Health an ally loses to a hit that the attacker takes back, while this hero lives (Lingering
+    Fragrance, Perfumer Byblis: 8%)."""
+    cr_mirror: float = 0.0
+    """Share of an enemy's Combat Readiness increase that this hero gains as well (Lady of the Scales: 50%)."""
+    ally_low: float = 0.0
+    """Health share at or below which an ally that was just attacked triggers `ally_low_effects` (La Vie en Rose)."""
+    ally_low_cooldown: int = 0
+    ally_low_effects: list[Effect] = field(default_factory=list)
+    offering_death_effects: list[Effect] = field(default_factory=list)
+    """Effects (heal all allies) when the ally granted offering dies."""
     revive: float | None = None
     """HP fraction restored once on lethal damage."""
     revive_effects: list[Effect] = field(default_factory=list)

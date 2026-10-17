@@ -336,11 +336,12 @@ def test_counterattack_lock_combat_readiness_lock_and_lethal_immortality_in_batt
 
 
 def test_effects_that_need_a_landed_stun_reach_every_ally_but_the_caster() -> None:
-    from e7ac.predict.battle import _receivers, simulate
+    from e7ac.predict.battle import _receivers, _State, simulate
     from tests.test_effects import unit
 
     units = [unit("a", "you"), unit("m", "you"), unit("b", "them")]
-    assert _receivers(Effect("cr", False, 0.1, 0, 1.0, receivers="others"), 0, units, [1.0, 1.0, 1.0]) == [1]
+    others = Effect("cr", False, 0.1, 0, 1.0, receivers="others")
+    assert _receivers(others, 0, units, [1.0, 1.0, 1.0], [_State(), _State(), _State()]) == [1]
     stun = Effect("stun", True, 0.0, 1, 0.5)
     boost = Effect("extra_turn", False, 0.0, 0, 1.0, receivers="others")
     only_on_stun = dataclasses.replace(boost, condition="stun")

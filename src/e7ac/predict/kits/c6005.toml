@@ -1,0 +1,83 @@
+# Lady of the Scales
+hero = "c6005"
+source = "in-game skill screens read by hand 2026-10-17: Divine Punishment +5, Scales of Equity +5, The Caress of Mercy +5 (max enhancement) with the Fear, Offering, Immortal and Abundance descriptions; heal amounts from Fribbels' skill options (community)"
+status = "verified"
+replace = [1, 2, 3]
+cooldowns = { 3 = 4 }  # "4 turns" on the screen at +5 (epic7db lists 5: without the -1 turn of +3, NV-41)
+unmodelled = [
+    "Soulburn (S1 with 100% effect chance on every enemy; Souls are not simulated)",
+    "Offering does not share damage over time, and Abundance's damage is dealt by the holder's attacks only (not by counters or dual attacks)",
+]
+
+[passive]
+cr_mirror = 0.5
+
+# S1 Divine Punishment: attacks one enemy, 75% chance to inflict fear for 1 turn (+2 and +4 effect chance included),
+# before recovering the Health of all allies in proportion to the target's max Health (Fribbels: 8%, of the target's:
+# the text says so).
+[[effect]]
+slot = 1
+kind = "fear"
+chance = 0.75
+turns = 1
+note = "S1: 75% chance to inflict fear for 1 turn"
+
+[[effect]]
+slot = 1
+kind = "heal"
+scaling = [0.08, 0.0, 0.0]
+receivers = "all"
+of_target = true
+note = "S1: recovers the Health of all allies by 8% of the target's max Health (Fribbels' 0.08; the text says 'proportional to the target's max Health')"
+
+# S2 Scales of Equity (passive): at the start of the battle grants offering to the foremost ally. Offering: the holder
+# takes 70% of the damage received by all allies; on lethal damage it is immortal for 1 turn, once per battle. When the
+# holder dies, recovers the Health of all allies by 50% (Fribbels' 0.5 of the caster's max Health: assumed, the text
+# does not say whose). When the Combat Readiness of an enemy increases, +50% of that amount for the caster
+# ([passive] cr_mirror).
+[[effect]]
+slot = 2
+when = "start"
+kind = "offering"
+value = 0.7
+turns = 1
+note = "S2: offering to the foremost ally: 70% damage sharing, immortal for 1 turn once on lethal damage"
+
+[[effect]]
+slot = 2
+when = "offering_death"
+kind = "heal"
+scaling = [0.5, 0.0, 0.0]
+receivers = "all"
+note = "S2: when the ally granted offering dies, recovers the Health of all allies by 50% (of the caster's max Health, Fribbels)"
+
+# S3 The Caress of Mercy (4 turns at +5): dispels all debuffs from all allies and increases Combat Readiness by 25%
+# (assumed: of all allies, like the dispel before it), consumes 20% of the current Health of the ally granted offering,
+# granting abundance (after attacking, 2,000 additional damage on the target) to all other allies for 2 turns.
+[[effect]]
+slot = 3
+kind = "cleanse"
+receivers = "all"
+count = 0
+note = "S3: dispels all debuffs from all allies"
+
+[[effect]]
+slot = 3
+kind = "cr"
+value = 0.25
+receivers = "all"
+note = "S3: Combat Readiness +25% (assumed: all allies)"
+
+[[effect]]
+slot = 3
+kind = "offering_cost"
+value = 0.2
+note = "S3: consumes 20% of the current Health of the ally granted offering"
+
+[[effect]]
+slot = 3
+kind = "abundance"
+value = 2000
+turns = 2
+receivers = "not_offering"
+note = "S3: abundance for 2 turns to all other allies: after attacking, 2,000 additional damage on the target"

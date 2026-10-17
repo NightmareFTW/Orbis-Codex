@@ -15,3 +15,8 @@ Never guess a number: unknown values are `status = "assumed"` and listed in docs
 
 Best source: the in-game skill screen (a screenshot of the hero's skill description at its current enhancement) —
 the numbers are then `verified`. epic7db can be out of date (SPEC D77, NV-41).
+
+Hand kits so far (screens read by hand): Young Senya, Mort, Harsetti, Blood Blade Karin, Maid Chloe, Yulha, then (SPEC
+D89) Lady of the Scales, Boss Arunka, Perfumer Byblis and Rinak: Offering, Abundance, taunt, venom and its detonation,
+Pilfer and Spoils and the rest of their mechanics are in `predict/overrides.py` (kinds, passives) and
+docs/MECHANICS.md (MECH-OFFER-01 ... MECH-SPOIL-01).

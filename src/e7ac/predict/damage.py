@@ -3,8 +3,10 @@
 Offense = (ATK x rate + HP x hp_scaling + DEF x def_scaling) x 1.871 x pow x (1 + enhancements) (MECH-DMG-01);
 defence factor 1 / (1 + DEF x (1 - penetration) / 300) (MECH-DMG-02, MECH-DMG-04); expected hit-type factor
 CC x min(CD, 350%) + (1 - CC) (MECH-DMG-05, crushing and miss left out). All `community`. Skill enhancements are
-assumed complete (the roster does not know them, NV-32). Skill fields whose formula is not documented (speed scaling,
-"increased value", extra ATK scaling, crit damage increase) are not counted: the skill is marked approximate.
+assumed complete (the roster does not know them, NV-32). Speed scaling (Rinak: the offense is multiplied by
+1 + Speed x the skill's factor, e7calc `mult`, `assumed`) is counted from the attacker's Speed in its stats. Skill
+fields whose formula is not documented ("increased value", extra ATK scaling, crit damage increase) are not counted:
+the skill is marked approximate.
 Not yet: buffs/debuffs, sets in combat (Torrent, Rage...), artifacts, elements, passives, barriers.
 """
 
@@ -22,7 +24,7 @@ ATK_CONSTANT: Final = 1.871
 """MECH-DMG-01 (community, no official source)."""
 CD_CAP: Final = 3.5
 """MECH-DMG-05."""
-_UNMODELLED: Final = ("self_spd_scaling", "increased_value", "extra_self_atk_scaling", "crit_damage_increase")
+_UNMODELLED: Final = ("increased_value", "extra_self_atk_scaling", "crit_damage_increase")
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,6 +34,8 @@ class SkillPower:
     enhance: float
     hp_scaling: float = 0.0
     def_scaling: float = 0.0
+    spd_scaling: float = 0.0
+    """The offense is multiplied by 1 + the caster's Speed x this (Rinak S1 0.0015, S3 0.003; e7calc, `assumed`)."""
     penetration: float = 0.0
     approximate: bool = False
     can_crit: bool = True
@@ -52,6 +56,7 @@ def skill_power(entity: ResolvedEntity) -> SkillPower | None:
         enhance=sum(_number(v) for v in enhance) if isinstance(enhance, list) else 0.0,
         hp_scaling=_number(entity.value("self_hp_scaling")),
         def_scaling=_number(entity.value("self_def_scaling")),
+        spd_scaling=_number(entity.value("self_spd_scaling")),
         penetration=_number(entity.value("penetration")),
         approximate=any(entity.value(name) is not None for name in _UNMODELLED),
         can_crit=not isinstance(hit_types := entity.value("hit_types"), list) or "crit" in hit_types,
@@ -80,6 +85,7 @@ def expected_hit(attacker: Mapping[Stat, float], skill: SkillPower, defender: Ma
     offense = attacker[Stat.ATK] * skill.rate + attacker[Stat.HP] * skill.hp_scaling
     offense += attacker[Stat.DEF] * skill.def_scaling
     offense *= ATK_CONSTANT * skill.pow * (1 + skill.enhance)
+    offense *= 1 + attacker.get(Stat.SPEED, 0.0) * skill.spd_scaling
     defence = 1 / (1 + defender[Stat.DEF] * (1 - skill.penetration) / 300)
     crit = min(attacker[Stat.CRIT_CHANCE], 1.0) if skill.can_crit else 0.0
     hit_type = crit * min(attacker[Stat.CRIT_DAMAGE], CD_CAP) + (1 - crit)

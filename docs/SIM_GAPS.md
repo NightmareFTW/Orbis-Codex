@@ -16,9 +16,9 @@ only: newer ones have none) or by hand (`src/e7ac/predict/kits/<code>.toml`, fro
 
 | Seen | Hero | State | Named effects whose in-game text is needed (beyond S1-S3) |
 |---:|---|---|---|
-| 16 | Lady of the Scales (c6005) | not read | Offering, Abundance; S1 heal amount (a share of the *target's* max Health) |
-| 15 | Boss Arunka (c2124) | not read | Ferocious Stand; S3 barrier amount |
-| 10 | Rinak (c1168) | not read | Pilfer; S1 damage grows with Speed; S3 7000 fixed damage and its self-stun |
+| 16 | Lady of the Scales (c6005) | done (D89) | Soulburn only |
+| 15 | Boss Arunka (c2124) | done (D89) | Soulburn only |
+| 10 | Rinak (c1168) | done (D89) | Soulburn only; the Health part of Pilfer / Spoils |
 | 9 | Spirit Eye Celine (c2103) | not read | Possession; Nimble Sword life steal amount; Souls |
 | 8 | Harsetti (c1153) | done | Focus maximum and bonus, En Passant multiplier (NV-44) |
 | 8 | Arbiter Vildred (c2007) | not read | Focus, Dark Blade, the regeneration on lethal damage |
@@ -28,7 +28,8 @@ only: newer ones have none) or by hand (`src/e7ac/predict/kits/<code>.toml`, fro
 | 6 | Setsuka (c1176) | not read | Fighting Spirit, Demon Blade Unleashed, Blade Art: Bewitching Blossom, beguile |
 | 5 | Genesis Ras (c2001) | not read | Sacred Covenant, seal and collapse |
 | 5 | Empyrean Ilynav (c2113) | not read | Injuries, Indomitable |
-| 4 | Zio (c1133), New Moon Luna (c2066), Perfumer Byblis (c5154), Witch of the Mere Tenebria (c6050) | not read | Deify; skill effect nullifier; venom (damage per venom and its detonation), lingering fragrance, La Vie en Rose; rupture, restrict, block |
+| 4 | Perfumer Byblis (c5154) | done (D89) | Soulburn; the 5% Health of Lingering Fragrance; injuries |
+| 4 | Zio (c1133), New Moon Luna (c2066), Witch of the Mere Tenebria (c6050) | not read | Deify; skill effect nullifier; rupture, restrict, block |
 | 4 | Maid Chloe (c2049) | S1, S3 done | S2 |
 | 2-3 | Mort, Young Senya, Celine, Frieren, School Nurse Yulha, Tactical Archetype Coli, Afternoon Soak Flan, ... | Mort, Young Senya done | the rest, in this order |
 
@@ -44,9 +45,9 @@ The opponent's stats are Stove's "typical" build: the median of each stat taken 
 PvE builds (NV-01, NV-02). Arena defence teams are probably better built than the median. Their sets and artifacts
 are not in the simulation at all (NV-07, NV-17).
 
-What settles it: (a) whether the game shows an Arena opponent's hero stats and gear (a hero's info screen before the
-fight): if it does, one capture of it, and the program can read the real build the way it reads the user's own heroes;
-(b) otherwise, results (section 3) to choose between the typical, strong and top profiles.
+**The game never shows an opponent's equipment** (the user, 2026-10-18), so the build cannot be read from the screen:
+the idea is closed. What is left is results (section 3) to choose between the typical, strong and top profiles, and
+the community data of what the heroes met most usually wear.
 
 ## 3. The real result of each fight
 
@@ -54,9 +55,16 @@ Nothing checks the chance against what happened. The Battle Results screen (Dama
 the damage and the recovery: the first one (the lost fight) is kept locally and summarised in NV-51; it shows the
 size of the gap (the opponents recovered 1.44 million).
 
-What settles it: the Battle Results and Victory / Defeat screen of each fight, with the chance the program showed. A
-results log that reads them from the screen is proposed (not built); until then, a screenshot of both is enough. The
-simulation could print each hero's damage and recovery, to compare with those numbers hero by hero.
+Since SPEC D89 `e7 predict win` prints each hero's damage, Health restored and barrier granted in an average battle, to
+compare with those numbers hero by hero. With the four opponents' kits read, the lost fight is **still** predicted as a
+win (99.6%; 89% with the "top" build), in about 22 actions, with a fraction of the real damage and healing (Byblis:
+31 thousand damage and 12 thousand restored against 249 thousand and 717 thousand; NV-53, NV-55). The damage numbers
+say the real fight lasted 15 to 40 rounds per hero; what the Recovery column counts is itself open (NV-53). So the
+skills read were not what decided that fight, and no other cause can be told apart from this one fight.
+
+What settles it: the Battle Results and Victory / Defeat screen of each fight, with the chance the program showed (a
+screenshot of both is enough; a results log that reads them from the screen is proposed, not built), the tabs of the
+same screen that were not sent yet (Damage Taken, the other Recovery tab), and how many turns the fight lasted.
 
 ## 4. How the game plays the fight
 
@@ -77,7 +85,8 @@ effect on the result needs the fights of section 3; for the user's own heroes it
 
 ## Order of work
 
-1. The heroes at the top of the table (each one that is read removes a "~" from a lot of predictions).
-2. The opponent build (section 2): the largest single lever on the stats once the kits are in.
-3. The results log (section 3): turns every later fix into a measured one.
+1. The heroes at the top of the table (each one that is read removes a "~" from a lot of predictions): next Spirit Eye
+   Celine, Arbiter Vildred, Rhianna and Luciella, Notos, Belian, Setsuka.
+2. The results log (section 3): turns every later fix into a measured one; the lost fight is the first case to explain.
+3. The opponent build (section 2): only from results, since the game never shows it.
 4. The rest, as the fights say which of them matter.

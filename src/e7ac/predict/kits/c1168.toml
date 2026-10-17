@@ -1,0 +1,70 @@
+# Rinak
+hero = "c1168"
+source = "in-game skill screens read by hand 2026-10-17: Vital Point Slash +5, Pickpocketing +5, Clumsy Finish +5 (max enhancement) with the Penetrate, Pilfer, Spoils, Increase Attack, Extra Turn and Stun descriptions; the speed factors of S1 and S3 and the 7,000 from e7calc and Fribbels' skill data (community)"
+status = "verified"
+replace = [2, 3]
+cooldowns = { 2 = 3, 3 = 4 }  # "3 turns" and "4 turns" on the screens at +5 (S3: -1 turn from +3)
+unmodelled = [
+    "Soulburn (S2 and S3 ignore Effect Resistance; Souls are not simulated)",
+    "Pilfer and Spoils: the max Health part (-20% / +20%) and their duration (kept until dispelled or cleansed)",
+]
+
+# S1 Vital Point Slash: dagger attack that penetrates Defense, cannot critically hit; damage grows with the caster's
+# Speed (skill data: rate 0.25, speed factor 0.0015; the offense is multiplied by 1 + Speed x 0.0015, e7calc: assumed).
+
+# S2 Pickpocketing (3 turns): attacks, dispels all buffs of the target, decreases its Combat Readiness by 40%, inflicts
+# pilfer (Attack, Defense and Health down 20%; the caster gains a Spoils stack: +20% each, up to 4), then increased
+# Attack (50%) to the caster for 2 turns and an extra turn.
+[[effect]]
+slot = 2
+kind = "dispel"
+count = 0
+note = "S2: dispels all buffs of the target"
+
+[[effect]]
+slot = 2
+kind = "cr"
+value = -0.4
+note = "S2: decreases the target's Combat Readiness by 40%"
+
+[[effect]]
+slot = 2
+kind = "pilfer"
+turns = 99
+note = "S2: pilfer on the target (Attack and Defense down 20%) and a Spoils stack for the caster (+20% Attack and Defense, up to 4)"
+
+[[effect]]
+slot = 2
+kind = "atk"
+value = 0.5
+turns = 2
+note = "S2: increase Attack (50%) to the caster for 2 turns"
+
+[[effect]]
+slot = 2
+kind = "extra_turn"
+note = "S2: an extra turn"
+
+# S3 Clumsy Finish (4 turns): attacks one enemy (penetrates Defense, no crit; damage grows with Speed: rate 0.32, speed
+# factor 0.003); after attacking dispels all buffs from the caster (Spoils included: the pilfers go with them) and
+# inflicts stun on the caster for 1 turn, and deals 7,000 additional damage to every enemy whether or not the attack hits.
+[[effect]]
+slot = 3
+kind = "dispel"
+count = 0
+receivers = "self"
+note = "S3: dispels all buffs from the caster (the security sensor)"
+
+[[effect]]
+slot = 3
+kind = "stun"
+turns = 2
+receivers = "self"
+note = "S3: stun on the caster for 1 turn (turns = 2: the end of the casting turn counts as one)"
+
+[[effect]]
+slot = 3
+kind = "fixed_damage"
+value = 7000
+receivers = "enemies"
+note = "S3: 7,000 additional damage to all enemies"
