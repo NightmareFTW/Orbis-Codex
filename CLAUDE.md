@@ -81,6 +81,7 @@ Key data facts (details in docs/DATA_SOURCES.md):
 - `docs/DATA_SOURCES.md` — sources, endpoints, freshness, licence/ToS, last verified
 - `docs/MECHANICS.md` — formulas/rules with source + status, needs-verification list
 - `docs/ARCHITECTURE.md` — diagram, stack, ERD, risks
+- `docs/SIM_GAPS.md` — what the simulation does not know yet (the heroes met most, the opponent's build, real results), ordered by effect, and what settles each
 - `fixtures/README.md` — expected (git-ignored) fixture files
 
 ## Current status

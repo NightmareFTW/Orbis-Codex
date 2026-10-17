@@ -133,3 +133,19 @@ def test_the_worklist_lists_what_was_never_read() -> None:
     heroes = {"c2124": SimpleNamespace(name="Boss Arunka")}
     rows = worklist([("c2124", 5)], cast(Any, heroes), {}, {}, cast(Any, None), lambda http, name: skills)
     assert rows[0].unmodelled == ("S1: effects in its text, none read", "S3: effects in its text, none read")
+
+
+def test_a_hand_kit_can_keep_a_skill_flagged_as_not_read() -> None:
+    import pytest
+
+    from e7ac.predict.overrides import KitError, parse_override
+
+    head = 'hero = "c5154"\nsource = "test"\nstatus = "community"\nreplace = [1]\n'
+    hand = parse_override(head + "unread = [3]\n")
+    kit = kit_from({1: SkillInfo(1, 0, {}, ARUNKA_S1), 3: SkillInfo(3, 4, {}, BYBLIS_S3)})
+    assert kit.unread == [1, 3]
+    done, _ = apply_override(kit, {}, hand)
+    assert done.unread == [3]  # S1 is written by hand, the venom of S3 is not: the hero stays flagged
+    assert apply_override(kit, {}, parse_override(head))[0].unread == []
+    with pytest.raises(KitError, match="slots 1, 2 or 3"):
+        parse_override(head + "unread = [4]\n")

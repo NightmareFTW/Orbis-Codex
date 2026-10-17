@@ -161,10 +161,20 @@ class KitOverride:
     replace: tuple[int, ...] = ()
     handles: tuple[str, ...] = ()
     unmodelled: tuple[str, ...] = ()
+    unread: tuple[int, ...] = ()
+    """Skill slots this hand kit still leaves out entirely (their effects are known to matter and are not simulated):
+    the hero stays "not read" for them, so every chance that involves it is still flagged (SPEC D87)."""
     passive: Mapping[str, Any] = field(default_factory=dict)
     cooldowns: Mapping[int, int] = field(default_factory=dict)
     effects: tuple[Placed, ...] = ()
     path: str = ""
+
+
+def _slot(value: object, name: str, key: str) -> int:
+    slot = _int(value, name, key)
+    if slot not in (1, 2, 3):
+        raise KitError(f"{name}: '{key}' lists skill slots 1, 2 or 3, not {slot}")
+    return slot
 
 
 def load_overrides(folder: Path = KITS_DIR) -> dict[str, KitOverride]:
@@ -204,6 +214,7 @@ def parse_override(text: str, name: str = "<kit>") -> KitOverride:
         replace=tuple(_int(s, name, "replace") for s in data.get("replace", [])),
         handles=tuple(str(h) for h in data.get("handles", [])),
         unmodelled=tuple(str(h) for h in data.get("unmodelled", [])),
+        unread=tuple(_slot(s, name, "unread") for s in data.get("unread", [])),
         passive=passive,
         cooldowns=cooldowns,
         effects=effects,
@@ -223,7 +234,7 @@ def apply_override(kit: Kit, cooldowns: Mapping[int, int], override: KitOverride
         revive=None if dropped else kit.revive,
         revive_effects=[] if dropped else list(kit.revive_effects),
         unmodelled=[n for n in kit.unmodelled if n not in override.handles] + list(override.unmodelled),
-        unread=[],  # read by hand: what is still missing is in `unmodelled`
+        unread=list(override.unread),  # read by hand: what is still missing is in `unmodelled`, or in `unread`
         low_hp_effects=[],
         guard_effects=[],
         spirit_effects=[],

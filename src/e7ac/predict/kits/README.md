@@ -8,6 +8,9 @@ Workflow:
 3. Write `kits/<code>.toml` with only what is wrong or missing; give `source` and `status` for its numbers.
 4. `e7 kit show HERO` again, then `e7 predict win ...` uses it ("kit refined by hand" note).
 
+A kit that still leaves a whole skill out (its effects matter and are not simulated yet) says so with
+`unread = [3]`: the hero then stays flagged "skills not read" for that slot, and every chance with it keeps its ~.
+
 Never guess a number: unknown values are `status = "assumed"` and listed in docs/MECHANICS.md "Needs verification".
 
 Best source: the in-game skill screen (a screenshot of the hero's skill description at its current enhancement) —
