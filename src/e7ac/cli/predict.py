@@ -19,14 +19,14 @@ from e7ac.opponents.assumed import Profile, assumed_build
 from e7ac.paths import default_paths
 from e7ac.predict.battle import RUNS, BattleOdds, Combatant, confidence_interval, simulate
 from e7ac.predict.damage import SkillPower, hits_to_defeat, skill_power, support_amounts
-from e7ac.predict.effects import Kit, Scaling, kit_from
-from e7ac.predict.overrides import KitError, apply_override, load_overrides
+from e7ac.predict.effects import Kit, Scaling
+from e7ac.predict.overrides import KitError, load_overrides
 from e7ac.predict.turn_order import START_CR_MAX, Unit, first_turns
+from e7ac.predict.worklist import effective_kit
 from e7ac.roster.composition import compose_final_stats
 from e7ac.roster.screen_gear import ScreenCatalog
 from e7ac.roster.store import build_from_row, list_owned
 from e7ac.settings import SettingsError, load_settings
-from e7ac.sources.epic7db import fetch_kit
 from e7ac.sources.http import FetchError
 from e7ac.sources.stove_usage import UsageError, fetch_hero_usage
 from e7ac.storage.db import session_scope
@@ -139,9 +139,10 @@ def win_odds(
     if missing:
         _fail(f"no stats for {', '.join(missing)} (Stove has no data: only the speed was given)")
     units = [Combatant(f.label, f.side, f.stats, f.speed, f.skills, f.cooldowns, f.kit, f.element) for f in fighters]
-    skipped = sorted({name for f in fighters for name in f.kit.unmodelled})
-    if skipped and not quiet:
-        typer.echo(f"note: effects not simulated yet: {', '.join(skipped)}", err=True)
+    if not quiet:
+        for f in fighters:
+            if f.kit.unmodelled:
+                typer.echo(f"note: {f.label}: not simulated yet: {', '.join(sorted(set(f.kit.unmodelled)))}", err=True)
     unknown = [f.label for f in fighters if 3 not in f.cooldowns and 3 in f.skills]
     if unknown and not quiet:
         typer.echo(f"note: S3 cooldown unknown for {', '.join(unknown)}: S3 on the first action only", err=True)
@@ -156,6 +157,13 @@ def win_odds(
     )
     for warning in odds.warnings:
         typer.echo(f"  warning: {warning}", err=True)
+    if odds.blind:
+        typer.echo(
+            f"  NOT RELIABLE: the skills of {', '.join(odds.blind)} were not read (epic7db shows no effects for them)"
+            " and are simulated as plain attacks: heals, barriers, venom, fear and the rest are missing, so the real"
+            " chance can be far from this. `e7 kit todo` lists the heroes that need a hand kit.",
+            err=True,
+        )
     return odds
 
 
@@ -232,12 +240,12 @@ def _fighters(team: str, vs: str, world: World | None, offline: bool) -> list[_F
         _fail(f"hand-written kit: {exc}")
     with catalog_cli.http_factory(paths, offline) as http:
         for fighter in fighters:
-            skills = fetch_kit(http, fighter.name) if fighter.name else {}
-            fighter.cooldowns = {s: k.cooldown for s, k in skills.items() if k.cooldown is not None}
-            fighter.kit = kit_from(skills, fighter.amounts)
             hand = overrides.get(fighter.code)
+            if fighter.name:
+                fighter.kit, fighter.cooldowns = effective_kit(http, fighter.name, fighter.amounts, hand)
+            else:  # not in the catalog: nothing is known of its skills
+                fighter.kit, fighter.cooldowns = Kit(unread=[1, 2, 3]), {}
             if hand is not None:
-                fighter.kit, fighter.cooldowns = apply_override(fighter.kit, fighter.cooldowns, hand)
                 typer.echo(f"note: {fighter.label}: kit refined by hand ({hand.status}, {hand.source})", err=True)
         for fighter in (f for f in fighters if f.side == "them"):
             try:

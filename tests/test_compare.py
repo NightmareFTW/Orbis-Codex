@@ -47,11 +47,11 @@ def test_chances_are_banded_for_their_colour() -> None:
 def test_unknown_heroes_are_never_guessed_and_the_same_teams_are_simulated_once() -> None:
     calls: list[tuple[tuple[str, ...], tuple[str, ...]]] = []
 
-    def predict(team: tuple[str, ...], theirs: tuple[str, ...]) -> tuple[float, float]:
+    def predict(team: tuple[str, ...], theirs: tuple[str, ...]) -> tuple[float, float, tuple[str, ...]]:
         calls.append((team, theirs))
-        return (0.8 if theirs[0] == "c2001" else 0.3), 0.02
+        return (0.8 if theirs[0] == "c2001" else 0.3), 0.02, ()
 
-    known: dict[Any, tuple[float, float]] = {}
+    known: dict[Any, tuple[float, float, tuple[str, ...]]] = {}
     defences = [
         ("c2001", "c2002", "c2003", "c2004"),
         ("c2005", None, "c2007", "c2008"),
@@ -65,16 +65,16 @@ def test_unknown_heroes_are_never_guessed_and_the_same_teams_are_simulated_once(
 
 
 def test_without_your_team_nothing_is_compared_and_a_failure_says_why() -> None:
-    def never(team: tuple[str, ...], theirs: tuple[str, ...]) -> tuple[float, float]:
+    def never(team: tuple[str, ...], theirs: tuple[str, ...]) -> tuple[float, float, tuple[str, ...]]:
         raise AssertionError("no simulation without a team")
 
     rows = compare([], [("c2001", "c2002", "c2003", "c2004")], never, {})
     assert rows[0].win is None and "VS screen" in rows[0].note
 
-    def broken(team: tuple[str, ...], theirs: tuple[str, ...]) -> tuple[float, float]:
+    def broken(team: tuple[str, ...], theirs: tuple[str, ...]) -> tuple[float, float, tuple[str, ...]]:
         raise Unavailable("Foe: Stove has no usage data")
 
-    known: dict[Any, tuple[float, float]] = {}
+    known: dict[Any, tuple[float, float, tuple[str, ...]]] = {}
     rows = compare(TEAM, [("c2001", "c2002", "c2003", "c2004")], broken, known)
     assert rows[0].note == "Foe: Stove has no usage data" and not known  # a failure is not remembered
 

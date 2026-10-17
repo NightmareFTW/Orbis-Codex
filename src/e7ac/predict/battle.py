@@ -67,6 +67,9 @@ class BattleOdds:
     mean_actions: float
     runs: int
     warnings: list[str] = field(default_factory=list)
+    blind: tuple[str, ...] = ()
+    """The heroes (label, with the skill slots) whose skills were not read: the simulation made them plain attackers, so
+    this chance cannot be trusted (SPEC D87)."""
 
 
 def simulate(units: Sequence[Combatant], runs: int = RUNS, seed: int = SEED) -> BattleOdds:
@@ -88,7 +91,10 @@ def simulate(units: Sequence[Combatant], runs: int = RUNS, seed: int = SEED) -> 
         wins += result == "you"
         losses += result == "them"
         actions_total += actions
-    return BattleOdds(wins / runs, losses / runs, (runs - wins - losses) / runs, actions_total / runs, runs, warnings)
+    blind = tuple(f"{u.label} ({', '.join(f'S{s}' for s in u.kit.unread)})" for u in units if u.kit.unread)
+    return BattleOdds(
+        wins / runs, losses / runs, (runs - wins - losses) / runs, actions_total / runs, runs, warnings, blind
+    )
 
 
 def _battle(

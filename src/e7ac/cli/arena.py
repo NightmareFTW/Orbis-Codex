@@ -736,8 +736,8 @@ def _announce(c: _Context, match: _Match) -> None:
         c.badge.say("Comparing the opponents...", battles, LIGHT)
     rows = compare.compare(match.team, match.list_codes, _predictor(c), c.compared)
     for row in rows:
-        what = f"{row.win:.0%} (+/-{row.margin:.0%})" if row.win is not None and row.margin is not None else row.note
-        typer.echo(f"  opponent {row.number}: {what}" + ("  <- best" if row.best else ""))
+        unread = f"  [{compare.unread_note(row.blind)}: {', '.join(row.blind)}]" if row.blind else ""
+        typer.echo(f"  opponent {row.number}: {row.describe()}{unread}" + ("  <- best" if row.best else ""))
     if c.options.opponents is not None:
         c.options.opponents(rows)
     if len(match.team) != 4:
@@ -745,6 +745,9 @@ def _announce(c: _Context, match: _Match) -> None:
     top, bottom = compare.verdict(rows)
     best = next((r for r in rows if r.best), None)
     colour = {"good": GREEN, "bad": RED, "even": AMBER}.get(compare.band(best.win if best else None), RED)
+    if best is not None and best.blind:
+        colour = AMBER  # not green: a chance that leaves skills out is not a promise
+        bottom = f"{bottom}  ({compare.unread_note(best.blind)})"
     c.badge.say(top, bottom, colour)
     c.last[0] = (top, bottom, colour)
     if best is not None and c.options.teams is not None:
@@ -752,7 +755,7 @@ def _announce(c: _Context, match: _Match) -> None:
 
 
 def _predictor(c: _Context) -> compare.Predictor:
-    def predict(team: tuple[str, ...], theirs: tuple[str, ...]) -> tuple[float, float]:
+    def predict(team: tuple[str, ...], theirs: tuple[str, ...]) -> tuple[float, float, tuple[str, ...]]:
         try:
             odds = predict_cli.win_odds(
                 ", ".join(team), ", ".join(theirs), None, c.offline, runs=c.options.compare_runs, quiet=True
@@ -761,7 +764,7 @@ def _predictor(c: _Context) -> compare.Predictor:
             raise compare.Unavailable(exc.reason) from exc
         except typer.Exit as exc:
             raise compare.Unavailable("see the log") from exc
-        return odds.win, confidence_interval(odds.win, odds.runs)
+        return odds.win, confidence_interval(odds.win, odds.runs), odds.blind
 
     return predict
 
@@ -861,8 +864,13 @@ def _predict(team: list[str], theirs: list[str], c: _Context) -> None:
         c.badge.say("No prediction", "see the Arena window", RED)
         return
     colour = GREEN if odds.win >= 0.6 else RED if odds.win <= 0.4 else AMBER
-    c.badge.say(f"Win chance {odds.win:.0%}", f"vs {names}"[:48], colour)
-    c.last[0] = (f"Win chance {odds.win:.0%}", f"vs {names}", colour)
+    sign = "~" if odds.blind else ""
+    top = f"Win chance {sign}{compare.chance_text(odds.win)}"
+    bottom = f"{compare.unread_note(odds.blind)} - unreliable" if odds.blind else f"vs {names}"
+    if odds.blind:
+        colour = AMBER  # not green: a chance that leaves skills out is not a promise
+    c.badge.say(top, bottom[:48], colour)
+    c.last[0] = (top, f"vs {names}" + (f" ({compare.unread_note(odds.blind)})" if odds.blind else ""), colour)
     if c.options.teams is not None:
         c.options.teams(list(team), list(theirs))
     typer.echo("Watching for the next Arena match... (Ctrl+C stops)")

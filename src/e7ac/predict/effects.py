@@ -139,12 +139,33 @@ class Kit:
     """HP fraction restored once on lethal damage."""
     revive_effects: list[Effect] = field(default_factory=list)
     unmodelled: list[str] = field(default_factory=list)
+    unread: list[int] = field(default_factory=list)
+    """Skill slots whose text describes effects (inflicts, heals, dispels, ...) but of which none was read: epic7db
+    shows no effect icons for them (newer heroes) and no hand kit covers them. The simulation treats such a skill as a
+    plain attack, so a hero with unread slots makes every chance that involves it unreliable (SPEC D87)."""
+
+
+_EFFECT_WORDS: Final = re.compile(
+    r"\b(?:inflict\w*|dispel\w*|heal\w*|recover\w*|barrier|stun\w*|fear\w*|provok\w*|silenc\w*|sleep\w*|venom\w*|"
+    r"burn\w*|bleed\w*|poison\w*|grant\w*|immun\w*|immortal\w*|reviv\w*|resurrect\w*|steal\w*|invincib\w*|"
+    r"extra turn|combat readiness|reflect\w*|decreas\w*|increas\w*|seal\w*|cleans\w*|restor\w*|absorb\w*)\b",
+    re.IGNORECASE,
+)
+_SCALING_ONLY: Final = re.compile(r"damage dealt (?:increases?|rises?)[^.]*", re.IGNORECASE)
+
+
+def describes_effects(text: str) -> bool:
+    """Whether a skill's text says it does more than hit (a status effect, a heal, a dispel, ...): "Damage dealt
+    increases proportional to the caster's Defense" is damage, not an effect."""
+    return _EFFECT_WORDS.search(_SCALING_ONLY.sub(" ", text)) is not None
 
 
 def kit_from(skills: dict[int, SkillInfo], amounts: Mapping[int, Mapping[str, Scaling]] | None = None) -> Kit:
     """`amounts`: per skill slot, Fribbels' "heal" / "barrier" scaling (none: those effects are not modelled)."""
     kit = Kit()
     for slot, info in sorted(skills.items()):
+        if not info.effects and describes_effects(info.text):
+            kit.unread.append(slot)  # (a passive the code below reads from its text is taken off the list again)
         effects = []
         for name, value in info.effects.items():
             effect = _effect(name, value, info.text, (amounts or {}).get(slot, {}))
@@ -159,7 +180,9 @@ def kit_from(skills: dict[int, SkillInfo], amounts: Mapping[int, Mapping[str, Sc
             if counter is not None and not re.search(r"\b(?:ally|allies)\b", counter.group(1)):
                 kit.counter = int(counter.group(2)) / 100  # not "when an ally is attacked" (Mort: a guard, hand kit)
                 effects = [e for e in effects if e.kind != "counter"]
+                _taken_off(kit, slot)
             if revive is not None:
+                _taken_off(kit, slot)
                 kit.revive, kit.revive_effects = revive, [e for e in effects if not e.debuff]
             elif "start of the battle" in lowered:
                 kit.at_start = [e for e in effects if not e.debuff]
@@ -171,6 +194,12 @@ def kit_from(skills: dict[int, SkillInfo], amounts: Mapping[int, Mapping[str, Sc
         else:
             kit.on_use[slot] = effects
     return kit
+
+
+def _taken_off(kit: Kit, slot: int) -> None:
+    """A passive whose text the code above read (a counterattack chance, a revive) is not "unread"."""
+    if slot in kit.unread:
+        kit.unread.remove(slot)
 
 
 def _effect(name: str, value: float | None, text: str, amounts: Mapping[str, Scaling]) -> Effect | None:

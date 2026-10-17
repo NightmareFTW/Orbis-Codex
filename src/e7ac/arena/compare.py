@@ -27,9 +27,10 @@ class Unavailable(Exception):  # noqa: N818 (not an error of the program: a pred
         self.reason = reason
 
 
-Predictor = Callable[[tuple[str, ...], tuple[str, ...]], tuple[float, float]]
-"""(your team, their team) -> (chance to win, its 95% half-width); raises `Unavailable`."""
-Known = dict[tuple[tuple[str, ...], tuple[str | None, ...]], tuple[float, float]]
+Predictor = Callable[[tuple[str, ...], tuple[str, ...]], tuple[float, float, tuple[str, ...]]]
+"""(your team, their team) -> (chance to win, its 95% half-width, the heroes whose skills were not read); raises
+`Unavailable`."""
+Known = dict[tuple[tuple[str, ...], tuple[str | None, ...]], tuple[float, float, tuple[str, ...]]]
 """Predictions already made: the same two teams are never simulated twice (the numbers would change between looks)."""
 
 
@@ -48,25 +49,57 @@ class OpponentOdds:
     best: bool = False
     tie: bool = False
     """Another opponent is within `CLOSE` of the best one."""
+    blind: tuple[str, ...] = ()
+    """The heroes of this fight (either side) whose skills were not read: `win` treats them as plain attackers."""
+
+    def describe(self) -> str:
+        """The chance as a line (its margin only when it is worth saying), or why there is none."""
+        if self.win is None:
+            return self.note
+        margin = f" (+/-{self.margin:.0%})" if self.margin is not None and self.margin >= 0.01 else ""
+        return chance_text(self.win) + margin
 
 
 def mark_best(rows: list[OpponentOdds]) -> list[OpponentOdds]:
-    """The rows with the best one marked (the highest chance; the first on a tie) and whether it is a close call."""
+    """The rows with the best one marked and whether it is a close call. The best is the highest chance; among the
+    chances within `CLOSE` of it (a simulation cannot tell them apart, and a team whose skills are not read always
+    looks easy) the one with the fewest heroes not read: the better known fight is the safer pick (SPEC D87)."""
     known = [r for r in rows if r.win is not None]
     if not known:
         return list(rows)
-    best = max(known, key=lambda r: (r.win or 0.0, -r.number))
+    top = max(r.win or 0.0 for r in known)
+    level = [r for r in known if top - (r.win or 0.0) < CLOSE]
+    best = min(level, key=lambda r: (len(r.blind), -(r.win or 0.0), r.number))
     close = any(r is not best and abs((r.win or 0.0) - (best.win or 0.0)) < CLOSE for r in known)
     return [replace(r, best=r is best, tie=r is best and close) for r in rows]
 
 
+def chance_text(win: float | None) -> str:
+    """A chance for people: a simulation of finitely many battles never says "100%" or "0%" (and a model that leaves
+    skills out says it less than ever)."""
+    if win is None:
+        return "?"
+    if win >= 0.995:
+        return "99%+"
+    return "<1%" if win <= 0.005 else f"{win:.0%}"
+
+
+def unread_note(blind: Sequence[str]) -> str:
+    """Why a chance is shaky, in a line."""
+    if not blind:
+        return ""
+    return f"skills of {len(blind)} hero{'' if len(blind) == 1 else 'es'} not read"
+
+
 def verdict(rows: list[OpponentOdds]) -> tuple[str, str]:
-    """The two lines of the badge: "Best: opponent 2 (72%)" and every chance ("1: 55%  2: 72%  3: ?")."""
-    chances = "  ".join(f"{r.number}: {'?' if r.win is None else f'{r.win:.0%}'}" for r in rows)
+    """The two lines of the badge: "Best: opponent 2 (72%)" and every chance ("1: 55%  2: 72%  3: ?"). A chance that
+    involves heroes whose skills were not read has a "~" before it."""
+    chances = "  ".join(f"{r.number}: {'~' if r.blind else ''}{chance_text(r.win)}" for r in rows)
     best = next((r for r in rows if r.best), None)
     if best is None or best.win is None:
         return "Opponents not compared", chances
-    return f"Best: opponent {best.number} ({best.win:.0%})" + (" - close" if best.tie else ""), chances
+    sign = "~" if best.blind else ""
+    return f"Best: opponent {best.number} ({sign}{chance_text(best.win)})" + (" - close" if best.tie else ""), chances
 
 
 def band(win: float | None) -> str:
@@ -96,6 +129,6 @@ def compare(
                 except Unavailable as exc:
                     rows.append(OpponentOdds(number, codes, None, None, exc.reason))
                     continue
-            win, margin = known[key]
-            rows.append(OpponentOdds(number, codes, win, margin, ""))
+            win, margin, blind = known[key]
+            rows.append(OpponentOdds(number, codes, win, margin, "", blind=blind))
     return mark_best(rows)

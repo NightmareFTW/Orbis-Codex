@@ -223,6 +223,7 @@ def apply_override(kit: Kit, cooldowns: Mapping[int, int], override: KitOverride
         revive=None if dropped else kit.revive,
         revive_effects=[] if dropped else list(kit.revive_effects),
         unmodelled=[n for n in kit.unmodelled if n not in override.handles] + list(override.unmodelled),
+        unread=[],  # read by hand: what is still missing is in `unmodelled`
         low_hp_effects=[],
         guard_effects=[],
         spirit_effects=[],

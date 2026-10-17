@@ -56,6 +56,7 @@ def effective_kit(
     cooldowns = {s: k.cooldown for s, k in skills.items() if k.cooldown is not None}
     if not skills:
         kit.unmodelled.append("(no epic7db page)")
+        kit.unread = [1, 2, 3]  # nothing is known of its skills
     return apply_override(kit, cooldowns, hand) if hand is not None else (kit, cooldowns)
 
 
@@ -72,5 +73,10 @@ def worklist(
     for code, seen in counts:
         name = heroes[code].name if code in heroes and heroes[code].name else code
         kit, _ = effective_kit(http, name, amounts.get(code, {}), overrides.get(code), fetch)
-        rows.append(WorkRow(code, name, seen, code in overrides, tuple(kit.unmodelled)))
+        unread = tuple(
+            f"S{slot}: effects in its text, none read"
+            for slot in kit.unread
+            if "(no epic7db page)" not in kit.unmodelled
+        )
+        rows.append(WorkRow(code, name, seen, code in overrides, (*unread, *kit.unmodelled)))
     return rows

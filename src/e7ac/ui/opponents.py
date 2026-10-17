@@ -9,7 +9,7 @@ from typing import Final
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QProgressBar, QVBoxLayout, QWidget
 
-from e7ac.arena.compare import OpponentOdds, band
+from e7ac.arena.compare import OpponentOdds, band, unread_note
 from e7ac.ui.context import AppContext
 from e7ac.ui.theme import STATUS_COLOURS, TOKENS
 from e7ac.ui.widgets import HeroRow
@@ -34,7 +34,7 @@ class _Row(QWidget):
         self.bar.setTextVisible(False)
         self.bar.setFixedHeight(14)
         self.chance = QLabel()
-        self.chance.setMinimumWidth(150)
+        self.chance.setMinimumWidth(190)
         self.chance.setWordWrap(True)
         self.tag = QLabel()
         self.tag.setMinimumWidth(110)
@@ -47,20 +47,22 @@ class _Row(QWidget):
     def show_odds(self, odds: OpponentOdds) -> None:
         self.number.setText(str(odds.number))
         self.heroes.set_codes(odds.codes)
-        colour = BAND_COLOUR.get(band(odds.win), STATUS_COLOURS["idle"])
+        # a chance that leaves skills out is amber, whatever its size: it is not a promise (SPEC D87)
+        colour = STATUS_COLOURS["warn"] if odds.blind else BAND_COLOUR.get(band(odds.win), STATUS_COLOURS["idle"])
         if odds.win is None:
             self.bar.setValue(0)
             self.chance.setText(odds.note)
         else:
             self.bar.setValue(round(odds.win * 100))
-            margin = f" (+/-{odds.margin:.0%})" if odds.margin is not None else ""
-            self.chance.setText(f"{odds.win:.0%}{margin}")
+            shaky = f"\n{unread_note(odds.blind)}" if odds.blind else ""
+            self.chance.setText(("~" if odds.blind else "") + odds.describe() + shaky)
+            self.chance.setToolTip(", ".join(odds.blind))
         self.chance.setStyleSheet(f"color: {colour if odds.win is not None else TOKENS['muted']};")
         self.bar.setStyleSheet(
             f"QProgressBar {{ background: {TOKENS['panel_alt']}; border: 1px solid {TOKENS['border']}; "
             f"border-radius: 6px; }} QProgressBar::chunk {{ background: {colour}; border-radius: 5px; }}"
         )
-        self.tag.setText(("★ best" + (" - close call" if odds.tie else "")) if odds.best else "")
+        self.tag.setText(("\u2605 best" + (" - close call" if odds.tie else "")) if odds.best else "")
         self.tag.setStyleSheet(f"color: {TOKENS['gold_bright']}; font-weight: 600; background: transparent;")
 
 
@@ -99,8 +101,9 @@ class OpponentsCard(QFrame):
                 row.show_odds(rows[index])
         best = next((r for r in rows if r.best), None)
         self._hint.setText(
-            "Attack the one marked best: it has the highest chance to win. Faces not recognised are left without a "
-            "number: name them below and the list is compared again."
+            "Attack the one marked best: the highest chance to win, and among equal ones the team the program knows "
+            "best. A ~ chance leaves skills out (the program has not read them yet): do not trust it. Faces not "
+            "recognised have no number: name them below and the list is compared again."
             if best is not None
             else "No opponent could be compared yet."
         )

@@ -58,6 +58,11 @@ def show(
     if passives:
         typer.echo("  passives: " + ", ".join(passives))
     typer.echo("  not simulated: " + (", ".join(kit.unmodelled) or "-"))
+    if kit.unread:
+        slots = ", ".join(f"S{slot}" for slot in kit.unread)
+        typer.echo(
+            f"  NOT READ: {slots}: the text describes effects but epic7db shows none; they count as plain attacks"
+        )
 
 
 @kit_app.command("todo")
