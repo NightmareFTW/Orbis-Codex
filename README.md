@@ -10,6 +10,9 @@ Status: Phase 1 in progress — see [`docs/ROADMAP.md`](docs/ROADMAP.md).
 2. Double-click `OrbisCodex.cmd` in the extracted folder. The first start installs [uv](https://docs.astral.sh/uv/),
    Python 3.12 and every dependency automatically (a few minutes, only once), then shows the `e7 doctor` check
    (lines starting with `[OK  ]`) and waits for a key. Later starts are instant.
+3. **Double-click `Orbis.cmd` for the main window**: Home (what the app has, sync the catalog), Arena (leave it
+   running and play: the chance to win, with the small badge over the game) and Arena stats (a dev tool: refresh the
+   Opponents list in the game as often as you like and see the heroes met most).
 
 From a terminal opened in that folder (cmd or PowerShell), run commands as `.\OrbisCodex.cmd <command>`
 (developers: `uv run e7 <command>`):
@@ -29,6 +32,8 @@ From a terminal opened in that folder (cmd or PowerShell), run commands as `.\Or
 | `e7 roster export backup.json` / `e7 roster import backup.json` | Back up / restore (or merge) the whole roster |
 | `e7 capture hero_info` | Save the game picture as PNG (read-only screen copy; `--hotkey ctrl+shift+s` to capture while you play) |
 | `e7 capture --list-windows` | Show the open windows and which one looks like the game |
+| `e7 app` | Open the main window (the same as double-clicking `Orbis.cmd`) |
+| `e7 kit todo` | The heroes met in Arena, most seen first, and what the simulation does not cover for each |
 | `e7 roster scan captures\*.png` | Read hero screens (Equipment tab or Hero Info) and store the builds, checked against the catalog |
 
 ## Develop

@@ -63,6 +63,14 @@ def _root(
         raise typer.Exit()
 
 
+@app.command("app")
+def window() -> None:
+    """Open the main window: Arena (predictions), Arena stats (the heroes met most) and the rest, in one place."""
+    from e7ac.ui.app import run  # Qt is loaded only here: every other command starts without it
+
+    raise typer.Exit(run())
+
+
 @app.command()
 def paths() -> None:
     """Show where data, cache, captures and logs are stored."""

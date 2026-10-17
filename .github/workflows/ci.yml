@@ -29,6 +29,9 @@ jobs:
         run: uv run ruff format --check .
       - name: Types
         run: uv run mypy
+      - name: Qt system libraries (the window tests run offscreen)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libegl1 libgl1 libxkbcommon0 libfontconfig1 libdbus-1-3
       - name: Tests
         run: uv run pytest
 

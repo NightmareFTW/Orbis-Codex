@@ -1,0 +1,153 @@
+"""Arena: the watch with predictions. Leave it running and play: the VS screen and the Attack Guide (or the
+Opponents list) are read, the chance to win is shown here and on the small badge over the game."""
+
+from __future__ import annotations
+
+import sys
+
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPlainTextEdit,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
+
+from e7ac.ui.context import AppContext
+from e7ac.ui.pages.base import Page, card, heading
+from e7ac.ui.theme import status_style
+from e7ac.ui.watch_controller import ARENA, COLLECT, RUNNING, STOPPED, STOPPING
+from e7ac.ui.watch_signal import LIGHT
+
+
+class ArenaPage(Page):
+    def __init__(self, context: AppContext) -> None:
+        super().__init__(context)
+        self._watch = context.watch
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(14)
+        layout.addWidget(
+            heading(
+                "Arena",
+                "Start, then play: open a match (the VS screen), tap the magnifier, or open the Opponents list. "
+                "Your team is read from the VS screen; the opponent from the Attack Guide faces.",
+            )
+        )
+
+        result, result_layout = card()
+        self._top = QLabel("Not watching")
+        self._top.setStyleSheet("font-size: 20pt; font-weight: 600; background: transparent;")
+        self._bottom = QLabel("Press Start")
+        self._bottom.setObjectName("muted")
+        self._bottom.setWordWrap(True)
+        result_layout.addWidget(self._top)
+        result_layout.addWidget(self._bottom)
+        layout.addWidget(result)
+
+        controls = QHBoxLayout()
+        self._start = QPushButton("Start")
+        self._start.setObjectName("primary")
+        self._start.clicked.connect(self._toggle)
+        self._again = QPushButton("Check again")
+        self._again.clicked.connect(self._watch.check_again)
+        self._picture = QPushButton("Save picture")
+        self._picture.clicked.connect(self._watch.save_picture)
+        self._overlay = QCheckBox("Badge on the game")
+        self._overlay.setChecked(sys.platform == "win32")
+        self._overlay.setEnabled(sys.platform == "win32")
+        self._overlay.setToolTip("A small badge over the game window: what to do next, and the result (Windows).")
+        self._offline = QCheckBox("Offline")
+        self._offline.setToolTip("Use cached data only (no downloads).")
+        for widget in (self._start, self._again, self._picture):
+            controls.addWidget(widget)
+        controls.addSpacing(12)
+        controls.addWidget(self._overlay)
+        controls.addWidget(self._offline)
+        controls.addStretch()
+        layout.addLayout(controls)
+
+        self._ask = QWidget()
+        ask_layout = QHBoxLayout(self._ask)
+        ask_layout.setContentsMargins(0, 0, 0, 0)
+        self._question = QLabel()
+        self._question.setStyleSheet(status_style("warn"))
+        self._name = QLineEdit()
+        self._name.setPlaceholderText("Exact hero name (or code), then Enter")
+        self._name.returnPressed.connect(self._answer)
+        send = QPushButton("Name it")
+        send.clicked.connect(self._answer)
+        skip = QPushButton("Skip")
+        skip.clicked.connect(self._skip)
+        ask_layout.addWidget(self._question)
+        ask_layout.addWidget(self._name, 1)
+        ask_layout.addWidget(send)
+        ask_layout.addWidget(skip)
+        self._ask.hide()
+        layout.addWidget(self._ask)
+
+        self._log = QPlainTextEdit()
+        self._log.setReadOnly(True)
+        self._log.setMaximumBlockCount(2000)
+        layout.addWidget(self._log, 1)
+
+        self._watch.said.connect(self._say)
+        self._watch.line.connect(self._on_line)
+        self._watch.state.connect(self._state)
+        self._watch.question.connect(self._asked)
+        self._watch.failed.connect(lambda reason: self._say("The watch stopped", reason, "#d04040"))
+        self._state(STOPPED)
+
+    def _toggle(self) -> None:
+        if self._watch.running:
+            self._watch.stop()
+            return
+        self._log.clear()
+        self._watch.start(offline=self._offline.isChecked(), collect_only=False, overlay=self._overlay.isChecked())
+
+    def _on_line(self, line: str) -> None:
+        if self._watch.mode == ARENA:
+            self._log.appendPlainText(line)
+
+    def _say(self, top: str, bottom: str, colour: str) -> None:
+        if self._watch.mode != ARENA and self._watch.running:
+            return
+        self._top.setText(top)
+        self._top.setStyleSheet(f"font-size: 20pt; font-weight: 600; background: transparent; color: {colour};")
+        self._bottom.setText(bottom)
+
+    def _state(self, state: str) -> None:
+        mine = self._watch.mode == ARENA or state == STOPPED
+        busy_elsewhere = self._watch.running and self._watch.mode == COLLECT
+        self._start.setText({STOPPED: "Start", RUNNING: "Stop", STOPPING: "Stopping..."}[state] if mine else "Start")
+        self._start.setObjectName("danger" if state == RUNNING and mine else "primary")
+        self._start.style().unpolish(self._start)
+        self._start.style().polish(self._start)
+        self._start.setEnabled(state != STOPPING and not busy_elsewhere)
+        self._again.setEnabled(state == RUNNING and mine)
+        self._picture.setEnabled(state == RUNNING and mine)
+        self._overlay.setEnabled(state == STOPPED and sys.platform == "win32")
+        self._offline.setEnabled(state == STOPPED)
+        if state == STOPPED:
+            self._ask.hide()
+            self._say("Not watching", "Press Start", LIGHT)
+        elif busy_elsewhere:
+            self._bottom.setText("The Arena stats page is collecting: stop it there first.")
+
+    def _asked(self, number: int) -> None:
+        self._question.setText(f"Opponent hero {number} not recognised:")
+        self._name.clear()
+        self._ask.show()
+        self._name.setFocus(Qt.FocusReason.OtherFocusReason)
+
+    def _answer(self) -> None:
+        self._watch.answer(self._name.text())
+        self._ask.hide()
+
+    def _skip(self) -> None:
+        self._watch.answer("")
+        self._ask.hide()

@@ -33,8 +33,7 @@ for the heroes the user meets most in Arena: ask the user for that list first, ~
 heroes (above): ready since D73 — run `e7 kit todo` on the user's PC (they paste the output), then for each hero
 `e7 kit show HERO` and write `src/e7ac/predict/kits/<code>.toml` (format in `predict/overrides.py`); (2) effects part 2 done
 (D74); six hand kits done 2026-10-17 (D76: c1162, c2011, c1153, c1104, c1131, c2049) — next: the user's `e7 kit todo`
-list, one hero at a time, best from the user's in-game skill-screen screenshots (verified; epic7db can be stale, D77); model gaps: artifacts, combat set effects, lifesteal (BBK S1: no number in the game text); second batch done 2026-10-17 (D80: Harsetti, Yulha S2/S3, BBK S2, Maid Chloe S1/S3); still to read from the game: Maid Chloe S2, then the heroes in the user's `e7 kit todo` (the user sends the skill screens hero by hero); (3) the main window (PySide6, ~150–200 MB: confirm the dependency with
-the user first), overlay later.
+list, one hero at a time, best from the user's in-game skill-screen screenshots (verified; epic7db can be stale, D77); model gaps: artifacts, combat set effects, lifesteal (BBK S1: no number in the game text); second batch done 2026-10-17 (D80: Harsetti, Yulha S2/S3, BBK S2, Maid Chloe S1/S3); still to read from the game: Maid Chloe S2, then the heroes in the user's `e7 kit todo` (the user sends the skill screens hero by hero); (3) the main window: slice 1 done 2026-10-18 (D81: PySide6 confirmed by the user; shell, Home, Arena, Arena stats); next: roster page, kits page, settings page, then the Qt overlay.
 
 ## Golden rules
 - **Never invent game numbers** (multipliers, set bonuses, base stats, formulas, AI behaviour). Every datum carries
@@ -52,7 +51,8 @@ the user first), overlay later.
 ## Commands
 ```bash
 uv sync                      # install (dev group included)
-uv run e7 --help             # CLI: --version, doctor, paths, config, catalog, roster, opponent, predict, arena, kit, capture
+uv run e7 --help             # CLI: --version, doctor, paths, config, catalog, roster, opponent, predict, arena, kit, capture, app
+uv run e7 app                # the main window (Orbis.cmd on Windows); Qt tests run offscreen (QT_QPA_PLATFORM=offscreen)
 uv run pytest                # tests (fixture tests skip if fixtures are missing; network tests need E7AC_NETWORK_TESTS=1)
 uv run ruff check . && uv run ruff format --check .
 uv run mypy                  # strict, src + tests
@@ -154,6 +154,7 @@ Key data facts (details in docs/DATA_SOURCES.md):
   VS badges allow. D72: "Save picture" badge button (game + result, `captures/arena/shared/`); the Opponents-list
   magnifier works too. D73: hand kits (`predict/kits/*.toml`, `e7 kit show|todo`). D75: the Opponents list is read
   directly (best of the three opponents on the badge). Local fixtures `fixtures/screenshots/arena/`, `fixtures/stove/class_icons/` (never committed).
+- **M8 slice 1 — done** (SPEC D81): PySide6 main window `e7 app` / `Orbis.cmd`: `ui/{shell,context,theme,tasks,watch_controller,app}.py`, pages registry `ui/pages/` (Home, Arena, Arena stats = dev tool). `cli/arena.py` `run_watch(options, badge, answers, retry, share, stop)` is what the window drives; every Opponents-list refresh is recorded on `<home>/arena/sightings.jsonl` (`arena/sightings.py`, `popularity()`), `e7 kit todo` counts it; `predict/worklist.py` and `appdata.py` are the UI-free shared pieces. Seen offscreen only, not yet on the user's Windows PC (NV-46).
 - Game client language: English, sometimes Portuguese → `game_language` setting (D39). Windows version shown by doctor.
 - Roster import paths (D45), picked by the user: A = Fribbels save file (M4, done), B = passive screen
   watch (M9a). Network import inside our app (M5c, D38): **not possible here** — blocked twice by Anthropic's safety

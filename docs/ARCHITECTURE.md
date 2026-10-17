@@ -83,7 +83,12 @@ src/e7ac/
   sim/           # engine, status effects, hooks, kits (YAML + python), ai policies, runner
   learning/      # prediction log, metrics (Brier, log loss, reliability), Platt/isotonic, Beta memory
   storage/       # SQLAlchemy models, repositories, Alembic env
-  ui/            # PySide6 main window, review screen, overlay, hotkey
+  ui/            # PySide6 main window, review screen, overlay, hotkey. Window (SPEC D81): `shell` (sidebar + stack),
+                 # `pages/` (registry `PAGES` of `PageSpec`: add a page = write a `Page`, add one entry), `context`
+                 # (what pages share), `watch_controller` (the one Arena watch on a thread, as Qt signals), `tasks`
+                 # (background commands, output captured), `theme` (colour tokens + stylesheet); the small badge over the
+                 # game is still tkinter (`watch_signal`) until the Qt overlay
+  appdata.py     # database + catalog heroes, shared by the CLI and the window
   cli/           # Typer app: e7 catalog|roster|import|predict|sim|data …
 kits/            # hero/artifact kit files (YAML), each citing sources, with tests
 migrations/      # Alembic
