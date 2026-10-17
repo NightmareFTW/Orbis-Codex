@@ -69,3 +69,31 @@ jobs:
           call .\OrbisCodex.cmd config set world nowhere
           if not "%ERRORLEVEL%"=="2" exit /b 1
           exit /b 0
+      - name: the desktop shortcut is made by PowerShell (windowless Python, the program's icon)
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          cmd /c ".\OrbisCodex.cmd shortcut"
+          if ($LASTEXITCODE -ne 0) { throw "e7 shortcut exited with $LASTEXITCODE" }
+          $link = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Orbis Codex.lnk'
+          if (-not (Test-Path $link)) { throw "no shortcut at $link" }
+          $s = (New-Object -ComObject WScript.Shell).CreateShortcut($link)
+          "target: $($s.TargetPath)  arguments: $($s.Arguments)  icon: $($s.IconLocation)"
+          if ($s.TargetPath -notlike '*\pythonw.exe') { throw 'the shortcut does not start the windowless Python' }
+          if ($s.Arguments -ne '-m e7ac.ui') { throw 'the shortcut does not open the window' }
+          if ($s.IconLocation -notlike '*\orbis.ico,0') { throw 'the shortcut has no icon file' }
+          if (-not (Test-Path (Join-Path $env:E7AC_HOME 'orbis.ico'))) { throw 'no icon file in the data folder' }
+      - name: Orbis.cmd opens the window with no console (it runs on its own, writes its log and its icon line)
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          cmd /c ".\Orbis.cmd"
+          if ($LASTEXITCODE -ne 0) { throw "Orbis.cmd exited with $LASTEXITCODE" }
+          $log = Join-Path $env:E7AC_HOME 'logs\app.log'
+          $end = (Get-Date).AddSeconds(120)
+          while (-not ((Test-Path $log) -and (Select-String -Path $log -Pattern 'icon:' -Quiet)) -and (Get-Date) -lt $end) { Start-Sleep -Seconds 1 }
+          if (Test-Path $log) { Get-Content $log }
+          if (-not (Test-Path $log) -or -not (Select-String -Path $log -Pattern 'icon:' -Quiet)) { throw 'the window did not start' }
+          Get-Process pythonw -ErrorAction Stop | Stop-Process -Force

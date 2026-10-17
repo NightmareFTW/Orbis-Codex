@@ -132,3 +132,22 @@ def test_without_a_console_what_the_program_prints_goes_to_a_log(
     assert sys.stdout is not None
     sys.stdout.close()
     assert log.stat().st_size == 0
+
+
+def test_the_shortcut_command_writes_the_icon_file_and_refuses_off_windows(
+    isolated_home: AppPaths, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import os
+
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    pytest.importorskip("PySide6.QtWidgets", exc_type=ImportError)
+    from typer.testing import CliRunner
+
+    from e7ac.cli.app import app
+
+    result = CliRunner().invoke(app, ["shortcut"])
+    assert result.exit_code == 2 and "Windows only" in result.stderr
+    assert (isolated_home.home / "orbis.ico").is_file()  # the icon file is there for the day it can be used
+    monkeypatch.setattr(shortcut, "create_desktop_shortcut", lambda working_dir, ico: Path("C:/D/Orbis Codex.lnk"))
+    done = CliRunner().invoke(app, ["shortcut"])
+    assert done.exit_code == 0 and "Orbis Codex.lnk" in done.stdout

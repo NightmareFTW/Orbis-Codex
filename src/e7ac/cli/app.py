@@ -71,6 +71,29 @@ def window() -> None:
     raise typer.Exit(run())
 
 
+@app.command("shortcut")
+def make_shortcut() -> None:
+    """Make a desktop shortcut that opens the main window with no console, wearing the program's icon (Windows)."""
+    from PySide6.QtWidgets import QApplication
+
+    from e7ac import shortcut as maker
+    from e7ac.ui import icon
+
+    paths = default_paths()
+    paths.ensure()
+    QApplication.instance() or QApplication([])  # the icon is drawn with Qt
+    ico = icon.write_ico(paths)
+    if ico is None:
+        typer.echo(f"Error: the icon file {icon.ico_path(paths)} could not be written.", err=True)
+        raise typer.Exit(code=2)
+    try:
+        link = maker.create_desktop_shortcut(paths.home, ico)
+    except maker.ShortcutError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+    typer.echo(f"Shortcut: {link}")
+
+
 @app.command()
 def paths() -> None:
     """Show where data, cache, captures and logs are stored."""
