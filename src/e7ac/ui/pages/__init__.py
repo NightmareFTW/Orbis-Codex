@@ -39,8 +39,15 @@ def _dev(context: AppContext) -> Page:
     return DevPage(context)
 
 
+def _settings(context: AppContext) -> Page:
+    from e7ac.ui.pages.settings import SettingsPage
+
+    return SettingsPage(context)
+
+
 PAGES: Final = (
     PageSpec("home", "Home", _home),
     PageSpec("arena", "Arena", _arena),
     PageSpec("dev", "Arena stats", _dev, group="Dev tools"),
+    PageSpec("settings", "Settings", _settings),
 )

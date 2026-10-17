@@ -81,6 +81,7 @@ def test_config_options_lists_keys() -> None:
     assert result.exit_code == 0
     assert "world" in result.stdout and "world_jpn" in result.stdout
     assert "WIDTHxHEIGHT" in result.stdout
+    assert "true | false" in result.stdout and "a whole number" in result.stdout
 
 
 def test_paths_lists_home(isolated_home: AppPaths) -> None:

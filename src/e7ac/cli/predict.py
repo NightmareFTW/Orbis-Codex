@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Annotated, Any
+from typing import Annotated, Any, NoReturn
 
 import typer
 
@@ -11,13 +11,13 @@ from e7ac.catalog.facts import EntityType
 from e7ac.catalog.resolve import ResolvedEntity
 from e7ac.catalog.store import current_snapshot, load_entity
 from e7ac.cli import catalog as catalog_cli
-from e7ac.cli.roster import _catalog_heroes, _engine, _fail, _resolve_hero_code, _screen_catalog
+from e7ac.cli.roster import _catalog_heroes, _engine, _resolve_hero_code, _screen_catalog
 from e7ac.domain.codes import Stat, is_hero_code
 from e7ac.domain.roster import HeroBuild
 from e7ac.domain.world import World
 from e7ac.opponents.assumed import Profile, assumed_build
 from e7ac.paths import default_paths
-from e7ac.predict.battle import BattleOdds, Combatant, confidence_interval, simulate
+from e7ac.predict.battle import RUNS, BattleOdds, Combatant, confidence_interval, simulate
 from e7ac.predict.damage import SkillPower, hits_to_defeat, skill_power, support_amounts
 from e7ac.predict.effects import Kit, Scaling, kit_from
 from e7ac.predict.overrides import KitError, apply_override, load_overrides
@@ -116,20 +116,38 @@ def win(
     win_odds(team, vs, world, offline)
 
 
-def win_odds(team: str, vs: str, world: World | None, offline: bool) -> BattleOdds:
-    """`predict win` with its printout; the odds are returned (the Arena watch shows them on its badge)."""
+class OddsUnavailable(typer.Exit):
+    """No prediction could be made, and why (a hero not in the roster, no stats, ...): what the Arena page shows."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(code=2)
+        self.reason = reason
+
+
+def _fail(message: str) -> NoReturn:
+    typer.echo(f"Error: {message}", err=True)
+    raise OddsUnavailable(message)
+
+
+def win_odds(
+    team: str, vs: str, world: World | None, offline: bool, runs: int = RUNS, quiet: bool = False
+) -> BattleOdds:
+    """`predict win` with its printout; the odds are returned (the Arena watch shows them on its badge). `quiet`: no
+    printout when it works (the Arena watch compares three opponents); failures still say why."""
     fighters = _fighters(team, vs, world, offline)
     missing = [f.label for f in fighters if not f.stats]
     if missing:
         _fail(f"no stats for {', '.join(missing)} (Stove has no data: only the speed was given)")
     units = [Combatant(f.label, f.side, f.stats, f.speed, f.skills, f.cooldowns, f.kit, f.element) for f in fighters]
     skipped = sorted({name for f in fighters for name in f.kit.unmodelled})
-    if skipped:
+    if skipped and not quiet:
         typer.echo(f"note: effects not simulated yet: {', '.join(skipped)}", err=True)
     unknown = [f.label for f in fighters if 3 not in f.cooldowns and 3 in f.skills]
-    if unknown:
+    if unknown and not quiet:
         typer.echo(f"note: S3 cooldown unknown for {', '.join(unknown)}: S3 on the first action only", err=True)
-    odds = simulate(units)
+    odds = simulate(units, runs=runs)
+    if quiet:
+        return odds
     margin = confidence_interval(odds.win, odds.runs)
     typer.echo(f"Win {odds.win:.1%} (+/-{margin:.1%})  loss {odds.loss:.1%}  draw {odds.draw:.1%}")
     typer.echo(

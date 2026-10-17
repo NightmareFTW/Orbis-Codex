@@ -21,9 +21,9 @@ from e7ac.settings import (
     EDITABLE_KEYS,
     Settings,
     SettingsError,
-    allowed_values,
     load_settings,
     save_settings,
+    value_hint,
     with_value,
 )
 
@@ -129,8 +129,7 @@ def config_set(
 def config_options() -> None:
     """List editable settings and their allowed values."""
     for key in EDITABLE_KEYS:
-        choices = allowed_values(key)
-        typer.echo(f"{key:<13} {', '.join(choices) if choices else 'auto | WIDTHxHEIGHT'}")
+        typer.echo(f"{key:<14} {value_hint(key)}")
 
 
 def _load_or_exit() -> Settings:

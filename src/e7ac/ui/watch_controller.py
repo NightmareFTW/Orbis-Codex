@@ -9,6 +9,7 @@ from typing import Final
 
 from PySide6.QtCore import QObject, Signal
 
+from e7ac.arena.compare import SIMULATIONS
 from e7ac.arena.questions import FaceQuestion
 from e7ac.ui.tasks import run_captured
 from e7ac.ui.watch_signal import LIGHT, NoSignal, WatchSignal
@@ -36,6 +37,8 @@ class WatchController(QObject):
     """Opponent teams just recorded on the sightings file."""
     teams = Signal(list, list)
     """Your team and the opponent's (hero codes) behind the last prediction."""
+    opponents = Signal(list)
+    """The chance to win against each opponent of the Opponents list (`arena.compare.OpponentOdds`), best one marked."""
     sees = Signal(str)
     """What the watch makes of the game picture now, in words."""
     failed = Signal(str)
@@ -58,7 +61,7 @@ class WatchController(QObject):
     def running(self) -> bool:
         return self._state != STOPPED
 
-    def start(self, *, offline: bool, collect_only: bool, overlay: bool) -> bool:
+    def start(self, *, offline: bool, collect_only: bool, overlay: bool, compare_runs: int = SIMULATIONS) -> bool:
         """False when a watch is already running."""
         if self.running:
             return False
@@ -83,6 +86,8 @@ class WatchController(QObject):
             snapshot=self._snapshot,
             recorded=self.recorded.emit,
             teams=self.teams.emit,
+            opponents=self.opponents.emit,
+            compare_runs=compare_runs,
         )
         self._set_state(RUNNING)
 

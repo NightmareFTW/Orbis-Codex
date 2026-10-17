@@ -19,6 +19,7 @@ import numpy as np
 import numpy.typing as npt
 import typer
 
+from e7ac.arena import compare
 from e7ac.arena.identify import Slot, identify
 from e7ac.arena.list_read import ListHero, resolve_list, shape_group
 from e7ac.arena.questions import FaceQuestion
@@ -30,6 +31,7 @@ from e7ac.cli import predict as predict_cli
 from e7ac.cli.roster import _catalog_heroes, _engine, _fail, _resolve_hero_code
 from e7ac.domain.codes import HeroClass
 from e7ac.paths import AppPaths, default_paths
+from e7ac.predict.battle import confidence_interval
 from e7ac.roster.store import list_owned
 from e7ac.settings import SettingsError, load_settings
 from e7ac.sources.assets import fetch_class_sprite, fetch_hero_icons, load_class_sprite, load_hero_icons
@@ -110,6 +112,10 @@ class WatchOptions:
     """Called with the number of teams just recorded on the sightings file."""
     teams: Callable[[list[str], list[str]], None] | None = None
     """Called with your team and the opponent's (hero codes, foremost first) when a prediction is made."""
+    opponents: Callable[[list[compare.OpponentOdds]], None] | None = None
+    """Called with the chance to win against each opponent of the Opponents list, the best one marked."""
+    compare_runs: int = compare.SIMULATIONS
+    """Simulated battles per opponent when the three of the list are compared."""
 
 
 def run_watch(
@@ -166,7 +172,7 @@ def run_watch(
         if share.is_set():
             share.clear()
             _share(match.frame, last[0], paths, badge, client, options.hwnd)
-        _learn_taught(context)
+        _learn_taught(context, match)
         if item is not None:
             frame, area = item
             match.frame = frame
@@ -221,6 +227,10 @@ class _Match:
     """When "Check again" was pressed and no list has been read since (`arena_clock`)."""
     list_recorded: list[npt.NDArray[np.float32]] = field(default_factory=list)
     """The faces of each row already recorded: a row that looks the same is not recorded twice."""
+    list_codes: list[list[str | None]] = field(default_factory=list)
+    """The heroes of each opponent of the list as last read (None: not recognised), for the comparison."""
+    list_when: str = ""
+    """When that reading was recorded (the key a taught face comes back with)."""
     guide_armed: bool = True
     vs_theirs: list[str] = field(default_factory=list)
     """The opponent as the last VS screen named it (all four, or nothing)."""
@@ -248,6 +258,8 @@ class _Context:
     """The last prediction as the badge shows it (two lines and their colour), for "Save picture"."""
     sightings: SightingStore | None = None
     options: WatchOptions = field(default_factory=WatchOptions)
+    compared: compare.Known = field(default_factory=dict)
+    """Predictions already made against the opponents of the list."""
 
 
 def _share(
@@ -709,33 +721,49 @@ def _opponents(
         if not fresh:
             typer.echo("  (all of them were recorded before: nothing added)")
         return
+    match.list_codes = [[h.code for h in row] for row in read]
+    match.list_when = when or match.list_when
+    _announce(c, match)
+
+
+def _announce(c: _Context, match: _Match) -> None:
+    """The opponents of the list against your team (SPEC D85): the window lists the three, the badge names the best."""
     if len(match.team) != 4:
         c.badge.say("Your team is not known", "open a VS screen once", RED)
         typer.echo("  your team is not known yet: open the VS screen of any match once", err=True)
+    else:
+        battles = f"{len(match.list_codes)} x {c.options.compare_runs:,} battles"
+        c.badge.say("Comparing the opponents...", battles, LIGHT)
+    rows = compare.compare(match.team, match.list_codes, _predictor(c), c.compared)
+    for row in rows:
+        what = f"{row.win:.0%} (+/-{row.margin:.0%})" if row.win is not None and row.margin is not None else row.note
+        typer.echo(f"  opponent {row.number}: {what}" + ("  <- best" if row.best else ""))
+    if c.options.opponents is not None:
+        c.options.opponents(rows)
+    if len(match.team) != 4:
         return
-    chances: list[str] = []
-    best: tuple[float, int] | None = None
-    for number, row in enumerate(read, 1):
-        codes = [h.code for h in row]
-        if None in codes:
-            chances.append(f"{number}: ?")
-            continue
+    top, bottom = compare.verdict(rows)
+    best = next((r for r in rows if r.best), None)
+    colour = {"good": GREEN, "bad": RED, "even": AMBER}.get(compare.band(best.win if best else None), RED)
+    c.badge.say(top, bottom, colour)
+    c.last[0] = (top, bottom, colour)
+    if best is not None and c.options.teams is not None:
+        c.options.teams(list(match.team), [code for code in best.codes if code])
+
+
+def _predictor(c: _Context) -> compare.Predictor:
+    def predict(team: tuple[str, ...], theirs: tuple[str, ...]) -> tuple[float, float]:
         try:
-            odds = predict_cli.win_odds(", ".join(match.team), ", ".join(c for c in codes if c), None, c.offline)
-        except typer.Exit:
-            chances.append(f"{number}: -")
-            continue
-        chances.append(f"{number}: {odds.win:.0%}")
-        if best is None or odds.win > best[0]:
-            best = (odds.win, number)
-    if best is None:
-        c.badge.say("Opponents not recognised", "open the magnifier of one", RED)
-        return
-    colour = GREEN if best[0] >= 0.6 else RED if best[0] <= 0.4 else AMBER
-    c.badge.say(f"Best: opponent {best[1]} ({best[0]:.0%})", "  ".join(chances), colour)
-    c.last[0] = (f"Best: opponent {best[1]} ({best[0]:.0%})", "  ".join(chances), colour)
-    if c.options.teams is not None:
-        c.options.teams(list(match.team), [h.code for h in read[best[1] - 1] if h.code])
+            odds = predict_cli.win_odds(
+                ", ".join(team), ", ".join(theirs), None, c.offline, runs=c.options.compare_runs, quiet=True
+            )
+        except predict_cli.OddsUnavailable as exc:
+            raise compare.Unavailable(exc.reason) from exc
+        except typer.Exit as exc:
+            raise compare.Unavailable("see the log") from exc
+        return odds.win, confidence_interval(odds.win, odds.runs)
+
+    return predict
 
 
 def _list_hero_line(hero: ListHero, heroes: dict[str, ResolvedEntity]) -> str:
@@ -787,12 +815,28 @@ def _offer_unknown(c: _Context, teams: list[list[ListHero]], rows: list[int], wh
         c.options.unknown(questions)
 
 
-def _learn_taught(c: _Context) -> None:
-    """Faces the user named on the window since the last frame."""
+def _learn_taught(c: _Context, match: _Match | None = None) -> None:
+    """Faces the user named on the window since the last frame; the opponents of the list on screen are compared again
+    with the new names."""
     queue_ = c.options.taught
+    renamed = False
     while queue_ is not None and not queue_.empty():
         question, code = queue_.get_nowait()
         _teach(question, code, c)
+        renamed = _rename(match, question, code) or renamed
+    if renamed and match is not None:
+        _announce(c, match)
+
+
+def _rename(match: _Match | None, question: FaceQuestion, code: str) -> bool:
+    """A face of the list still on screen got its name: True when the comparison has changed."""
+    if match is None or question.key is None:
+        return False
+    when, row, face = question.key
+    if when != match.list_when or not 0 < row <= len(match.list_codes) or match.list_codes[row - 1][face] is not None:
+        return False
+    match.list_codes[row - 1][face] = code
+    return True
 
 
 def _teach(question: FaceQuestion, code: str, c: _Context) -> None:

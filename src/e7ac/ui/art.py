@@ -60,17 +60,17 @@ def _ratio() -> float:
 
 
 def _round(data: bytes | None, size: int) -> QPixmap:
-    return _round_image(QImage.fromData(data) if data else QImage(), size)
+    return round_image(QImage.fromData(data) if data else QImage(), size)
 
 
 def round_from_bgr(picture: npt.NDArray[np.uint8], size: int) -> QPixmap:
     """A round portrait of a picture the watch cut from the screen (BGR, as OpenCV has it)."""
     height, width = picture.shape[:2]
     image = QImage(picture.data, width, height, 3 * width, QImage.Format.Format_BGR888).copy()
-    return _round_image(image, size)
+    return round_image(image, size)
 
 
-def _round_image(image: QImage, size: int) -> QPixmap:
+def round_image(image: QImage, size: int) -> QPixmap:
     ratio = _ratio()
     side = round(size * ratio)
     pixmap = QPixmap(side, side)

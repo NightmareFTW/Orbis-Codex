@@ -12,13 +12,22 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, Final
 
-from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from e7ac.domain.world import World
 from e7ac.fileio import write_text_atomic
 
 SETTINGS_SCHEMA_VERSION: Final = 1
 _RESOLUTION_RE: Final = re.compile(r"^(\d{3,5})x(\d{3,5})$")
+COMPARE_RUNS_MIN: Final = 500
+COMPARE_RUNS_DEFAULT: Final = 3000
+COMPARE_RUNS_MAX: Final = 10000
+_FREE_FORM_HINTS: Final = {
+    "resolution": "auto | WIDTHxHEIGHT",
+    "badge_overlay": "true | false",
+    "offline": "true | false",
+    "compare_runs": f"a whole number from {COMPARE_RUNS_MIN} to {COMPARE_RUNS_MAX}",
+}
 
 
 class SettingsError(Exception):
@@ -68,6 +77,12 @@ class Settings(BaseModel):
     resolution: str | None = None
     """`WIDTHxHEIGHT` of the game window, or None to auto-detect it from the window (default)."""
     game_language: GameLanguage = GameLanguage.EN
+    badge_overlay: bool = True
+    """Show the small badge over the game while the Arena watch runs (Windows)."""
+    offline: bool = False
+    """The Arena watch uses cached data only (no downloads)."""
+    compare_runs: int = Field(default=COMPARE_RUNS_DEFAULT, ge=COMPARE_RUNS_MIN, le=COMPARE_RUNS_MAX)
+    """Simulated battles per opponent when the Arena compares the three opponents of the list (SPEC D85)."""
 
     @field_validator("schema_version")
     @classmethod
@@ -104,6 +119,12 @@ def allowed_values(key: str) -> list[str] | None:
     if isinstance(annotation, type) and issubclass(annotation, StrEnum):
         return [member.value for member in annotation]
     return None
+
+
+def value_hint(key: str) -> str:
+    """What a key accepts, in words (for `e7 config options`)."""
+    choices = allowed_values(key)
+    return ", ".join(choices) if choices else _FREE_FORM_HINTS[key]
 
 
 def load_settings(path: Path) -> Settings:

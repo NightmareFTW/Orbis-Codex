@@ -61,7 +61,7 @@ def _tree(window: MainWindow) -> list[tuple[str, list[str]]]:
 
 def test_the_window_builds_its_pages_on_the_first_visit(context: AppContext) -> None:
     window = MainWindow(context)
-    assert _tree(window) == [("Home", []), ("Arena", []), ("\u25b8  Dev tools", ["Arena stats"])]
+    assert _tree(window) == [("Home", []), ("Arena", []), ("\u25b8  Dev tools", ["Arena stats"]), ("Settings", [])]
     assert window.page("home") is not None and window.page("arena") is None and window.page("dev") is None
     window.show_page("arena")
     assert window.page("arena") is not None and window._stack.currentWidget() is window.page("arena")
@@ -449,3 +449,257 @@ def test_the_vs_screen_question_waits_for_the_window_and_the_stop_frees_it(
     watch.respond(teach, "c9001")
     watch.respond(teach, "")  # a skipped list face is not a lesson
     assert watch._taught.get_nowait() == (teach, "c9001") and watch._taught.empty()
+
+
+def _settings_page(context: AppContext) -> Any:
+    window = MainWindow(context)
+    window.show_page("settings")
+    page: Any = window.page("settings")
+    assert page is not None
+    return window, page
+
+
+def test_settings_come_after_the_dev_tools_and_show_what_is_saved(context: AppContext) -> None:
+    from e7ac.settings import load_settings
+
+    window, page = _settings_page(context)
+    assert [spec.key for spec in __import__("e7ac.ui.pages", fromlist=["PAGES"]).PAGES][-1] == "settings"
+    editors = page._editors
+    assert editors["client"].currentData() == "stove_pc" and editors["world"].currentData() == "world_global"
+    assert editors["resolution"].text() == "" and editors["compare_runs"].value() == 3000
+    assert editors["badge_overlay"].isChecked() and not editors["offline"].isChecked()
+    assert not context.paths.settings_file.exists()  # showing the settings never writes them
+    editors["world"].setCurrentIndex(editors["world"].findData("world_eu"))
+    editors["offline"].setChecked(True)
+    editors["compare_runs"].setValue(5000)
+    saved = load_settings(context.paths.settings_file)
+    assert saved.world.value == "world_eu" and saved.offline and saved.compare_runs == 5000
+    assert page._note.text() == "Saved."
+    page.shown()  # the next visit shows the same
+    assert editors["world"].currentData() == "world_eu" and editors["compare_runs"].value() == 5000
+    window.close()
+
+
+def test_a_resolution_is_checked_before_it_is_saved(context: AppContext) -> None:
+    from e7ac.settings import load_settings
+
+    window, page = _settings_page(context)
+    edit = page._editors["resolution"]
+    edit.setText("banana")
+    edit.editingFinished.emit()
+    assert page._note.text().startswith("Not saved") and edit.text() == ""  # back to what is saved
+    assert not context.paths.settings_file.exists()
+    edit.setText("2560 x 1494")
+    edit.editingFinished.emit()
+    assert load_settings(context.paths.settings_file).resolution == "2560x1494"
+    edit.setText("")
+    edit.editingFinished.emit()
+    assert load_settings(context.paths.settings_file).resolution is None  # empty = auto
+    window.close()
+
+
+def test_a_broken_settings_file_is_shown_and_never_replaced(context: AppContext) -> None:
+    context.paths.settings_file.write_text("{oops", encoding="utf-8")
+    window, page = _settings_page(context)
+    assert "cannot be read" in page._note.text() and not page._editors["world"].isEnabled()
+    page._save("world", "world_eu")
+    assert context.paths.settings_file.read_text(encoding="utf-8") == "{oops"
+    window.close()
+
+
+def test_the_badge_size_set_in_the_settings_is_applied_at_once(
+    context: AppContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    resized: list[str] = []
+    monkeypatch.setattr(context.watch, "set_badge_size", resized.append)
+    window, page = _settings_page(context)
+    box = page._editors["badge_size"]
+    box.setCurrentIndex(box.findData("huge"))
+    assert resized == ["huge"]
+    window.close()
+
+
+def test_the_self_check_lives_in_the_settings_not_on_the_home_page(
+    context: AppContext, qapp: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from e7ac.doctor import CheckResult, CheckStatus
+
+    monkeypatch.setattr(
+        "e7ac.ui.pages.settings.run_checks",
+        lambda paths: [
+            CheckResult("ocr", CheckStatus.OK, "ready"),
+            CheckResult("game window", CheckStatus.WARN, "none"),
+        ],
+    )
+    window, page = _settings_page(context)
+    _wait(qapp, lambda: page._checks.itemAtPosition(1, 1) is not None)
+    texts = [page._checks.itemAtPosition(i, c).widget().text() for i in range(2) for c in range(2)]
+    assert texts == ["OK   ocr", "ready", "WARN game window", "none"]
+    home: Any = window.page("home")
+    assert not hasattr(home, "_checks") and not hasattr(home, "_runner")
+    window.close()
+
+
+def test_kept_pictures_are_counted_and_can_be_deleted(context: AppContext) -> None:
+    window, page = _settings_page(context)
+    assert page._kept.text() == "No kept pictures." and not page._forget.isEnabled()
+    folder = context.paths.captures_dir / "arena" / "debug"
+    folder.mkdir(parents=True)
+    for name in ("a.png", "b.png"):
+        (folder / name).write_bytes(b"x" * 1000)
+    shared = context.paths.captures_dir / "arena" / "shared"
+    shared.mkdir()
+    (shared / "keep.png").write_bytes(b"y")
+    page.shown()
+    assert page._kept.text().startswith("2 kept pictures") and page._forget.isEnabled()
+    assert page.forget_pictures() == 2
+    assert page._kept.text() == "No kept pictures." and (shared / "keep.png").is_file()  # only the kept ones go
+    window.close()
+
+
+def test_the_diagnostics_say_how_the_last_run_ended_and_make_a_report(context: AppContext) -> None:
+    from e7ac import __version__
+    from e7ac.crashlog import PreviousRun
+
+    window, page = _settings_page(context)
+    assert page._last_run.text() == "The last run ended normally."
+    context.previous = PreviousRun(datetime(2026, 10, 18, 12, 30, tzinfo=UTC), None)
+    page.shown()
+    assert "2026-10-18 12:30 UTC" in page._last_run.text() and "did not end normally" in page._last_run.text()
+    report = page.report()
+    assert __version__ in report and "world_global" in report and "did not end normally" in report
+    window.close()
+
+
+def test_the_home_page_warns_when_the_last_run_ended_unexpectedly(context: AppContext) -> None:
+    from e7ac.crashlog import PreviousRun
+
+    context.previous = PreviousRun(None, None)
+    window = MainWindow(context)
+    home: Any = window.page("home")
+    assert not home._crash.isHidden() and "did not end normally" in home._crash_text.text()
+    home._dismiss_crash()
+    assert home._crash.isHidden() and getattr(context, "previous") is None  # noqa: B009 (mypy narrowed it)
+    window.close()
+
+
+def test_the_icon_is_celines_portrait_or_the_users_own_picture_or_a_plain_emblem(
+    context: AppContext, qapp: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    from PySide6.QtGui import QColor, QImage
+
+    from e7ac.ui import icon
+
+    paths = context.paths
+    assert icon.source(paths) == "the plain emblem (no portraits yet)"
+    assert not icon.app_icon(paths).isNull() and 256 in {s.width() for s in icon.app_icon(paths).availableSizes()}
+    _fake_icons(monkeypatch, {icon.ICON_HERO: (200, 30, 30)})  # Celine is "in the cache"
+    assert icon.source(paths) == "Celine's portrait"
+    # the user's own picture: not square, only its middle is kept
+    wide = QImage(300, 100, QImage.Format.Format_RGB32)
+    wide.fill(QColor(0, 0, 255))
+    for x in range(100):  # the left and right thirds are other colours
+        for y in range(100):
+            wide.setPixelColor(x, y, QColor(255, 0, 0))
+            wide.setPixelColor(200 + x, y, QColor(255, 0, 0))
+    source = tmp_path / "skin.png"
+    assert wide.save(str(source))
+    assert icon.use_picture(paths, source) == ""
+    kept = QImage(str(icon.override_path(paths)))
+    assert (kept.width(), kept.height()) == (100, 100) and kept.pixelColor(50, 50).blue() == 255
+    assert icon.source(paths) == "your own picture"
+    centre = icon.app_icon(paths).pixmap(64, 64).toImage()
+    ratio = centre.devicePixelRatio()
+    assert centre.pixelColor(int(32 * ratio), int(32 * ratio)).blue() > 200
+    # what is not a picture changes nothing
+    (tmp_path / "notes.txt").write_text("not a picture", encoding="utf-8")
+    assert "not a picture" in icon.use_picture(paths, tmp_path / "notes.txt")
+    assert icon.source(paths) == "your own picture"
+    assert icon.use_default(paths) == "" and icon.source(paths) == "Celine's portrait"
+
+
+def test_the_settings_page_changes_the_icon_and_the_window_follows(
+    context: AppContext, qapp: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    from PySide6.QtGui import QColor, QImage
+
+    window, page = _settings_page(context)
+    assert (
+        page._icon_source.text() == "Program icon: the plain emblem (no portraits yet)."
+        and not page._icon_default.isEnabled()
+    )
+    face = QImage(80, 80, QImage.Format.Format_RGB32)
+    face.fill(QColor(0, 200, 0))
+    path = tmp_path / "face.png"
+    assert face.save(str(path))
+    page.use_icon(path)
+    assert page._icon_source.text() == "Program icon: your own picture." and page._icon_default.isEnabled()
+    assert page._note.text() == "The icon is changed." and not qapp.windowIcon().isNull()
+    page.use_default_icon()
+    assert page._icon_source.text().startswith("Program icon: the plain emblem") and not page._icon_default.isEnabled()
+    page.use_icon(tmp_path / "missing.png")
+    assert page._note.text().startswith("The icon was not changed")
+    window.close()
+
+
+def test_the_controller_hands_the_comparison_to_the_window_and_the_settings_to_the_watch(
+    context: AppContext, qapp: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from e7ac.arena.compare import OpponentOdds
+    from e7ac.cli import arena as arena_cli
+
+    rows = [OpponentOdds(1, ("c1001",) * 4, 0.7, 0.02, "", best=True)]
+    got: dict[str, Any] = {}
+
+    def fake_watch(options: Any, badge: Any, answers: Any, retry: Any, share: Any, stop: Any) -> None:
+        got["runs"] = options.compare_runs
+        options.opponents(rows)
+        stop.wait(5)
+
+    monkeypatch.setattr(arena_cli, "run_watch", fake_watch)
+    seen: list[Any] = []
+    context.watch.opponents.connect(seen.append)
+    assert context.watch.start(offline=True, collect_only=False, overlay=False, compare_runs=2000)
+    _wait(qapp, lambda: seen)
+    assert got["runs"] == 2000 and seen == [rows]
+    context.watch.stop()
+    _wait(qapp, lambda: not context.watch.running)
+
+
+def test_the_arena_page_lists_the_three_opponents_with_the_best_marked_and_remembers_its_options(
+    context: AppContext, qapp: Any
+) -> None:
+    from e7ac.arena.compare import OpponentOdds, mark_best
+    from e7ac.settings import load_settings
+
+    team = ("c1001", "c1002", "c1003", "c1004")
+    rows = mark_best(
+        [
+            OpponentOdds(1, team, 0.55, 0.02, ""),
+            OpponentOdds(2, ("c1005", None, "c1006", "c1007"), None, None, "a hero is not recognised"),
+            OpponentOdds(3, team, 0.82, 0.02, ""),
+        ]
+    )
+    window = MainWindow(context)
+    window.show_page("arena")
+    arena: Any = window.page("arena")
+    assert arena._opponents.isHidden()
+    context.watch.mode = ARENA
+    context.watch.opponents.emit(rows)
+    card = arena._opponents
+    assert not card.isHidden() and [r.isHidden() for r in card._rows] == [False, False, False]
+    assert [r.tag.text() for r in card._rows] == ["", "", "★ best"]
+    assert [r.chance.text() for r in card._rows] == ["55% (+/-2%)", "a hero is not recognised", "82% (+/-2%)"]
+    assert card._rows[1].heroes.codes == ["c1005", None, "c1006", "c1007"]  # the face nobody could name stays empty
+    context.watch.mode = COLLECT  # a collecting watch has no use for it
+    context.watch.opponents.emit(rows[:1])
+    assert len(card._rows[0].chance.text()) and card._rows[2].tag.text() == "★ best"
+    context.watch._state = STOPPED
+    context.watch.state.emit(STOPPED)
+    assert card.isHidden()
+    arena._offline.setChecked(True)  # remembered for the next start
+    assert load_settings(context.paths.settings_file).offline
+    arena._overlay.setChecked(True)  # (off to begin with where there is no badge: not Windows)
+    arena._overlay.setChecked(False)
+    assert not load_settings(context.paths.settings_file).badge_overlay
+    window.close()

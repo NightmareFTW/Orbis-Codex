@@ -8,11 +8,12 @@ from typing import ClassVar
 
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPaintEvent, QPen, QPolygonF
-from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QComboBox, QGridLayout, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
-from e7ac.settings import BadgeSize, SettingsError, load_settings, save_settings, with_value
+from e7ac.settings import BadgeSize
+from e7ac.ui import prefs
 from e7ac.ui.context import AppContext
-from e7ac.ui.theme import TOKENS
+from e7ac.ui.theme import TOKENS, status_style
 
 
 class Ornament(QWidget):
@@ -119,20 +120,36 @@ class BadgeSizeBox(QComboBox):
         self._on_error = on_error
         for size, label in self.LABELS.items():
             self.addItem(label, size.value)
-        try:
-            current = load_settings(context.paths.settings_file).badge_size
-        except SettingsError:
-            current = BadgeSize.LARGE
+        current = prefs.load(context.paths)[0].badge_size
         self.setCurrentIndex(list(self.LABELS).index(current))
         self.setToolTip("How big the small badge over the game is (what to do next, and the result).")
         self.currentIndexChanged.connect(self._changed)
 
     def _changed(self) -> None:
         size = str(self.currentData())
-        path = self._context.paths.settings_file
-        try:
-            save_settings(with_value(load_settings(path), "badge_size", size), path)
-        except (SettingsError, OSError) as exc:
-            if self._on_error is not None:
-                self._on_error(f"the badge size was not saved: {exc}")
+        problem = prefs.store(self._context.paths, "badge_size", size)
+        if problem and self._on_error is not None:
+            self._on_error(f"the badge size was not saved: {problem}")
         self._context.watch.set_badge_size(size)
+
+    def show_saved(self) -> None:
+        """Follow the saved size (another page may have changed it)."""
+        current = prefs.load(self._context.paths)[0].badge_size
+        self.blockSignals(True)
+        self.setCurrentIndex(list(self.LABELS).index(current))
+        self.blockSignals(False)
+
+
+def set_row(grid: QGridLayout, row: int, name: str, value: str, kind: str = "") -> None:
+    """A two-column row (name, value) of a grid of facts; the name is coloured by `kind` (ok / warn / bad)."""
+    for column, text in enumerate((name, value)):
+        item = grid.itemAtPosition(row, column)
+        label = item.widget() if item is not None else None
+        if not isinstance(label, QLabel):
+            label = QLabel()
+            label.setWordWrap(True)
+            grid.addWidget(label, row, column)
+        label.setText(text)
+        label.setStyleSheet(status_style(kind) if kind and column == 0 else "background: transparent;")
+        if column == 0:
+            label.setMinimumWidth(110)

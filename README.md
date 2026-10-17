@@ -11,9 +11,11 @@ Status: Phase 1 in progress — see [`docs/ROADMAP.md`](docs/ROADMAP.md).
    Python 3.12 and every dependency automatically (a few minutes, only once), then shows the `e7 doctor` check
    (lines starting with `[OK  ]`) and waits for a key. Later starts are instant.
 3. **Double-click `Orbis.cmd` for the main window**: Home (what the app has, sync the catalog), Arena (leave it
-   running and play: the chance to win, with the small badge over the game) and Arena stats (a dev tool: refresh the
-   Opponents list in the game as often as you like and see the heroes met most). The badge over the game has a size
-   (normal, large, huge) next to the Start button.
+   running and play: the chance to win, with the small badge over the game; on the Opponents list it compares the
+   three opponents and names the best), Arena stats (a dev tool: refresh the Opponents list in the game as often as
+   you like and see the heroes met most) and Settings (is everything ready, the game and Arena options, folders,
+   diagnostics, the program icon). If the window ever closes by itself, `Orbis.cmd` waits with a message, and
+   Settings > Diagnostics has the report to send.
 
 From a terminal opened in that folder (cmd or PowerShell), run commands as `.\OrbisCodex.cmd <command>`
 (developers: `uv run e7 <command>`):

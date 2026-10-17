@@ -167,3 +167,24 @@ def test_the_badge_size_defaults_to_large_and_is_a_known_choice(isolated_home: A
     assert with_value(Settings(), "badge_size", "huge").badge_size is BadgeSize.HUGE
     with pytest.raises(SettingsError):
         with_value(Settings(), "badge_size", "tiny")
+
+
+def test_the_arena_watch_options_are_settings_with_limits() -> None:
+    from e7ac.settings import EDITABLE_KEYS, Settings, SettingsError, value_hint, with_value
+
+    settings = Settings()
+    assert settings.badge_overlay and not settings.offline and settings.compare_runs == 3000
+    assert (
+        with_value(settings, "offline", "true").offline
+        and not with_value(settings, "badge_overlay", "false").badge_overlay
+    )
+    assert with_value(settings, "compare_runs", "5000").compare_runs == 5000
+    for key, value in (
+        ("compare_runs", "10"),
+        ("compare_runs", "100000"),
+        ("compare_runs", "many"),
+        ("offline", "maybe"),
+    ):
+        with pytest.raises(SettingsError):
+            with_value(settings, key, value)
+    assert all(value_hint(key) for key in EDITABLE_KEYS)  # `e7 config options` can describe every key

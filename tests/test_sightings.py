@@ -94,6 +94,7 @@ def _context(
         last=[("", "", "")],
         offline=True,
         shapes=shapes,
+        compared={},
     )
     return context, SimpleNamespace(team=team), said
 

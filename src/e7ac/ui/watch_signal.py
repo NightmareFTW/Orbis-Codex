@@ -11,6 +11,8 @@ the Python the launcher installs); otherwise the console is the only signal.
 
 from __future__ import annotations
 
+import gc
+import logging
 import queue
 import sys
 import threading
@@ -18,6 +20,8 @@ from collections.abc import Callable
 from typing import Any, Final, Protocol
 
 from e7ac.vision.window import Rect
+
+LOGGER = logging.getLogger(__name__)
 
 WIDTH: Final = 300
 HEIGHT: Final = 58
@@ -155,6 +159,21 @@ class TkBadge:
             winsound.MessageBeep(winsound.MB_OK if ok else winsound.MB_ICONHAND)
 
     def _run(self) -> None:
+        """The Tk thread. The Tcl interpreter must die in the thread that made it (Tcl panics, and the whole program
+        ends without a word, when a garbage collection in another thread frees it): so the garbage of the window is
+        collected here, with the automatic collector paused until then (SPEC D85)."""
+        resume = False
+        try:
+            resume = self._loop()
+        except Exception:
+            LOGGER.exception("the badge over the game stopped")
+        finally:
+            gc.collect()
+            if resume:
+                gc.enable()
+
+    def _loop(self) -> bool:
+        """The badge window until it is closed; True when it paused the automatic collector for `_run` to resume."""
         import tkinter as tk
 
         _make_dpi_aware()  # before any window: sizes and places are then physical pixels, like the capture's
@@ -246,6 +265,14 @@ class TkBadge:
         root.after(50, poll)
         self.ready.set()
         root.mainloop()
+        return _pause_gc()
+
+
+def _pause_gc() -> bool:
+    """Stop the automatic collector (no other thread may free the window's objects now); True when it was running."""
+    was = gc.isenabled()
+    gc.disable()
+    return was
 
 
 def _on_click(action: Callable[[], None]) -> Callable[[Any], None]:
