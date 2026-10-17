@@ -61,13 +61,15 @@ def test_a_marker_of_a_process_that_is_gone_means_the_run_did_not_end_normally(l
 
 
 def test_a_window_that_is_still_running_is_not_reported(logs: Path) -> None:
-    other = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
-    try:
-        marker = _marker(logs, other.pid)
+    marker = _marker(logs, 4242)
+    with marker.open("r+b") as running:  # the other window holds its marker's lock for as long as it runs
+        assert crashlog._try_lock(running)
         assert crashlog.install(logs) is None and marker.is_file()
-    finally:
-        other.kill()
-        other.wait()
+        (logs / "crash-4242.log").write_text("", encoding="utf-8")
+        crashlog.shutdown()
+        assert crashlog.install(logs) is None and (logs / "crash-4242.log").is_file()  # nor its dump file
+    crashlog.shutdown()
+    assert crashlog.install(logs) is not None  # once that window is gone, it did not end normally
 
 
 def test_a_fatal_error_dump_of_a_dead_process_is_archived_and_reported_once(logs: Path) -> None:
@@ -89,7 +91,7 @@ def test_only_the_last_few_dumps_are_kept(logs: Path) -> None:
     for day in range(1, 9):
         (logs / f"crash-202610{day:02d}-120000.log").write_text("dump", encoding="utf-8")
     crashlog.install(logs)
-    kept = sorted(p.name for p in logs.glob("crash-2*.log"))
+    kept = sorted(p.name for p in logs.glob("crash-????????-??????.log"))
     assert len(kept) == crashlog.KEEP_CRASH_LOGS and kept[-1] == "crash-20261008-120000.log"
 
 

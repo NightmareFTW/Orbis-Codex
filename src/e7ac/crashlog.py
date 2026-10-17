@@ -6,8 +6,9 @@ Windows, without a message the user can read. Three things are kept instead, all
 - `crash-<pid>.log`: `faulthandler` dumps the Python stack of every thread there when the process dies on a fatal error;
   an empty file is removed on a clean exit, a non-empty one of a dead process is archived as `crash-<time>.log`;
 - `app.log`: the errors that did not kill the program (uncaught exceptions of any thread, Qt warnings), with a size cap;
-- `running-<pid>.json`: a marker that exists only while the program runs; one left by a process that is gone means that
-  run did not end normally (crash, console closed, PC restarted). `install` reports it as a `PreviousRun`.
+- `running-<pid>.json`: a marker that exists only while the program runs, with a lock the program holds on it (the
+  lock goes when the program ends, however it ends: no process handle, no process id lookup); a marker nobody holds is
+  a run that did not end normally (crash, console closed, PC restarted). `install` reports it as a `PreviousRun`.
 
 Nothing here leaves the PC and nothing touches the game.
 """
@@ -39,6 +40,8 @@ KEEP_CRASH_LOGS: Final = 5
 _MARKER: Final = "running-{pid}.json"
 _DUMP: Final = "crash-{pid}.log"
 _ARCHIVE_FORMAT: Final = "crash-%Y%m%d-%H%M%S.log"
+LOCK_AT: Final = 1 << 20
+"""The byte of a marker that its running program keeps locked: far past the text, which stays readable meanwhile."""
 LOGGER: Final = logging.getLogger("e7ac")
 
 
@@ -66,33 +69,21 @@ def log_path(logs_dir: Path) -> Path:
     return logs_dir / LOG_NAME
 
 
-def alive(pid: int) -> bool:
-    """Whether a process with this id is running (a reused id counts as running: a missed notice, never a false one)."""
-    if pid <= 0:
-        return False
-    if sys.platform == "win32":
-        import ctypes
-        from ctypes import wintypes
-
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined,unused-ignore]
-        kernel32.OpenProcess.restype = wintypes.HANDLE
-        kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
-        kernel32.GetExitCodeProcess.argtypes = (wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD))
-        kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
-        handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
-        if not handle:
-            return False
-        try:
-            code = wintypes.DWORD()
-            return bool(kernel32.GetExitCodeProcess(handle, ctypes.byref(code))) and code.value == 259  # STILL_ACTIVE
-        finally:
-            kernel32.CloseHandle(handle)
+def _try_lock(handle: IO[bytes]) -> bool:
+    """Take the lock a running program holds on its marker (False: somebody holds it). Only the standard library, and
+    never a process handle: the lock goes when the program ends, however it ends, and is not fooled by a reused id."""
+    handle.seek(LOCK_AT)
     try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
+        if sys.platform == "win32":
+            import msvcrt
+
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
-        return True  # PermissionError: it exists, it is somebody else's
+        return False
     return True
 
 
@@ -103,6 +94,7 @@ class _Session:
         self.logs_dir = logs_dir
         self.pid = os.getpid()
         self.marker = logs_dir / _MARKER.format(pid=self.pid)
+        self.marker_file: IO[bytes] | None = None
         self.dump_path = logs_dir / _DUMP.format(pid=self.pid)
         self.dump: IO[str] | None = None
         self.handler: RotatingFileHandler | None = None
@@ -173,6 +165,8 @@ def shutdown() -> None:
     if session.handler is not None:
         LOGGER.removeHandler(session.handler)
         session.handler.close()
+    if session.marker_file is not None:
+        session.marker_file.close()
     session.marker.unlink(missing_ok=True)
     atexit.unregister(shutdown)
 
@@ -204,34 +198,51 @@ def latest_dump(logs_dir: Path) -> Path | None:
 
 
 def _previous_run(logs_dir: Path) -> PreviousRun | None:
-    """Markers and dumps of processes that are gone; they are consumed here (reported once)."""
+    """Markers and dumps of runs that are gone; they are consumed here (reported once). A run is gone when nobody holds
+    the lock on its marker."""
     started: datetime | None = None
     unclean = False
+    running: set[int] = set()
     for marker in logs_dir.glob("running-*.json"):
         pid = _pid_of(marker.stem)
-        if pid is not None and alive(pid) and pid != os.getpid():
-            continue
-        unclean = True
         try:
-            when = datetime.fromisoformat(json.loads(marker.read_text(encoding="utf-8"))["started"])
-            started = when if started is None or when > started else started
-        except (OSError, ValueError, KeyError, TypeError):
-            pass
+            with marker.open("r+b") as handle:
+                if not _try_lock(handle):
+                    running.add(pid if pid is not None else -1)
+                    continue
+                handle.seek(0)
+                when = _started(handle.read(4096))
+        except OSError:
+            continue  # cannot be opened now: not ours to judge
+        unclean = True
+        if when is not None and (started is None or when > started):
+            started = when
         marker.unlink(missing_ok=True)
     dump: Path | None = None
     for path in logs_dir.glob("crash-*.log"):
         pid = _pid_of(path.stem)
-        if pid is None or (alive(pid) and pid != os.getpid()):
+        if pid is None or pid in running:
             continue  # an archived dump (not a pid), or a window that is still running
-        if path.stat().st_size == 0:
-            path.unlink(missing_ok=True)
-            continue
-        unclean = True
-        dump = _archive(path)
+        try:
+            if path.stat().st_size == 0:
+                path.unlink(missing_ok=True)
+                continue
+            unclean = True
+            dump = _archive(path)
+        except OSError:
+            continue  # still open: the program that owns it is running
     _prune(logs_dir)
     if not unclean:
         return None
     return PreviousRun(started, dump or latest_dump(logs_dir))
+
+
+def _started(raw: bytes) -> datetime | None:
+    try:
+        when = datetime.fromisoformat(json.loads(raw.rstrip(b"\0").decode("utf-8"))["started"])
+    except (ValueError, KeyError, TypeError):
+        return None
+    return when if when.tzinfo is not None else None
 
 
 def _pid_of(stem: str) -> int | None:
@@ -266,11 +277,17 @@ def _remove_if_empty(path: Path) -> None:
 
 
 def _write_marker(session: _Session) -> None:
+    """The marker: when this run started, held locked until it ends."""
     with contextlib.suppress(OSError):  # no marker: a crash is then not reported on the next start, the dump still is
-        session.marker.write_text(
-            json.dumps({"pid": session.pid, "started": datetime.now(UTC).isoformat(timespec="seconds")}),
-            encoding="utf-8",
+        handle = session.marker.open("wb")
+        handle.write(
+            json.dumps({"pid": session.pid, "started": datetime.now(UTC).isoformat(timespec="seconds")}).encode()
         )
+        handle.flush()
+        if _try_lock(handle):
+            session.marker_file = handle
+        else:
+            handle.close()
 
 
 def _on_exception(kind: type[BaseException], value: BaseException, trace: types.TracebackType | None) -> None:
