@@ -9,3 +9,6 @@ Workflow:
 4. `e7 kit show HERO` again, then `e7 predict win ...` uses it ("kit refined by hand" note).
 
 Never guess a number: unknown values are `status = "assumed"` and listed in docs/MECHANICS.md "Needs verification".
+
+Best source: the in-game skill screen (a screenshot of the hero's skill description at its current enhancement) —
+the numbers are then `verified`. epic7db can be out of date (SPEC D77, NV-41).
