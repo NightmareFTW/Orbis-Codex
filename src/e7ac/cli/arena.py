@@ -24,10 +24,12 @@ from e7ac.arena.identify import Slot, identify
 from e7ac.arena.list_read import ListHero, resolve_list, shape_group
 from e7ac.arena.questions import FaceQuestion
 from e7ac.arena.references import ReferenceStore
+from e7ac.arena.results import Outcome, Prediction, ResultStore, calibrate, pair, results_path
 from e7ac.arena.sightings import Sighting, SightingStore, sightings_path
 from e7ac.catalog.resolve import ResolvedEntity
 from e7ac.cli import catalog as catalog_cli
 from e7ac.cli import predict as predict_cli
+from e7ac.cli import roster as roster_cli
 from e7ac.cli.roster import _catalog_heroes, _engine, _fail, _resolve_hero_code
 from e7ac.domain.codes import HeroClass
 from e7ac.paths import AppPaths, default_paths
@@ -51,7 +53,9 @@ from e7ac.vision.arena_badges import (
 )
 from e7ac.vision.arena_guide import Face, FaceMatcher, ListLayout, fit_rows, list_rows
 from e7ac.vision.arena_list import find_rows, read_list_badges
+from e7ac.vision.arena_result import read_result
 from e7ac.vision.image import ImageError, load_image
+from e7ac.vision.watch import ScreenWatcher, thumbnail
 from e7ac.vision.window import Rect
 
 arena_app = typer.Typer(help="Arena screens: identify the heroes shown.", no_args_is_help=True)
@@ -156,6 +160,8 @@ def run_watch(
         last,
         sightings,
         options,
+        ResultStore(results_path(paths.home)),
+        _lazy_reader(),
     )
     badge.say("Arena: open a match", "the VS screen, before the battle", LIGHT)
     if options.collect_only:
@@ -181,6 +187,8 @@ def run_watch(
                 match.size = (frame.shape[1], frame.shape[0])
                 typer.echo(f"  game picture: {match.size[0]}x{match.size[1]} (read at {WORK_HEIGHT} px high)")
             _step(normalise(frame), match, context)
+            if not options.collect_only:
+                _outcome_step(frame, match, context)
         else:
             match.sees = "the game window is not visible (it must be on screen, not minimised or covered)"
         if options.status is not None and match.sees != shown:
@@ -239,6 +247,8 @@ class _Match:
     pending_codes: list[str | None] = field(default_factory=list)
     frame: BgrImage | None = None
     """The last game picture (full size), for "Save picture"."""
+    screens: ScreenWatcher = field(default_factory=ScreenWatcher)
+    """Which game screen is new and has settled: only then is it looked at for a Victory / Defeat title."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -258,6 +268,10 @@ class _Context:
     """The last prediction as the badge shows it (two lines and their colour), for "Save picture"."""
     sightings: SightingStore | None = None
     options: WatchOptions = field(default_factory=WatchOptions)
+    results: ResultStore | None = None
+    """What was predicted and what happened (SPEC D93)."""
+    reader: Callable[[], Any] = lambda: None
+    """The OCR engine, made on first use (the Victory / Defeat title needs it)."""
     compared: compare.Known = field(default_factory=dict)
     """Predictions already made against the opponents of the list."""
 
@@ -856,6 +870,46 @@ def _teach(question: FaceQuestion, code: str, c: _Context) -> None:
     typer.echo(f"  {question.title}: {_name(c.heroes, code)} (learned)")
 
 
+def _lazy_reader() -> Callable[[], Any]:
+    """The OCR engine, made once, the first time it is needed."""
+    made: list[Any] = []
+
+    def reader() -> Any:
+        if not made:
+            made.append(roster_cli.reader_factory())
+        return made[0]
+
+    return reader
+
+
+def _log_prediction(c: _Context, team: list[str], theirs: list[str], odds: Any) -> None:
+    """The chance of a match on the results log, to be paired with its Victory / Defeat (SPEC D93)."""
+    if c.results is None:
+        return
+    try:
+        profile = load_settings(c.paths.settings_file).opponent_profile.value
+    except SettingsError:
+        profile = "typical"
+    c.results.add(Prediction(datetime.now(UTC), tuple(team), tuple(theirs), odds.win, odds.loss, profile, odds.blind))
+
+
+def _outcome_step(frame: BgrImage, match: _Match, c: _Context) -> None:
+    """A game screen that is new and has settled: is it the Victory / Defeat title that ends a fight? Then the outcome
+    goes on the results log (once: the same screen is not read again)."""
+    if c.results is None or not match.screens.feed(thumbnail(frame), arena_clock()):
+        return
+    result = read_result(frame, c.reader())
+    if result is None:
+        return
+    c.results.add(Outcome(datetime.now(UTC), result))
+    predictions, outcomes, _ = c.results.read()
+    fights = pair(predictions, outcomes)
+    seen = fights[-1].prediction.win if fights and fights[-1].outcome.when == outcomes[-1].when else None
+    note = f" (you were given {compare.chance_text(seen)})" if seen is not None else " (no prediction was made)"
+    typer.echo(f"{datetime.now().astimezone():%H:%M:%S} Arena result: {result}{note}")
+    c.badge.say(f"Recorded: {result.title()}", note.strip(" ()"), GREEN if result == "victory" else RED)
+
+
 def _predict(team: list[str], theirs: list[str], c: _Context) -> None:
     names = ", ".join(_name(c.heroes, code) for code in theirs)
     try:
@@ -863,6 +917,7 @@ def _predict(team: list[str], theirs: list[str], c: _Context) -> None:
     except typer.Exit:
         c.badge.say("No prediction", "see the Arena window", RED)
         return
+    _log_prediction(c, team, theirs, odds)
     colour = GREEN if odds.win >= 0.6 else RED if odds.win <= 0.4 else AMBER
     sign = "~" if odds.blind else ""
     top = f"Win chance {sign}{compare.chance_text(odds.win)}"
@@ -891,6 +946,42 @@ def _faces(
         if failed:
             typer.echo(f"note: {len(failed)} face icons not available: those heroes are asked", err=True)
     return FaceMatcher.from_png(load_hero_icons(paths.cache_dir, heroes), face_store.crops())
+
+
+@arena_app.command("results")
+def results(
+    undo: Annotated[bool, typer.Option("--undo", help="Remove the last line of the log (a wrong outcome).")] = False,
+) -> None:
+    """What the program predicted against what happened: the fights the Arena watch saw to the end, and how far the
+    chances were from the results (SPEC D93). A win chance is only as good as it was right about real fights."""
+    store = ResultStore(results_path(default_paths().home))
+    if undo:
+        typer.echo("Removed the last line." if store.remove_last() else "Nothing to remove.")
+        return
+    predictions, outcomes, skipped = store.read()
+    fights = pair(predictions, outcomes)
+    with session_scope(_engine()) as session:
+        heroes = _catalog_heroes(session) or {}
+    if not fights:
+        typer.echo(
+            f"No fight seen to the end yet ({len(predictions)} prediction(s), {len(outcomes)} outcome(s) logged). "
+            "Play with the Arena watch running: it logs each chance and the Victory / Defeat screen."
+        )
+        return
+    for fight in fights:
+        p = fight.prediction
+        unread = f"  (skills not read: {', '.join(p.blind)})" if p.blind else ""
+        theirs = ", ".join(_name(heroes, code) for code in p.theirs)
+        typer.echo(
+            f"  {p.when.astimezone():%Y-%m-%d %H:%M}  chance {compare.chance_text(p.win):>5} [{p.profile}]  "
+            f"{fight.outcome.result:<7}  vs {theirs}{unread}"
+        )
+    cal = calibrate(fights)
+    typer.echo(
+        f"{cal.fights} fight(s): {cal.wins} won, the chances expected {cal.expected:.1f}; Brier {cal.brier:.2f} "
+        f"(0 perfect, 0.25 a coin toss); lost with 85% or more: {cal.sure_but_lost}"
+        + (f"  ({skipped} unreadable line(s))" if skipped else "")
+    )
 
 
 @arena_app.command("forget")

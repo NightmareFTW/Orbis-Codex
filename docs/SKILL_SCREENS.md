@@ -149,7 +149,7 @@ Heroes epic7db has no page for (their skills cannot even be compared with a text
 
 ## D. Fights (the only thing a popup cannot give)
 
-The Battle Results screen after a fight (all its tabs) with the chance the program showed. **Four or five fights are enough to start**: pick ones where the program was confident and the result was a surprise or a close call, and a few it got right. For each: the Victory/Defeat screen and every tab of Battle Results (damage and recovery of both teams; the damage taken and the other tab if there is one). A reader for those screens is the next slice (results log); until then screenshots, or just the numbers typed.
+The Battle Results screen after a fight (all its tabs) with the chance the program showed. **Four or five fights are enough to start**: pick ones where the program was confident and the result was a surprise or a close call, and a few it got right. For each: the Victory/Defeat screen and every tab of Battle Results (damage and recovery of both teams; the damage taken and the other tab if there is one). The Victory / Defeat and the chance shown are logged by the Arena watch by itself since SPEC D93 (`e7 arena results`), so **only the Battle Results numbers** need to be sent: screenshots, or just the numbers typed.
 
 ## E. What no screen gives
 

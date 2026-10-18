@@ -65,8 +65,12 @@ say the real fight lasted 15 to 40 rounds per hero; what the Recovery column cou
 skills read were not what decided that fight, and no other cause can be told apart from this one fight.
 
 What settles it: the Battle Results and Victory / Defeat screen of each fight, with the chance the program showed (a
-screenshot of both is enough; a results log that reads them from the screen is proposed, not built), the tabs of the
+screenshot of both is enough), the tabs of the
 same screen that were not sent yet (Damage Taken, the other Recovery tab), and how many turns the fight lasted.
+
+Since SPEC D93 the Arena watch writes each chance and each Victory / Defeat to a local log (`e7 arena results`), so
+the chance and the result of every fight the user plays with the watch running are kept without any screenshot; only
+the Battle Results numbers (damage and recovery per hero) are still sent by hand.
 
 ## 4. How the game plays the fight
 
@@ -89,6 +93,6 @@ effect on the result needs the fights of section 3; for the user's own heroes it
 
 1. The heroes at the top of the table (each one that is read removes a "~" from a lot of predictions): next Spirit Eye
    Celine, Arbiter Vildred, Rhianna and Luciella, Notos, Belian, Setsuka.
-2. The results log (section 3): turns every later fix into a measured one; the lost fight is the first case to explain.
+2. The results log (section 3, built in SPEC D93): turns every later fix into a measured one; the lost fight is the first case to explain.
 3. The opponent build (section 2): only from results, since the game never shows it.
 4. The rest, as the fights say which of them matter.

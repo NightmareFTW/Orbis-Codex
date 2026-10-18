@@ -121,6 +121,7 @@ def test_the_badge_does_not_promise_what_the_model_cannot_see(monkeypatch: Any) 
         badge=SimpleNamespace(say=lambda top, bottom, colour: said.append((top, bottom, colour))),
         last=[("", "", "")],
         options=SimpleNamespace(teams=None),
+        results=None,
     )
     monkeypatch.setattr(
         predict_cli, "win_odds", lambda *a, **k: BattleOdds(1.0, 0.0, 0.0, 9, 1000, [], ("Byblis (S3)",))
