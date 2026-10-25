@@ -16,7 +16,7 @@ from e7ac.paths import AppPaths
 from e7ac.settings import ClientKind
 from e7ac.vision import _win32
 from e7ac.vision.capture import CaptureError, Frame, MssBackend, capture_name, frame_warnings, save_png
-from e7ac.vision.window import PROFILES, Rect, WindowError, WindowInfo, select_game_window
+from e7ac.vision.window import PROFILES, Rect, WindowError, WindowInfo, other_client, select_game_window
 
 runner = CliRunner()
 SRC = Path(__file__).resolve().parents[1] / "src" / "e7ac"
@@ -107,6 +107,18 @@ def test_selection_never_guesses() -> None:
         select_game_window([window(minimized=True)], STOVE)
     with pytest.raises(WindowError, match="no visible client area"):
         select_game_window([window(size=(0, 0))], STOVE)
+
+
+def test_a_wrong_client_setting_says_which_client_the_open_window_looks_like() -> None:
+    """The Stove PC game is open but the setting says "emulator": the message points at the setting (SPEC D95)."""
+    emulator = PROFILES[ClientKind.EMULATOR]
+    with pytest.raises(WindowError, match=r"looks like the 'stove_pc' client.*e7 config set client stove_pc"):
+        select_game_window([window()], emulator)
+    notepad = window(title="Notepad", class_name="Notepad", exe="notepad.exe")
+    assert other_client([notepad], ClientKind.STOVE_PC) is None
+    with pytest.raises(WindowError) as nothing:
+        select_game_window([notepad], emulator)
+    assert "looks like" not in str(nothing.value)
 
 
 @pytest.mark.parametrize(

@@ -15,7 +15,6 @@ from PySide6.QtGui import QGuiApplication, QIcon
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
-    QComboBox,
     QHBoxLayout,
     QLabel,
     QPlainTextEdit,
@@ -37,7 +36,7 @@ from e7ac.ui.pages.base import Page, card, heading
 from e7ac.ui.questions import QuestionCard
 from e7ac.ui.theme import status_style
 from e7ac.ui.watch_controller import COLLECT, RUNNING, STOPPED, STOPPING
-from e7ac.ui.widgets import BadgeSizeBox
+from e7ac.ui.widgets import BadgeSizeBox, SteadyComboBox
 
 PERIODS = (("All time", None), ("Last 24 hours", timedelta(hours=24)), ("Last 7 days", timedelta(days=7)))
 KIT_HEROES = 30
@@ -122,7 +121,7 @@ class DevPage(Page):
         self._overlay.setEnabled(sys.platform == "win32")
         self._offline = QCheckBox("Offline")
         self._size = BadgeSizeBox(context, lambda message: self._status.setText(message))
-        self._period = QComboBox()
+        self._period = SteadyComboBox()
         for label, _ in PERIODS:
             self._period.addItem(label)
         self._period.currentIndexChanged.connect(self.reload)

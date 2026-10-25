@@ -7,8 +7,8 @@ from collections.abc import Callable, Sequence
 from typing import ClassVar
 
 from PySide6.QtCore import QPointF, Qt
-from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPaintEvent, QPen, QPolygonF
-from PySide6.QtWidgets import QComboBox, QGridLayout, QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPaintEvent, QPen, QPolygonF, QWheelEvent
+from PySide6.QtWidgets import QComboBox, QGridLayout, QHBoxLayout, QLabel, QSpinBox, QVBoxLayout, QWidget
 
 from e7ac.settings import BadgeSize
 from e7ac.ui import prefs
@@ -105,7 +105,37 @@ class FeaturedHero(QWidget):
             self._name.setText(self._context.hero_name(code))
 
 
-class BadgeSizeBox(QComboBox):
+class SteadyComboBox(QComboBox):
+    """A choice that the mouse wheel changes only after it was clicked: a wheel turned over a page that scrolls would
+    otherwise move the choice under the pointer, and a choice that saves itself (the Settings page) would keep the
+    change without anybody noticing (SPEC D95: the client became "emulator" and no window was found any more)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
+    def wheelEvent(self, event: QWheelEvent) -> None:  # noqa: N802 (Qt's name)
+        if self.hasFocus():
+            super().wheelEvent(event)
+        else:
+            event.ignore()  # the page under it scrolls instead
+
+
+class SteadySpinBox(QSpinBox):
+    """A number that the mouse wheel changes only after it was clicked (see `SteadyComboBox`)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
+    def wheelEvent(self, event: QWheelEvent) -> None:  # noqa: N802 (Qt's name)
+        if self.hasFocus():
+            super().wheelEvent(event)
+        else:
+            event.ignore()
+
+
+class BadgeSizeBox(SteadyComboBox):
     """The size of the small badge over the game: saved in the settings, and applied at once when it is showing."""
 
     LABELS: ClassVar[dict[BadgeSize, str]] = {

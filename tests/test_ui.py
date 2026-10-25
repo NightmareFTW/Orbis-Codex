@@ -485,6 +485,49 @@ def test_settings_come_after_the_dev_tools_and_show_what_is_saved(context: AppCo
     window.close()
 
 
+def _wheel(widget: Any, steps: int = -1) -> None:
+    """A mouse wheel turned over `widget`, as the user's hand does when scrolling the page."""
+    from PySide6.QtCore import QPoint, QPointF, Qt
+    from PySide6.QtGui import QWheelEvent
+    from PySide6.QtWidgets import QApplication
+
+    centre = QPointF(widget.width() / 2, widget.height() / 2)
+    event = QWheelEvent(
+        centre,
+        widget.mapToGlobal(centre),
+        QPoint(0, 0),
+        QPoint(0, 120 * steps),
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+        Qt.ScrollPhase.NoScrollPhase,
+        False,
+    )
+    QApplication.sendEvent(widget, event)
+
+
+def test_the_mouse_wheel_does_not_change_a_setting_nobody_clicked(context: AppContext) -> None:
+    """Scrolling the Settings page over a choice moved it to the next item and saved it (SPEC D95): the client went
+    from "Stove PC" to "emulator" and the game window was never found again."""
+    from e7ac.settings import load_settings
+
+    window, page = _settings_page(context)
+    window.show()
+    editors = page._editors
+    before = {key: editors[key].currentData() for key in ("client", "world", "game_language", "opponent_profile")}
+    for key in before:
+        for _ in range(5):
+            _wheel(editors[key])
+    _wheel(editors["compare_runs"])
+    assert {key: editors[key].currentData() for key in before} == before and editors["compare_runs"].value() == 3000
+    assert not context.paths.settings_file.exists()  # nothing was saved
+    editors["client"].setFocus()
+    editors["client"].activateWindow()
+    if editors["client"].hasFocus():  # a focused choice still answers the wheel (a click first)
+        _wheel(editors["client"])
+        assert load_settings(context.paths.settings_file).client.value != "stove_pc"
+    window.close()
+
+
 def test_a_resolution_is_checked_before_it_is_saved(context: AppContext) -> None:
     from e7ac.settings import load_settings
 

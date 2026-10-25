@@ -97,6 +97,16 @@ PROFILES: dict[ClientKind, ClientProfile] = {
 }
 
 
+def other_client(windows: Sequence[WindowInfo], current: ClientKind) -> ClientKind | None:
+    """Another client whose profile matches exactly one open window: what to suggest when the setting `client` finds
+    nothing (a Stove PC player whose setting says "emulator" has the game open all the same). Meant for the moment
+    `current` matched no window; the first client in the table that matches exactly one is suggested."""
+    for kind, profile in PROFILES.items():
+        if kind is not current and sum(profile.matches(w) for w in windows) == 1:
+            return kind
+    return None
+
+
 def select_game_window(windows: Sequence[WindowInfo], profile: ClientProfile, hwnd: int | None = None) -> WindowInfo:
     """The one window to capture. Explicit `hwnd` wins; otherwise exactly one profile match is required."""
     if hwnd is not None:
@@ -106,8 +116,15 @@ def select_game_window(windows: Sequence[WindowInfo], profile: ClientProfile, hw
     else:
         found = [w for w in windows if profile.matches(w)]
         if not found:
+            other = other_client(windows, profile.kind)
+            hint = (
+                f" A window that looks like the '{other.value}' client is open: change the setting client "
+                f"(Settings > Client, or: e7 config set client {other.value})."
+                if other is not None
+                else ""
+            )
             raise WindowError(
-                f"the game window was not found for client '{profile.kind.value}' ({profile.note}). Is the game "
+                f"the game window was not found for client '{profile.kind.value}' ({profile.note}).{hint} Is the game "
                 "running? See the open windows with: e7 capture --list-windows, then pick one with --hwnd"
             )
         if len(found) > 1:

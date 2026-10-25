@@ -36,7 +36,7 @@ from e7ac.ui import icon, prefs
 from e7ac.ui.context import AppContext
 from e7ac.ui.pages.base import Page, card, heading
 from e7ac.ui.theme import status_style
-from e7ac.ui.widgets import set_row
+from e7ac.ui.widgets import SteadyComboBox, SteadySpinBox, set_row
 
 _STATUS_KIND = {CheckStatus.OK: "ok", CheckStatus.WARN: "warn", CheckStatus.FAIL: "bad"}
 CHOICE_LABELS: Final[dict[str, dict[str, str]]] = {
@@ -138,7 +138,7 @@ class SettingsPage(Page):
         self._flag(grid, 0, "badge_overlay", "Badge over the game", "The small badge with what to do and the result.")
         self._choice(grid, 1, "badge_size", "Badge size", "Applies at once, also while the watch runs.")
         self._flag(grid, 2, "offline", "Offline", "Cached data only: nothing is downloaded while watching.")
-        spin = QSpinBox()
+        spin = SteadySpinBox()
         spin.setRange(COMPARE_RUNS_MIN, COMPARE_RUNS_MAX)
         spin.setSingleStep(500)
         spin.valueChanged.connect(lambda value: self._save("compare_runs", str(value)))
@@ -280,7 +280,7 @@ class SettingsPage(Page):
         grid.addWidget(note, row, 2)
 
     def _choice(self, grid: QGridLayout, row: int, key: str, label: str, hint: str) -> None:
-        box = QComboBox()
+        box = SteadyComboBox()
         labels = CHOICE_LABELS.get(key, {})
         for value in allowed_values(key) or []:
             box.addItem(labels.get(value, value), value)
