@@ -33,7 +33,6 @@ from e7ac.cli import roster as roster_cli
 from e7ac.cli.roster import _catalog_heroes, _engine, _fail, _resolve_hero_code
 from e7ac.domain.codes import HeroClass
 from e7ac.paths import AppPaths, default_paths
-from e7ac.predict.battle import confidence_interval
 from e7ac.roster.store import list_owned
 from e7ac.settings import SettingsError, load_settings
 from e7ac.sources.assets import fetch_class_sprite, fetch_hero_icons, load_class_sprite, load_hero_icons
@@ -778,7 +777,7 @@ def _predictor(c: _Context) -> compare.Predictor:
             raise compare.Unavailable(exc.reason) from exc
         except typer.Exit as exc:
             raise compare.Unavailable("see the log") from exc
-        return odds.win, confidence_interval(odds.win, odds.runs), odds.blind
+        return odds.win, odds.margin, odds.blind
 
     return predict
 
@@ -890,7 +889,8 @@ def _log_prediction(c: _Context, team: list[str], theirs: list[str], odds: Any) 
         profile = load_settings(c.paths.settings_file).opponent_profile.value
     except SettingsError:
         profile = "typical"
-    c.results.add(Prediction(datetime.now(UTC), tuple(team), tuple(theirs), odds.win, odds.loss, profile, odds.blind))
+    raw = odds.raw if odds.raw is not None else odds.win  # the simulation's own share: the one to calibrate
+    c.results.add(Prediction(datetime.now(UTC), tuple(team), tuple(theirs), raw, odds.loss, profile, odds.blind))
 
 
 def _outcome_step(frame: BgrImage, match: _Match, c: _Context) -> None:

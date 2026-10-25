@@ -96,6 +96,19 @@ class BattleOdds:
     this chance cannot be trusted (SPEC D87)."""
     heroes: tuple[HeroTotals, ...] = ()
     """Per hero, the average damage, healing and barriers of one battle (to compare with the Battle Results screen)."""
+    low: float | None = None
+    high: float | None = None
+    """The chance against the worst and the best of the opponent builds simulated (SPEC D94); None: one build only."""
+    raw: float | None = None
+    """The simulation's own share of wins, when `win` was corrected for what it does not know (`predict.doubt`)."""
+
+    @property
+    def margin(self) -> float:
+        """Half-width of the chance: the simulation's noise, or the spread over the opponent builds if that is wider."""
+        noise = confidence_interval(self.win, self.runs)
+        if self.low is None or self.high is None:
+            return noise
+        return max(noise, (self.high - self.low) / 2)
 
 
 def simulate(units: Sequence[Combatant], runs: int = RUNS, seed: int = SEED) -> BattleOdds:

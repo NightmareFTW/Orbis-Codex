@@ -17,8 +17,9 @@ from e7ac.domain.roster import HeroBuild
 from e7ac.domain.world import World
 from e7ac.opponents.assumed import Profile, assumed_build
 from e7ac.paths import default_paths
-from e7ac.predict.battle import RUNS, BattleOdds, Combatant, confidence_interval, simulate
+from e7ac.predict.battle import RUNS, BattleOdds, Combatant, simulate
 from e7ac.predict.damage import SkillPower, hits_to_defeat, skill_power, support_amounts
+from e7ac.predict.doubt import BUILDS, believed, mix
 from e7ac.predict.effects import Kit, Scaling
 from e7ac.predict.overrides import KitError, load_overrides
 from e7ac.predict.turn_order import START_CR_MAX, Unit, first_turns
@@ -41,8 +42,9 @@ _VS = typer.Option(help='Opponents, comma separated; add "=SPEED" when you know 
 _WORLD = typer.Option(help="Stove region for opponents (default: your setting).")
 _OFFLINE = typer.Option("--offline", help="Use cached Stove data only.")
 _PROFILE = typer.Option(
-    help="The build assumed for the opponents: typical / strong / top (Stove, each stat taken alone) or library "
-    "(the average of the Fribbels hero library, from epic7db). Default: your setting opponent_profile."
+    help="The build assumed for the opponents: mixed (typical, strong and top together, with a range), typical / "
+    "strong / top (Stove, each stat taken alone) or library (the average of the Fribbels hero library, from epic7db). "
+    "Default: your setting opponent_profile."
 )
 
 
@@ -64,6 +66,8 @@ class _Fighter:
     kit: Kit = field(default_factory=Kit)
     amounts: dict[int, dict[str, Scaling]] = field(default_factory=dict)
     """Per skill slot: heal / barrier scaling from Fribbels (SPEC D68)."""
+    variants: dict[Profile, dict[Stat, float]] = field(default_factory=dict)
+    """An opponent's stats under each build of `BUILDS`, when the profile is `mixed` (SPEC D94)."""
 
 
 @predict_app.command("order")
@@ -120,8 +124,9 @@ def win(
     profile: Annotated[OpponentProfile | None, _PROFILE] = None,
 ) -> None:
     """Chance to win, from many simulated battles: turn order (speed, start CR) and damage (S3 whenever its cooldown
-    allows, else S1; focus fire). Opponents use their typical Stove build and a speed drawn from Stove. A first
-    estimate: buffs, passives, heals, barriers, artifacts and combat set effects are not simulated yet."""
+    allows, else S1; focus fire). Opponents use the Stove builds of the profile and a speed drawn from Stove. The
+    chance shown is the simulation corrected for what it does not know (SPEC D94): never 100%. Not simulated yet:
+    artifacts, combat set effects and lifesteal."""
     win_odds(team, vs, world, offline, profile=profile)
 
 
@@ -153,7 +158,6 @@ def win_odds(
     missing = [f.label for f in fighters if not f.stats]
     if missing:
         _fail(f"no stats for {', '.join(missing)} (Stove has no data: only the speed was given)")
-    units = [Combatant(f.label, f.side, f.stats, f.speed, f.skills, f.cooldowns, f.kit, f.element) for f in fighters]
     if not quiet:
         for f in fighters:
             if f.kit.unmodelled:
@@ -161,14 +165,21 @@ def win_odds(
     unknown = [f.label for f in fighters if 3 not in f.cooldowns and 3 in f.skills]
     if unknown and not quiet:
         typer.echo(f"note: S3 cooldown unknown for {', '.join(unknown)}: S3 on the first action only", err=True)
-    odds = simulate(units, runs=runs)
+    odds = _simulate_builds(fighters, runs)
     if quiet:
         return odds
-    margin = confidence_interval(odds.win, odds.runs)
-    typer.echo(f"Win {odds.win:.1%} (+/-{margin:.1%})  loss {odds.loss:.1%}  draw {odds.draw:.1%}")
+    raw = odds.raw if odds.raw is not None else odds.win
+    spread = ""
+    if odds.low is not None and odds.high is not None:
+        spread = f", range {odds.low:.0%}-{odds.high:.0%} over the builds the opponents may have"
+    typer.echo(f"Win chance {odds.win:.0%} (+/-{odds.margin:.0%}{spread})")
+    typer.echo(
+        f"  the simulation said win {raw:.1%}  loss {odds.loss:.1%}  draw {odds.draw:.1%}; the chance reads that as "
+        "20 real fights (SPEC D94), because the simulation does not know the opponents' gear"
+    )
     typer.echo(
         f"  {odds.runs:,} simulated battles, {odds.mean_actions:.0f} actions on average; confidence: low "
-        "(skill effects read automatically; no counters, DoTs, artifacts or combat set effects yet)"
+        "(skill effects read automatically; no artifacts, combat set effects or lifesteal yet)"
     )
     typer.echo("  per hero, one average battle (the game's Battle Results): damage / Health restored / barrier granted")
     for h in odds.heroes:
@@ -183,6 +194,31 @@ def win_odds(
             err=True,
         )
     return odds
+
+
+def _simulate_builds(fighters: list[_Fighter], runs: int) -> BattleOdds:
+    """The battle simulated against each build of the opponents (when they have several, the runs shared out by their
+    weights), mixed into one chance with a range, then corrected by `believed` (SPEC D94)."""
+    builds: list[tuple[Profile | None, float]] = [(None, 1.0)]
+    if any(f.variants for f in fighters):
+        builds = [(profile, weight) for profile, weight in BUILDS]
+    parts = []
+    for profile, weight in builds:
+        units = [
+            Combatant(
+                f.label,
+                f.side,
+                f.variants.get(profile, f.stats) if profile is not None else f.stats,
+                f.speed,
+                f.skills,
+                f.cooldowns,
+                f.kit,
+                f.element,
+            )
+            for f in fighters
+        ]
+        parts.append((weight, simulate(units, runs=max(1, round(runs * weight)))))
+    return believed(mix(parts))
 
 
 def _table(title: str, attackers: list[_Fighter], defenders: list[_Fighter]) -> None:
@@ -286,6 +322,10 @@ def _fighters(
                 continue
             typical = assumed_build(usage, _PROFILES.get(chosen, Profile.TYPICAL), http.now())
             fighter.stats = {stat: s.value for stat, s in typical.stats.items()}
+            if chosen is OpponentProfile.MIXED:
+                for stove, _ in BUILDS:
+                    sample = assumed_build(usage, stove, http.now())
+                    fighter.variants[stove] = {stat: s.value for stat, s in sample.stats.items()}
             if fighter.speed is not None:
                 fighter.speed = _given_speed(fighter)
                 continue

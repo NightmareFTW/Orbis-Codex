@@ -60,9 +60,11 @@ class BadgeSize(StrEnum):
 
 class OpponentProfile(StrEnum):
     """Which stats an Arena opponent is assumed to have: Stove's median, strong (P75) or top (P90) of each stat taken
-    alone (a population that also holds PvE builds), or `library`: the average of the builds submitted to the Fribbels
-    hero library (optimizer users, shown on each epic7db hero page; SPEC D92)."""
+    alone (a population that also holds PvE builds), `library`: the average of the builds submitted to the Fribbels
+    hero library (optimizer users, shown on each epic7db hero page; SPEC D92), or `mixed`: the three Stove builds
+    together, weighted, which gives the chance a range (SPEC D94)."""
 
+    MIXED = "mixed"
     TYPICAL = "typical"
     STRONG = "strong"
     TOP = "top"
@@ -94,7 +96,7 @@ class Settings(BaseModel):
     """The Arena watch uses cached data only (no downloads)."""
     compare_runs: int = Field(default=COMPARE_RUNS_DEFAULT, ge=COMPARE_RUNS_MIN, le=COMPARE_RUNS_MAX)
     """Simulated battles per opponent when the Arena compares the three opponents of the list (SPEC D85)."""
-    opponent_profile: OpponentProfile = OpponentProfile.TYPICAL
+    opponent_profile: OpponentProfile = OpponentProfile.MIXED
     """The build assumed for an Arena opponent (the game never shows it): see `OpponentProfile`."""
 
     @field_validator("schema_version")

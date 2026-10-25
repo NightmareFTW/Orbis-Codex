@@ -155,7 +155,8 @@ class SettingsPage(Page):
             4,
             "opponent_profile",
             "Opponent build",
-            "The game never shows an opponent's gear: Stove's typical, strong or top, or the Fribbels library average.",
+            "The game never shows an opponent's gear: mixed (the three Stove builds, with a range), one of them, or "
+            "the Fribbels library average.",
         )
         if sys.platform != "win32":
             self._editors["badge_overlay"].setEnabled(False)

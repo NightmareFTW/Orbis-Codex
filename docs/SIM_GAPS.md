@@ -47,9 +47,9 @@ are not in the simulation at all (NV-07, NV-17).
 
 **The game never shows an opponent's equipment** (the user, 2026-10-18), so the build cannot be read from the screen:
 the idea is closed. What is left is results (section 3) to choose between the profiles. Since SPEC D92 there are
-four: Stove typical / strong / top and **library** (the Fribbels hero library average of each hero, from epic7db's page:
+five: **mixed** (since SPEC D94 the default: the three Stove builds together, so the chance has a range), Stove typical / strong / top and **library** (the Fribbels hero library average of each hero, from epic7db's page:
 final stats with the sets already in them, speed included; `e7 predict win --profile library`, or the setting
-`opponent_profile`). On the lost fight the chance goes 99.4% (typical) -> 96.0% (library): still a win.
+`opponent_profile`). On the lost fight the chance goes 99.4% (typical) -> 96.0% (library): still a win. Since SPEC D94 the chance shown is also read with doubt (a sure win is 95.5%, never 100%): on the lost fight it is 92% (range 82-95%). That hides nothing: the simulation still calls it a win, and what it is missing has to be found by comparing it with real fights (section 3).
 
 ## 3. The real result of each fight
 
