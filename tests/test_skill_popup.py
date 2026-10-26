@@ -440,6 +440,25 @@ def test_any_short_last_line_of_a_panel_is_kept_but_stray_marks_are_not() -> Non
     assert panel([("30%.", 1000), ("5", 1040)]) == "Increases Attack and Defense by 30%. 5"  # a chain of short lines
 
 
+def test_an_icon_glyph_read_beside_a_panel_title_is_not_taken_for_the_last_line_of_the_panel_above() -> None:
+    """The icon of "XV Bomb" is read as "XV" (two letters, on the title's row): taken for a short last line it glued
+    the Bomb panel to Energy Depletion's (the user's third export, SPEC D106)."""
+    rows = [
+        *synthetic(),
+        line("Energy Depletion", 1262, 900, 360, 54),
+        line("Decreases Attack and Speed by", 1180, 960, 560),
+        line("50%.", 1180, 1000, 90),
+        line("XV", 1180, 1044, 50),
+        line("Bomb", 1262, 1044, 150, 54),
+        line("At the end of the duration, suffers damage.", 1180, 1104, 640),
+    ]
+    popup = parse_skill_popup(rows)
+    assert popup is not None
+    by_title = {e.title: e.text for e in popup.effects}
+    assert by_title["Energy Depletion"] == "Decreases Attack and Speed by 50%."
+    assert by_title["Bomb"] == "At the end of the duration, suffers damage."
+
+
 def test_the_journals_buttons_are_not_part_of_the_last_panel() -> None:
     rows = [*synthetic(), line("Preview Skills", 1180, 700, 200, 40)]
     popup = parse_skill_popup(rows)

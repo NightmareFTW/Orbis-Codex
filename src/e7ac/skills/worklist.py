@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
-from e7ac.skills.problems import Problem, hero_problems
+from e7ac.skills.problems import Problem, effect_titles, hero_problems
 from e7ac.skills.store import SkillStore, StoredSkill
 
 SKILLS_PER_HERO = 3
@@ -87,10 +87,11 @@ def worklist(
             placed.add(code)
     order += [(code, "") for code in sorted(heroes, key=lambda c: heroes[c].lower()) if code not in placed]
     rows = []
+    titles = effect_titles(store)
     for code, why in order:
         skills = store.load(code)
         marks, read = slot_marks(skills)
-        rows.append(SkillRow(code, heroes[code], why, read, marks, hero_problems(skills)))
+        rows.append(SkillRow(code, heroes[code], why, read, marks, hero_problems(skills, titles)))
     return rows
 
 

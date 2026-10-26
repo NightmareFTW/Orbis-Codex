@@ -437,15 +437,30 @@ def _panels(
     anchor = max(lefts, key=lambda x: sum(abs(y - x) <= 15 for y in lefts))  # the left edge most lines share
     column = [r for r in (*side, *tails) if anchor - 15 <= r[0].box.x0 <= anchor + 3.2 * height]
     loose = {id(r) for r in tails}
+    titled = {  # a line with an icon glyph read at its left on the same row is a panel's title ("XV" + "Bomb")
+        id(r) for r in column if any(_same_row(r[0], t[0]) and t[0].box.x1 <= r[0].box.x0 + 8 for t in tails)
+    }
     kept = sorted((r for r in column if r[0].box.y0 >= title.box.y0 - 30), key=lambda r: r[0].box.y0)
     groups: list[list[tuple[TextLine, str]]] = []
     for row in kept:
-        follows = bool(groups) and row[0].box.y0 - groups[-1][-1][0].box.y1 <= 0.8 * height
+        follows = bool(groups) and row[0].box.y0 - groups[-1][-1][0].box.y1 <= 0.8 * height and id(row) not in titled
+        if id(row) in loose and not (
+            follows
+            and abs(row[0].box.x0 - groups[-1][-1][0].box.x0) <= height  # a wrapped line starts where the one above did
+            and not any(_same_row(row[0], other[0]) for other in column if other is not row)  # an icon is not a tail
+        ):
+            continue
         if follows:
             groups[-1].append(row)
-        elif id(row) not in loose:
+        else:
             groups.append([row])
     return tuple(_panel(g) for g in _flag_bodies(groups, height) if len(g) >= 2)
+
+
+def _same_row(a: TextLine, b: TextLine) -> bool:
+    """Whether two lines share a row (they overlap in height by more than half of the shorter one)."""
+    overlap = min(a.box.y1, b.box.y1) - max(a.box.y0, b.box.y0)
+    return overlap > 0.5 * min(a.box.height, b.box.height)
 
 
 def _flag_bodies(groups: list[list[tuple[TextLine, str]]], height: float) -> list[list[tuple[TextLine, str]]]:

@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (
 from e7ac.arena.met import met_heroes
 from e7ac.cli.skills import describe
 from e7ac.skills.export import export_text
-from e7ac.skills.problems import clear_problems
+from e7ac.skills.problems import clear_problems, effect_titles
 from e7ac.skills.store import SkillStore, skills_dir
 from e7ac.skills.summary import hero_summary
 from e7ac.skills.worklist import SkillRow, progress, worklist
@@ -262,7 +262,7 @@ class SkillsPage(Page):
             self._detail.clear()
             return
         name = next((r.name for r in self._rows if r.code == code), code)
-        self._detail.setPlainText(hero_summary(name, code, self._store.load(code)))
+        self._detail.setPlainText(hero_summary(name, code, self._store.load(code), effect_titles(self._store)))
 
     def show_hero(self, code: str) -> None:
         """Select a hero's row (the one just read) and show it, scrolled into view."""

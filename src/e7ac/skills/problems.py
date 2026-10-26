@@ -11,7 +11,8 @@ store."""
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+import re
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from typing import Final
 
@@ -39,22 +40,40 @@ class Problem:
         return f"{self.skill}: {self.detail}"
 
 
-def skill_problems(skill: StoredSkill) -> list[Problem]:
-    """The problems of one stored skill (a junk reading is only that: the rest of it means nothing)."""
+def holds_title(text: str, titles: Collection[str]) -> str | None:
+    """The effect title that starts a sentence inside the text ("... by 50%. XV Bomb At the end ..."): two panels read
+    as one (the title is followed by a capital, so "Bomb damage is ..." is not it)."""
+    for title in titles:
+        if title and re.search(rf"[.!%]\s+(?:[A-Za-z]{{1,3}}\s+)?{re.escape(title)}\s+[A-Z]", text):
+            return title
+    return None
+
+
+def skill_problems(skill: StoredSkill, titles: Collection[str] = ()) -> list[Problem]:
+    """The problems of one stored skill (a junk reading is only that: the rest of it means nothing). `titles`: the
+    effects known, to find a panel that swallowed the next one."""
     if (why := why_junk(skill)) is not None:
         return [Problem(skill.hero, skill.name, "junk", why)]
     found = [Problem(skill.hero, skill.name, "cut", f"{part} looks cut") for part in cut_parts(skill)]
+    for panel in skill.effects:
+        if (other := holds_title(panel.text, titles)) is not None:
+            found.append(Problem(skill.hero, skill.name, "cut", f"effect {panel.title} also holds the text of {other}"))
     if skill.slot not in (1, 2, 3):
         found.append(Problem(skill.hero, skill.name, "unplaced", "its place among the hero's skills is not known"))
     return found
 
 
-def hero_problems(skills: Sequence[StoredSkill]) -> tuple[Problem, ...]:
-    return tuple(p for skill in skills for p in skill_problems(skill))
+def hero_problems(skills: Sequence[StoredSkill], titles: Collection[str] = ()) -> tuple[Problem, ...]:
+    return tuple(p for skill in skills for p in skill_problems(skill, titles))
+
+
+def effect_titles(store: SkillStore) -> list[str]:
+    return [str(entry.get("title", key)) for key, entry in store.effects().items()]
 
 
 def find_problems(store: SkillStore) -> list[Problem]:
-    return [p for code in store.heroes() for p in hero_problems(store.load(code))]
+    titles = effect_titles(store)
+    return [p for code in store.heroes() for p in hero_problems(store.load(code), titles)]
 
 
 def clear_problems(store: SkillStore) -> list[Problem]:

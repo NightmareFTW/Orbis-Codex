@@ -658,3 +658,13 @@ def test_every_kind_of_problem_is_found_and_the_ones_that_can_be_read_again_are_
     assert [s.name for s in store.load("c1001")] == ["Whole"] and [s.name for s in store.load("c1002")] == ["Loose"]
     assert "vigor" not in store.effects()  # the effect only the dropped skill had shown goes with it
     assert clear_problems(store) == []
+
+
+def test_a_panel_that_swallowed_the_next_one_is_a_problem() -> None:
+    from e7ac.skills.problems import holds_title
+
+    glued = "Decreases Attack and Speed by 50%. XV Bomb At the end of the duration, suffers damage."
+    assert holds_title(glued, ["Bomb", "Bleed"]) == "Bomb"
+    assert holds_title("Decreases Attack and Speed by 50%.", ["Bomb"]) is None
+    assert holds_title("Bomb damage is unaffected by the number of turns.", ["Bomb"]) is None  # not a title: "damage"
+    assert holds_title("Poison, Bleed, Burn, Venom, and Erosion damages are proportional.", ["Bleed"]) is None
