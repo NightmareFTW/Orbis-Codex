@@ -27,9 +27,13 @@ from e7ac.cli.roster import _catalog_heroes, _engine, _fail
 from e7ac.paths import AppPaths, default_paths
 from e7ac.roster.screen_import import resolve_hero_code
 from e7ac.settings import SettingsError, load_settings
+from e7ac.skills.clean import clean as clean_store
+from e7ac.skills.clean import find as find_junk
 from e7ac.skills.export import export_text
 from e7ac.skills.hero import HeroMemory, decide
+from e7ac.skills.importer import import_export
 from e7ac.skills.merge import assign, place
+from e7ac.skills.own_ui import shows_window, without_badge
 from e7ac.skills.store import SkillStore, skills_dir
 from e7ac.skills.worklist import progress, worklist
 from e7ac.sources.epic7db import SkillInfo, fetch_kit, fetch_tier_order, slug
@@ -210,6 +214,37 @@ def forget(
     typer.echo(f"Forgot {removed} skill(s): {what}{heroes[code].name or code}.")
 
 
+@skills_app.command("import")
+def import_command(
+    file: Annotated[Path, typer.Argument(help="A skills export (the file `e7 skills export` writes).")],
+) -> None:
+    """Put the skills of an export into this PC's store (the readings that are not skills are left out), so skills read
+    on another PC feed the kits here."""
+    try:
+        text = file.read_text(encoding="utf-8")
+    except OSError as exc:
+        _fail(f"cannot read {file}: {exc}")
+    done = import_export(SkillStore(skills_dir(default_paths().home)), text, make_kit_of(default_paths()))
+    for item in done.left_out:
+        typer.echo(f"  left out (not a skill): {item}")
+    typer.echo(f"{done.skills} skill(s) of {done.heroes} hero(es) imported from {file.name}.")
+
+
+@skills_app.command("clean")
+def clean_command(
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Only list what would go.")] = False,
+) -> None:
+    """Drop the readings that are not skills (the text of the Orbis window or badge taken for a popup, an enhancement
+    step taken for a title): what an earlier version stored. Hold again what it takes away, if it was a real skill."""
+    store = SkillStore(skills_dir(default_paths().home))
+    heroes = _heroes()
+    found = find_junk(store) if dry_run else clean_store(store)
+    for item in found:
+        typer.echo(f"  {heroes[item.code].name if item.code in heroes else item.code}: {item.name!r}: {item.why}")
+    verb = "would go" if dry_run else "dropped"
+    typer.echo(f"{len(found)} reading(s) {verb}." if found else "Nothing to clean.")
+
+
 @skills_app.command("show")
 def show(hero: Annotated[str, typer.Argument(help='Exact name or code, e.g. "Lady of the Scales".')]) -> None:
     """The skills read for a hero, as the game worded them."""
@@ -301,6 +336,11 @@ def run_skill_watch(options: SkillWatchOptions, badge: WatchSignal, stop: thread
     def work() -> None:
         while (image := pending.get()) is not None:
             lines = reader.read(image)
+            if shows_window(lines):  # the Orbis window is on top of the game: its text is not the game's
+                counts["ignored"] += 1
+                badge.say("Skills: the Orbis window is over the game", "move it beside the game", AMBER)
+                continue
+            lines = without_badge(lines)  # nor is the badge's own text
             popup = parse_skill_popup(lines)
             if popup is None and (known := memory.recall(clock())) is not None and heroes[known].name:
                 titles = [n for info in kit_of(heroes[known].name).values() for n in info.names]

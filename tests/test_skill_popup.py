@@ -400,3 +400,25 @@ def test_a_step_that_begins_with_a_plus_is_not_taken_for_the_title() -> None:
     assert [level for level, _ in popup.enhance] == [1, 2, 3, 4, 5]
     assert popup.enhance[0][1] == "+3 Fighting Spirit at the start of the first battle" and popup.enhance[4][0] == 5
     assert [e.title for e in popup.effects] == ["Increase Defense", "Immunity"]
+
+
+def test_the_last_wrapped_line_of_a_panel_keeps_its_number() -> None:
+    """ "Decreases Evasion by" lost its "50%." (Target, Vigor, Energy Depletion in the user's export): a line of two
+    characters was taken for noise."""
+    rows = [
+        *synthetic(),
+        line("Target", 1262, 900, 200, 54),
+        line("Increases damage suffered by 15% and", 1180, 960, 560),
+        line("decreases Evasion by", 1180, 1000, 420),
+        line("50%.", 1180, 1040, 90),
+    ]
+    popup = parse_skill_popup(rows)
+    assert popup is not None
+    target = next(e for e in popup.effects if e.title == "Target")
+    assert target.text == "Increases damage suffered by 15% and decreases Evasion by 50%."
+
+
+def test_the_journals_buttons_are_not_part_of_the_last_panel() -> None:
+    rows = [*synthetic(), line("Preview Skills", 1180, 700, 200, 40)]
+    popup = parse_skill_popup(rows)
+    assert popup is not None and all("Preview" not in e.text for e in popup.effects)

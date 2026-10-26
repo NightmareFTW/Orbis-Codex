@@ -251,3 +251,51 @@ def test_the_watch_reads_a_passive_with_no_enhance_section_by_the_names_of_the_h
     stored = SkillStore(isolated_home.home / "skills").load("c2011")
     assert [(s.name, s.slot, s.passive) for s in stored] == [("The Law of Skuggiheim", 2, True)]
     assert stored[0].text.startswith("At the start of battle, Speed of the caster is fixed")
+
+
+# ------------------------------------------------------------------------------------ the program's own window
+
+
+def test_the_orbis_window_and_the_badge_are_not_the_game() -> None:
+    from e7ac.skills.own_ui import shows_window, without_badge
+
+    window = [line("ORBIS CODEX", 20, 20), line("Spirit Eye Celine", 20, 900), line("Hero of the day", 20, 940)]
+    assert shows_window(window) and not shows_window(hero_screen())
+    badge = [
+        line("Read: Notos", 700, 10, 300, 36),
+        line("God's Might +0", 700, 52, 300, 30),  # the badge's second line, right under the first
+        line("Divinity Release", 455, 105, 330, 60),  # the game's own text, further down
+    ]
+    kept = [t.text for t in without_badge(badge)]
+    assert kept == ["Divinity Release"]
+    assert [t.text for t in without_badge(hero_screen())] == [t.text for t in hero_screen()]  # nothing to take out
+
+
+def test_the_watch_reads_nothing_from_a_picture_that_shows_the_orbis_window_or_its_badge(
+    monkeypatch: pytest.MonkeyPatch, synthetic_catalog: list[str], isolated_home: AppPaths
+) -> None:
+    """The user's export held "S3 Sword of Requiem |" with the text "Spirit Eye Celine Hero of the day" (the detail
+    panel of the Orbis window over the game) and "God's Might" with "Read: Notos -" (the badge): not the game's."""
+    from e7ac.cli import arena as arena_cli
+    from e7ac.cli import skills as skills_cli
+    from e7ac.vision.window import Rect
+
+    frames = [np.full((36, 64, 3), shade, np.uint8) for shade in (40, 200)]
+    sequence = [f for f in frames for _ in range(6)]
+    monkeypatch.setattr(
+        arena_cli, "game_frames", lambda client, hwnd: iter([(f, Rect(0, 0, 64, 36)) for f in sequence])
+    )
+    ticks = iter(x * 0.5 for x in range(1000))
+    monkeypatch.setattr(skills_cli, "clock", lambda: next(ticks))
+    over_the_game = [
+        line("S3  Sword of Requiem |", 455, 105, 330, 60),
+        line("Spirit Eye Celine Hero of the day", 455, 200, 400, 40),
+        line("ORBIS CODEX", 20, 20, 300, 40),
+        *named("Karin")[3:],
+    ]
+    monkeypatch.setattr(roster_cli, "reader_factory", lambda: Script([hero_screen("Karin"), over_the_game]))
+    events: list[skills_cli.ReadEvent] = []
+    badge = Badge()
+    skills_cli.run_skill_watch(skills_cli.SkillWatchOptions(on_read=events.append), badge, threading.Event())
+    assert events == [] and SkillStore(isolated_home.home / "skills").heroes() == []
+    assert ("Skills: the Orbis window is over the game", "move it beside the game") in badge.said

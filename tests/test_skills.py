@@ -398,3 +398,112 @@ def test_skills_forget_drops_a_hero_reading_from_the_command_line(
     assert gone.exit_code == 0 and "Forgot 1 skill(s): Blood Blade Karin." in gone.output
     assert store.heroes() == [] and store.effects() == {}
     assert runner.invoke(app, ["skills", "forget", "Nobody Atall"]).exit_code != 0
+
+
+def test_readings_that_are_not_skills_are_told_from_real_ones_and_cleaned(tmp_path: Path) -> None:
+    from e7ac.skills.clean import clean, find, why_junk
+
+    store = SkillStore(tmp_path)
+    real = "Attacks the enemy with a sheath, and grants stealth to the caster for 1 turn."
+    store.save("c1001", popup(name="Mighty Strike", text=real), NOW, slot=1)
+    store.save("c1001", popup(name="S3 Sword of Requiem |", text="Spirit Eye Celine Hero of the day", enhance=()), NOW)
+    store.save("c1001", popup(name="God's Might", text="Read: Notos -", enhance=(), effects=()), NOW)
+    store.save("c1001", popup(name="+3 Fighting Spirit at the start of the first battle", text="Preview Stats"), NOW)
+    store.save("c1001", popup(name="Sixth Sense", text="Short.", enhance=(), effects=()), NOW)
+    store.save(
+        "c1001",
+        popup(name="Pursuit of Death", text="Rhianna and Luciella never lose a target once they've marked them."),
+        NOW,
+    )
+    assert [j.name for j in find(store)] == [
+        "S3 Sword of Requiem |",
+        "God's Might",
+        "+3 Fighting Spirit at the start of the first battle",
+        "Sixth Sense",
+    ]
+    assert why_junk(store.load("c1001")[0]) is None
+    assert "Orbis window" in (why_junk(store.load("c1001")[1]) or "")
+    assert len(clean(store)) == 4
+    assert [s.name for s in store.load("c1001")] == ["Mighty Strike", "Pursuit of Death"]
+    assert find(store) == []
+
+
+def test_skills_clean_lists_then_drops_them_from_the_command_line(
+    reading: Path, synthetic_catalog: list[str], isolated_home: AppPaths
+) -> None:
+    runner.invoke(app, ["skills", "read", str(reading)])
+    store = SkillStore(isolated_home.home / "skills")
+    store.save("c2011", popup(name="S2  Something |", text="ORBIS CODEX", enhance=(), effects=()), NOW)
+    assert len(store.load("c2011")) == 2
+    shown = runner.invoke(app, ["skills", "clean", "--dry-run"])
+    assert shown.exit_code == 0 and "1 reading(s) would go." in shown.output and len(store.load("c2011")) == 2
+    done = runner.invoke(app, ["skills", "clean"])
+    assert done.exit_code == 0 and "1 reading(s) dropped." in done.output and len(store.load("c2011")) == 1
+    assert "Nothing to clean." in runner.invoke(app, ["skills", "clean"]).output
+
+
+def test_an_export_is_read_back_into_a_store_and_the_junk_in_it_is_left_out(tmp_path: Path) -> None:
+    from e7ac.skills.importer import import_export, parse
+
+    source = SkillStore(tmp_path / "source")
+    real = "Attacks the enemy with a sheath, and grants stealth to the caster for 1 turn."
+    source.save("c1001", popup(name="Mighty Strike", text=real), NOW)
+    source.save("c1001", popup(name="Sixth Sense", level=None, text=real + " Passive.", enhance=(), effects=()), NOW)
+    source.save("c1001", popup(name="S3 Sword of Requiem |", text="ORBIS CODEX", enhance=(), effects=()), NOW)
+    note = SkillPopup(
+        "Hero", "Blink", 3, (), None, "Blink 2 turns", "Moves, and grants +3 Speed.", "", None, (), (), 0.9
+    )
+    source.save("c1002", note, NOW)
+    steps = ((1, "+5% damage"),)
+    burn = SkillPopup(
+        "Hero", "Burst", 2, (("Soul", 1),), 3, "", "Attacks all enemies.", "Hits harder.", 25, steps, (), 0.9
+    )
+    source.save("c1002", burn, NOW)
+    text = export_text(source, {"c1001": "Alpha", "c1002": "Beta"}, now=NOW)
+
+    heroes = parse(text)
+    assert [(k, [p.name for p in v]) for k, v in heroes.items()] == [
+        (("Alpha", "c1001"), ["Mighty Strike", "Sixth Sense", "S3 Sword of Requiem |"]),
+        (("Beta", "c1002"), ["Blink", "Burst"]),
+    ]
+    mine = SkillStore(tmp_path / "mine")
+    done = import_export(mine, text, lambda _name: {1: SkillInfo(1, 0, {}, "", "Mighty Strike")})
+    assert (done.heroes, done.skills) == (2, 4) and done.left_out == ["Alpha: S3 Sword of Requiem |"]
+    alpha = {s.name: s for s in mine.load("c1001")}
+    assert alpha["Mighty Strike"].slot == 1 and alpha["Mighty Strike"].level == 6
+    assert alpha["Mighty Strike"].enhance == source.load("c1001")[0].enhance
+    assert [e.title for e in alpha["Mighty Strike"].effects] == ["Decrease Defense"]
+    assert alpha["Sixth Sense"].level is None and alpha["Sixth Sense"].slot is None  # +0: numbers as shown, not placed
+    beta = {s.name: s for s in mine.load("c1002")}
+    assert beta["Blink"].cooldown is None and beta["Blink"].cooldown_note == "Blink 2 turns"
+    assert beta["Burst"].cooldown == 3 and beta["Burst"].gains == (("Soul", 1),)
+    assert beta["Burst"].soulburn == "Hits harder." and beta["Burst"].soulburn_cost == 25
+    again = export_text(mine, {"c1001": "Alpha", "c1002": "Beta"}, now=NOW)
+    assert again.split("== Beta")[1] == text.split("== Beta")[1]  # the heroes without junk come back word for word
+
+
+def test_an_enhancement_step_that_starts_with_a_plus_is_not_cut_in_two() -> None:
+    from e7ac.skills.importer import STEP
+
+    line = "+1 +5% damage dealt; +2 +3 Fighting Spirit at the start of the battle; +3 Recovers 10% Health"
+    assert STEP.findall(line) == [
+        ("1", "+5% damage dealt"),
+        ("2", "+3 Fighting Spirit at the start of the battle"),
+        ("3", "Recovers 10% Health"),
+    ]
+
+
+def test_skills_import_loads_an_export_from_the_command_line(
+    tmp_path: Path, isolated_home: AppPaths, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from e7ac.cli import skills as skills_cli
+
+    source = SkillStore(tmp_path / "source")
+    source.save("c2011", popup(name="Mighty Strike"), NOW)
+    file = tmp_path / "export.txt"
+    file.write_text(export_text(source, {"c2011": "Celine"}, now=NOW), encoding="utf-8")
+    monkeypatch.setattr(skills_cli, "make_kit_of", lambda _paths: lambda _name: {})
+    done = runner.invoke(app, ["skills", "import", str(file)])
+    assert done.exit_code == 0 and "1 skill(s) of 1 hero(es) imported from export.txt." in done.output
+    assert [s.name for s in SkillStore(isolated_home.home / "skills").load("c2011")] == ["Mighty Strike"]
+    assert runner.invoke(app, ["skills", "import", str(tmp_path / "missing.txt")]).exit_code != 0

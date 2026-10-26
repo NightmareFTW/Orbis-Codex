@@ -51,9 +51,13 @@ UI_LABELS: Final = frozenset(
         "awaken",
         "cancel",
         "hero transmission",
+        "preview skills",
+        "preview stats",
+        "relationships",
+        "hero rating",
     }
 )
-"""Text of the Hero Info screen around the popup (its tabs and buttons), never part of it."""
+"""Text of the Hero Info screen (and the Journal's) around the popup: its tabs and buttons, never part of it."""
 TEXT_STEP: Final = re.compile(r"^[+-]\s*\d+(?:\.\d+)?\s*(?:%|turns?)", re.IGNORECASE)
 CONTINUES: Final = frozenset({"prevent", "prevents", "of", "the", "to", "which", "and", "for", "with", "by", "in"})
 """A panel title ending in one of these goes on in the next line."""
@@ -142,7 +146,7 @@ def parse_skill_popup(lines: Sequence[TextLine], titles: Sequence[str] = ()) -> 
     if enhance_row is None and burn_row is None:  # nothing marks where the text ends: the paragraph does
         main = _paragraph(main)
     reach = right_edge + PANEL_REACH * (right_edge - left)
-    side = [r for r in corner if right_edge - 10 <= r[0].box.x0 <= reach and len(re.sub(r"\W", "", r[1])) > 2]
+    side = [r for r in corner if right_edge - 10 <= r[0].box.x0 <= reach and _text_like(r[1])]
     first_desc = next((r for r in main if abs(r[0].box.x0 - left) <= max(12.0, tolerance) and not _cost(r[1])), None)
     cost_rows = [r for r in main if first_desc is None or r[0].box.y0 < first_desc[0].box.y0]
     gains = tuple((kind.title(), int(n)) for r in cost_rows for n, kind in ACQUIRE.findall(r[1]))
@@ -269,6 +273,12 @@ def _title_above_description(rows: Sequence[tuple[TextLine, str]]) -> tuple[None
         and sum(c.isalpha() for c in r[1]) >= 3
     ]
     return (None, min(above, key=lambda r: r[0].box.y0)[0]) if above else None
+
+
+def _text_like(text: str) -> bool:
+    """A line that can be part of a panel: more than two letters or digits, or a short one that carries a number, as the
+    last wrapped line of a description does ("50%.": "decreases Evasion by" lost its number without this)."""
+    return len(re.sub(r"\W", "", text)) > 2 or ("%" in text and any(c.isdigit() for c in text))
 
 
 def _title_named(rows: Sequence[tuple[TextLine, str]], titles: Sequence[str]) -> tuple[None, TextLine] | None:
