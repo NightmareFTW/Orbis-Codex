@@ -58,6 +58,11 @@ TEXT_STEP: Final = re.compile(r"^[+-]\s*\d+(?:\.\d+)?\s*(?:%|turns?)", re.IGNORE
 CONTINUES: Final = frozenset({"prevent", "prevents", "of", "the", "to", "which", "and", "for", "with", "by", "in"})
 """A panel title ending in one of these goes on in the next line."""
 FLAGS: Final = re.compile(r"\(([^)]*)\)\s*$")
+LABELS: Final = frozenset({"specialty"})
+"""A small label under a title that says the panel is not a skill's popup."""
+PANEL_REACH: Final = 0.5
+"""Effect panels start within this share of the popup's width right of it; text further right (the Journal's
+Background column) is the screen's own."""
 MIN_LINES: Final = 6
 """Fewer lines than this is not a skill popup."""
 
@@ -132,7 +137,8 @@ def parse_skill_popup(lines: Sequence[TextLine], titles: Sequence[str] = ()) -> 
     main = [r for r in below if r[0].box.x0 >= left - 12 and r[0].box.x0 < right_edge - 10]
     if enhance_row is None and burn_row is None:  # nothing marks where the text ends: the paragraph does
         main = _paragraph(main)
-    side = [r for r in corner if r[0].box.x0 >= right_edge - 10 and len(re.sub(r"\W", "", r[1])) > 2]
+    reach = right_edge + PANEL_REACH * (right_edge - left)
+    side = [r for r in corner if right_edge - 10 <= r[0].box.x0 <= reach and len(re.sub(r"\W", "", r[1])) > 2]
     first_desc = next((r for r in main if abs(r[0].box.x0 - left) <= max(12.0, tolerance) and not _cost(r[1])), None)
     cost_rows = [r for r in main if first_desc is None or r[0].box.y0 < first_desc[0].box.y0]
     gains = tuple((kind.title(), int(n)) for r in cost_rows for n, kind in ACQUIRE.findall(r[1]))
@@ -269,7 +275,7 @@ def _title_named(rows: Sequence[tuple[TextLine, str]], titles: Sequence[str]) ->
         return None
     names = {name: name for name in titles if name}
     for line, text in rows:
-        if line.box.height < 20 or match_label(text, names) is None:
+        if line.box.height < 20 or match_label(text, names) is None or _labelled(line, rows):
             continue
         under = [
             r
@@ -279,6 +285,15 @@ def _title_named(rows: Sequence[tuple[TextLine, str]], titles: Sequence[str]) ->
         if len(under) >= 2:
             return None, line
     return None
+
+
+def _labelled(title: TextLine, rows: Sequence[tuple[TextLine, str]]) -> bool:
+    """Whether the line has a label right under it ("Specialty": the Journal's panel of a hero's specialty is named like
+    its skill and has the same shape as a popup, a title with a paragraph, but it is not one)."""
+    return any(
+        text.lower() in LABELS and abs(line.box.x0 - title.box.x0) <= 40 and 0 <= line.box.y0 - title.box.y1 <= 60
+        for line, text in rows
+    )
 
 
 def _paragraph(rows: Sequence[tuple[TextLine, str]]) -> list[tuple[TextLine, str]]:

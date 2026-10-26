@@ -71,6 +71,12 @@ class SkillInfo:
     off); `max_cooldown` is then this."""
 
     @property
+    def names(self) -> tuple[str, ...]:
+        """The names of the skill: a skill that changes form is shown as "Half Moon Slash / Waning Moon Slash", and
+        each form has its own popup in the game."""
+        return tuple(part.strip() for part in self.name.split("/") if part.strip())
+
+    @property
     def max_cooldown(self) -> int | None:
         """The cooldown with every enhancement step that shortens it ("-1 turn cooldown") applied: what a fully enhanced
         skill has, e.g. the 5 turns shown for Lady of the Scales S3 are 4 in the game at +5 (NV-41)."""

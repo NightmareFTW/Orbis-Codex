@@ -357,3 +357,44 @@ def test_the_watch_reads_a_popup_once_the_screen_has_settled(
     assert [e.new for e in events] == [True, False]  # the same skill held again: read, not new
     assert ("Read: Blood Blade Karin", "The Caress of Mercy +5") in badge.said
     assert SkillStore(isolated_home.home / "skills").heroes() == ["c2011"]
+
+
+def test_a_skill_that_changes_form_is_found_by_either_of_its_names() -> None:
+    from e7ac.skills.merge import place
+
+    kit = {
+        1: SkillInfo(1, 0, {}, "", "Half Moon Slash / Waning Moon Slash"),
+        2: SkillInfo(2, 3, {}, "", "Hunter's Mark / Blade of Pursuit"),
+        3: SkillInfo(3, 5, {}, "", "Pursuit of Death"),
+    }
+    assert kit[1].names == ("Half Moon Slash", "Waning Moon Slash") and kit[3].names == ("Pursuit of Death",)
+    assert slot_of("Waning Moon Slash", kit) == 1 and slot_of("Half Moon Slash", kit) == 1
+    assert slot_of("Blade of Pursuit", kit) == 2 and slot_of("Pursuit of Death", kit) == 3
+    assert place("Hunter's Mark", kit) == (2, False) and place("Half Moon Slash", kit) == (1, False)
+
+
+def test_a_wrong_reading_can_be_forgotten_with_the_effects_only_it_had_shown(tmp_path: Path) -> None:
+    store = SkillStore(tmp_path)
+    store.save("c1001", popup(name="First", effects=(EffectPanel("Junk", (), "Not an effect."),)), NOW, slot=1)
+    store.save("c1001", popup(name="Second"), NOW, slot=2)
+    store.save("c1002", popup(name="Other"), NOW, slot=1)  # shows Decrease Defense too
+    assert set(store.effects()) == {"junk", "decrease defense"}
+    assert store.forget("c1001", "first") == 1  # by name, once normalised
+    assert [s.name for s in store.load("c1001")] == ["Second"] and set(store.effects()) == {"decrease defense"}
+    assert store.forget("c1001", "first") == 0  # nothing left to forget
+    assert store.forget("c1001") == 1 and store.load("c1001") == [] and store.heroes() == ["c1002"]
+    assert set(store.effects()) == {"decrease defense"} and store.effects()["decrease defense"]["heroes"] == ["c1002"]
+
+
+def test_skills_forget_drops_a_hero_reading_from_the_command_line(
+    reading: Path, synthetic_catalog: list[str], isolated_home: AppPaths
+) -> None:
+    runner.invoke(app, ["skills", "read", str(reading)])
+    store = SkillStore(isolated_home.home / "skills")
+    assert store.heroes() == ["c2011"] and "lingering fragrance" in store.effects()
+    one = runner.invoke(app, ["skills", "forget", "Blood Blade Karin", "--skill", "No Such Skill"])
+    assert one.exit_code == 0 and "Forgot 0 skill(s)" in one.output and store.heroes() == ["c2011"]
+    gone = runner.invoke(app, ["skills", "forget", "Blood Blade Karin"])
+    assert gone.exit_code == 0 and "Forgot 1 skill(s): Blood Blade Karin." in gone.output
+    assert store.heroes() == [] and store.effects() == {}
+    assert runner.invoke(app, ["skills", "forget", "Nobody Atall"]).exit_code != 0

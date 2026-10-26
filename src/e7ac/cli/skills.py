@@ -192,6 +192,24 @@ def read(
     typer.echo(f"{stored} skill(s) stored of {len(paths)} capture(s)." if not dry_run else "Dry run: nothing stored.")
 
 
+@skills_app.command("forget")
+def forget(
+    hero: Annotated[str, typer.Argument(help='Exact name or code, e.g. "Rhianna and Luciella".')],
+    skill: Annotated[
+        str | None, typer.Option(help="Only this skill (its name); default: everything read of the hero.")
+    ] = None,
+) -> None:
+    """Drop what was read for a hero (or one of its skills), and the effects only it had shown: for a reading that was
+    wrong. Hold the skills again afterwards."""
+    heroes = _heroes()
+    code, problem = (hero, "") if hero in heroes else resolve_hero_code(hero, heroes)
+    if code is None:
+        _fail(problem)
+    removed = SkillStore(skills_dir(default_paths().home)).forget(code, skill)
+    what = f"{skill!r} of " if skill else ""
+    typer.echo(f"Forgot {removed} skill(s): {what}{heroes[code].name or code}.")
+
+
 @skills_app.command("show")
 def show(hero: Annotated[str, typer.Argument(help='Exact name or code, e.g. "Lady of the Scales".')]) -> None:
     """The skills read for a hero, as the game worded them."""
@@ -285,7 +303,7 @@ def run_skill_watch(options: SkillWatchOptions, badge: WatchSignal, stop: thread
             lines = reader.read(image)
             popup = parse_skill_popup(lines)
             if popup is None and (known := memory.recall(clock())) is not None and heroes[known].name:
-                titles = [info.name for info in kit_of(heroes[known].name).values() if info.name]
+                titles = [n for info in kit_of(heroes[known].name).values() for n in info.names]
                 popup = parse_skill_popup(lines, titles)  # a passive that has no badge and no "Skill Enhance"
             if popup is None:
                 counts["ignored"] += 1

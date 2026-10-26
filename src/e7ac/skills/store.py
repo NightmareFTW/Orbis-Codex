@@ -170,6 +170,29 @@ class SkillStore:
         )
         return Saved(stored, before is None, changed, self._learn(code, popup.effects, when))
 
+    def forget(self, code: str, name: str | None = None) -> int:
+        """Drop what was read for a hero (every skill, or the one called `name`) and the effects only it had shown;
+        returns how many skills went. For a reading that was wrong (another panel of the screen taken for a popup)."""
+        skills = self.load(code)
+        wanted = None if name is None else normalise_name(name)
+        kept = [] if wanted is None else [s for s in skills if s.key != wanted]
+        gone = len(skills) - len(kept)
+        if gone == 0:
+            return 0
+        if kept:
+            self.write(code, kept)
+        else:
+            self._file(code).unlink(missing_ok=True)
+        still = {e.title.lower() for s in kept for e in s.effects}
+        known = self.effects()
+        for key, entry in list(known.items()):
+            if key not in still and code in entry.get("heroes", []):
+                entry["heroes"] = [h for h in entry["heroes"] if h != code]
+                if not entry["heroes"]:
+                    del known[key]
+        write_text_atomic(self.root / EFFECTS_FILE, json.dumps(known, indent=1, ensure_ascii=False, sort_keys=True))
+        return gone
+
     def write(self, code: str, skills: list[StoredSkill]) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
         write_text_atomic(

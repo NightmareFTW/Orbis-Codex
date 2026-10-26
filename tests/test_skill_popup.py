@@ -298,3 +298,46 @@ def test_a_title_that_is_not_one_of_the_heros_skills_is_not_taken_for_one() -> N
     assert parse_skill_popup(harsetti_passive(), []) is None
     no_text = [ln for ln in harsetti_passive() if ln.box.x0 != 343]
     assert parse_skill_popup(no_text, ["The Law of Skuggiheim"]) is None  # a name with no paragraph under it
+
+
+def journal_specialty() -> list[TextLine]:
+    """A hero's page in the Journal (Rhianna and Luciella, the user's capture 2026-10-26, 1919 x 1003): the Specialty
+    panel has a title that is also the name of the hero's third skill and a paragraph one icon to its left, the shape of
+    a popup, but a label ("Specialty") sits under the title; the Background column is the screen's own text."""
+    background = [
+        "Some say they were born from the",
+        "moonlight, and others say they first",
+        "stirred in the darkness. The truth is",
+        "unknown, as this is the only record",
+        "remaining in an unnamed organization.",
+        "The two monsters raised by the",
+    ]
+    return [
+        line("Dark", 95, 125, 55, 36),
+        line("ThiefAquarius", 200, 122, 220, 40),
+        line("Rhianna and Luciella", 48, 170, 510, 65),
+        line("Background", 1425, 120, 205, 45),
+        *[line(text, 1426, 215 + 30 * i, 440, 30) for i, text in enumerate(background)],
+        line("Attack %", 150, 400, 100, 30),
+        line("Pursuit of Death", 1543, 742, 206, 36),
+        line("Specialty", 1541, 785, 100, 26),
+        line("Rhianna and Luciella never lose a", 1436, 840, 368, 30),
+        line("target once they've marked them.", 1436, 868, 375, 30),
+        line("Preview Skills", 785, 915, 180, 36),
+    ]
+
+
+def test_the_specialty_panel_of_the_journal_is_not_taken_for_the_skill_named_like_it() -> None:
+    titles = ["Half Moon Slash", "Waning Moon Slash", "Hunter's Mark", "Blade of Pursuit", "Pursuit of Death"]
+    assert parse_skill_popup(journal_specialty(), titles) is None
+
+
+def test_text_far_to_the_right_of_a_popup_is_not_one_of_its_effect_panels() -> None:
+    plain = parse_skill_popup(synthetic())
+    column = [
+        line("Background", 2000, 120, 205, 45),
+        *[line(f"Some say they were born from the moon {i}", 2000, 215 + 34 * i, 440, 30) for i in range(6)],
+    ]
+    beside = parse_skill_popup([*synthetic(), *column])
+    assert plain is not None and beside is not None
+    assert [e.title for e in beside.effects] == [e.title for e in plain.effects]

@@ -29,9 +29,10 @@ _BY: Final = re.compile(r"\bby (\d+(?:\.\d+)?)%")
 
 
 def slot_of(name: str, skills: Mapping[int, SkillInfo]) -> int | None:
-    """The slot whose epic7db name is this popup's skill name (exact once normalised), or None."""
+    """The slot whose epic7db name (either one, for a skill that changes form) is this popup's skill name (exact once
+    normalised), or None."""
     wanted = normalise_name(name)
-    found = [slot for slot, info in skills.items() if info.name and normalise_name(info.name) == wanted]
+    found = [slot for slot, info in skills.items() if wanted in {normalise_name(n) for n in info.names}]
     return found[0] if len(found) == 1 else None
 
 
@@ -39,7 +40,7 @@ def place(name: str, kit: Mapping[int, SkillInfo]) -> tuple[int | None, bool]:
     """(slot, passive) of the skill a popup shows, among epic7db's skills of the hero: its name exactly once normalised,
     else the margin rule (one clear best match, never a near-miss). `passive`: the slot-2 skill with no cooldown, the
     rule the kit readers use. (None, False) when the name is not among them."""
-    names = {info.name: slot for slot, info in kit.items() if info.name}
+    names = {n: slot for slot, info in kit.items() for n in info.names}
     found = match_label(name, names) if names else None
     if found is None:
         return None, False
