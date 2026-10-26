@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
+from e7ac.skills.problems import Problem, hero_problems
 from e7ac.skills.store import SkillStore, StoredSkill
 
 SKILLS_PER_HERO = 3
@@ -26,9 +27,22 @@ class SkillRow:
     """What each of the three skills, in the hero's order (S1, S2, S3), came to: "S" an active skill read, "P" a passive
     read, "?" a skill read whose slot is not known, "-" not read. Empty: only the count is known."""
 
+    problems: tuple[Problem, ...] = ()
+    """What is wrong with the skills read (junk, cut, unplaced; SPEC D107): to hold again or to look at."""
+
     @property
     def complete(self) -> bool:
+        """Three skills read (whether or not they are right)."""
         return self.read >= SKILLS_PER_HERO
+
+    @property
+    def done(self) -> bool:
+        """Complete and nothing wrong: nothing left to hold."""
+        return self.complete and not self.problems
+
+    @property
+    def clearable(self) -> tuple[Problem, ...]:
+        return tuple(p for p in self.problems if p.clearable)
 
     @property
     def marks(self) -> str:
@@ -74,8 +88,9 @@ def worklist(
     order += [(code, "") for code in sorted(heroes, key=lambda c: heroes[c].lower()) if code not in placed]
     rows = []
     for code, why in order:
-        marks, read = slot_marks(store.load(code))
-        rows.append(SkillRow(code, heroes[code], why, read, marks))
+        skills = store.load(code)
+        marks, read = slot_marks(skills)
+        rows.append(SkillRow(code, heroes[code], why, read, marks, hero_problems(skills)))
     return rows
 
 

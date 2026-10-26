@@ -613,9 +613,10 @@ def test_skills_check_lists_the_readings_that_look_cut_and_the_event_says_so(
     assert cut_parts(store.load("c2011")[0]) == ["effect Vigor"]
     listed = runner.invoke(app, ["skills", "check"])
     assert listed.exit_code == 0 and "Cut Skill" in listed.output and "effect Vigor looks cut" in listed.output
-    assert "stored cut" in listed.output and "1 reading(s) look cut." in listed.output
+    assert "stored cut" in listed.output and "2 problem(s)." in listed.output  # cut, and its place is not known
     store.save("c2011", popup(name="Cut Skill", effects=(EffectPanel("Vigor", (), "Increases Attack by 30%."),)), NOW)
-    assert "No reading looks cut." in runner.invoke(app, ["skills", "check"]).output
+    again = runner.invoke(app, ["skills", "check"]).output
+    assert "effect Vigor" not in again and "1 problem(s)." in again  # whole now: only the place is not known
 
 
 def test_a_popup_whose_effect_stops_short_is_stored_and_the_event_says_it_looks_cut(
@@ -636,3 +637,24 @@ def test_a_popup_whose_effect_stops_short_is_stored_and_the_event_says_it_looks_
     whole = EffectPanel("Vigor", (), "Increases Attack and Defense by 30%.")
     again = store_popup(store, heroes, replace(popup(effects=(whole,)), hero="Blood Blade Karin"))
     assert again.cut == () and "LOOKS CUT" not in describe(again)
+
+
+def test_every_kind_of_problem_is_found_and_the_ones_that_can_be_read_again_are_cleared(tmp_path: Path) -> None:
+    from e7ac.skills.problems import clear_problems, find_problems, hero_problems
+
+    store = SkillStore(tmp_path)
+    good = "Attacks the enemy with a sheath, and grants stealth to the caster for 1 turn."
+    store.save("c1001", popup(name="Whole", text=good), NOW, slot=1)
+    store.save(
+        "c1001", popup(name="Cut", text=good, effects=(EffectPanel("Vigor", (), "Increases Attack by"),)), NOW, slot=2
+    )
+    store.save("c1001", popup(name="S3 Window |", text="Spirit Eye Celine Hero of the day", enhance=()), NOW)
+    store.save("c1002", popup(name="Loose", text=good), NOW)  # read, but its place is not known
+    found = {(p.skill, p.kind) for p in find_problems(store)}
+    assert found == {("Cut", "cut"), ("S3 Window |", "junk"), ("Loose", "unplaced")}
+    assert [p.kind for p in hero_problems(store.load("c1002"))] == ["unplaced"]
+    gone = clear_problems(store)
+    assert {(p.skill, p.kind) for p in gone} == {("Cut", "cut"), ("S3 Window |", "junk")}  # "Loose" is only shown
+    assert [s.name for s in store.load("c1001")] == ["Whole"] and [s.name for s in store.load("c1002")] == ["Loose"]
+    assert "vigor" not in store.effects()  # the effect only the dropped skill had shown goes with it
+    assert clear_problems(store) == []

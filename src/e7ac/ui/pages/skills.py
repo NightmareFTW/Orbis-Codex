@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
 from e7ac.arena.met import met_heroes
 from e7ac.cli.skills import describe
 from e7ac.skills.export import export_text
+from e7ac.skills.problems import clear_problems
 from e7ac.skills.store import SkillStore, skills_dir
 from e7ac.skills.summary import hero_summary
 from e7ac.skills.worklist import SkillRow, progress, worklist
@@ -40,6 +41,15 @@ from e7ac.ui.widgets import SteadyComboBox
 
 HEADERS = ("#", "Hero", "Code", "Skills", "Why")
 LIST_SIZE = 400
+
+
+def _state(row: SkillRow) -> str:
+    """What the table says after the reason: complete, or what is wrong (SPEC D107)."""
+    if row.problems:
+        first = "; ".join(p.line() for p in row.problems[:2]) + (" ..." if len(row.problems) > 2 else "")
+        lead = "complete, but " if row.complete else ""
+        return f"  -  {lead}{len(row.problems)} problem(s): {first}"
+    return "  -  complete" if row.complete else ""
 
 
 class _Tiers(QObject):
@@ -107,6 +117,12 @@ class SkillsPage(Page):
         self._chosen = ""
         """The hero named in the box: a plain string, because the reader asks for it from its own thread."""
         self._hero.editTextChanged.connect(self._hero_named)
+        self._clear = QPushButton("Clear problem readings")
+        self._clear.setToolTip(
+            "Drops the readings that look wrong or cut (the program's own text taken for a skill, a description that "
+            "stops short) so you can hold those skills again. The skills read well are kept."
+        )
+        self._clear.clicked.connect(self._clear_problems)
         self._hide = QCheckBox("Hide complete heroes")
         self._hide.setChecked(False)
         self._hide.toggled.connect(self._fill)
@@ -116,7 +132,7 @@ class SkillsPage(Page):
         copy = QPushButton("Copy export")
         copy.setToolTip("Everything read as text on the clipboard, to paste in the chat.")
         copy.clicked.connect(self._copy_export)
-        for widget in (self._start, self._hero, self._overlay, self._hide):
+        for widget in (self._start, self._hero, self._overlay, self._hide, self._clear):
             controls.addWidget(widget)
         controls.addStretch()
         controls.addWidget(export)
@@ -182,10 +198,13 @@ class SkillsPage(Page):
         self._rows = worklist(heroes, met_heroes(self.context.paths.home), self._tier_order, self._store)
         complete, started, skills, total = progress(self._rows)
         effects = len(self._store.effects())
+        wrong = sum(bool(r.problems) for r in self._rows)
+        self._clear.setEnabled(not self._skills.running and any(r.clearable for r in self._rows))
+        self._clear.setText(f"Clear problem readings ({sum(len(r.clearable) for r in self._rows)})")
         self._fill_heroes()
         self._summary.setText(
             f"{complete} of {total} heroes complete  |  {started} started  |  {skills} skills read  |  "
-            f"{effects} effects described"
+            f"{effects} effects described" + (f"  |  {wrong} with a problem (amber)" if wrong else "")
         )
         self._fill()
 
@@ -197,28 +216,32 @@ class SkillsPage(Page):
         typed = self._hero.currentText()
         self._hero.blockSignals(True)
         self._hero.clear()
-        self._hero.addItems([r.name for r in self._rows if not r.complete][:LIST_SIZE])
+        self._hero.addItems([r.name for r in self._rows if not r.done][:LIST_SIZE])
         self._hero.setEditText(typed)
         self._hero.blockSignals(False)
 
     def _fill(self) -> None:
-        rows = [r for r in self._rows if not (self._hide.isChecked() and r.complete)][:LIST_SIZE]
+        rows = [r for r in self._rows if not (self._hide.isChecked() and r.done)][:LIST_SIZE]
         keep = self._selected_code()
         table = self._table
         table.blockSignals(True)
         table.setRowCount(len(rows))
         self._codes = [r.code for r in rows]
         done = QBrush(QColor(STATUS_COLOURS["ok"]))
+        cut = QBrush(QColor(STATUS_COLOURS["warn"]))
         for number, row in enumerate(rows):
             cells = [
                 QTableWidgetItem(str(number + 1)),
                 QTableWidgetItem(QIcon(self.context.portraits.pixmap(row.code, 32)), row.name),
                 QTableWidgetItem(row.code),
                 QTableWidgetItem(row.marks),
-                QTableWidgetItem(row.why + ("  -  complete" if row.complete else "")),
+                QTableWidgetItem(row.why + _state(row)),
             ]
             for column, cell in enumerate(cells):
-                if row.complete:
+                if row.problems:
+                    cell.setForeground(cut)
+                    cell.setToolTip("\n".join(p.line() for p in row.problems))
+                elif row.complete:
                     cell.setForeground(done)
                 table.setItem(number, column, cell)
         table.resizeColumnsToContents()
@@ -281,6 +304,23 @@ class SkillsPage(Page):
         self._start.style().polish(self._start)
         self._start.setEnabled(state != STOPPING)
         self._overlay.setEnabled(state == STOPPED and sys.platform == "win32")
+        self._clear.setEnabled(state == STOPPED and any(r.clearable for r in self._rows))
+
+    def _clear_problems(self) -> None:
+        """Drop the skills that have a problem, so they can be held again (the table then shows what is missing)."""
+        if self._skills.running:
+            return
+        gone = clear_problems(self._store)
+        heroes = len({p.code for p in gone})
+        self.reload()
+        if gone:
+            self._set_status(
+                f"Cleared {len({(p.code, p.skill) for p in gone})} reading(s) of {heroes} hero(es): "
+                "hold those skills again.",
+                "ok",
+            )
+        else:
+            self._set_status("Nothing to clear.", "")
 
     def _export(self) -> None:
         text, target = self._export_text(), skills_dir(self.context.paths.home) / "skills_export.txt"

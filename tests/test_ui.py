@@ -835,6 +835,43 @@ def test_the_settings_page_makes_the_desktop_shortcut(
     window.close()
 
 
+WHOLE = "Attacks the enemy with a sheath, and grants stealth to the caster for 1 turn."
+
+
+def test_a_hero_with_a_problem_stays_amber_in_the_list_and_the_button_clears_it(
+    context: AppContext, synthetic_catalog: list[str], qapp: Any
+) -> None:
+    """Three skills read is not the same as three skills right (SPEC D107): the table says what is wrong and the
+    button drops the readings to be held again."""
+    from e7ac.skills.store import SkillStore, skills_dir
+    from e7ac.vision.skill_popup import EffectPanel, SkillPopup
+
+    store = SkillStore(skills_dir(context.paths.home))
+    cut = (EffectPanel("Vigor", (), "Increases Attack and Defense by"),)
+    for slot, (name, effects) in enumerate((("Lethal Strike", ()), ("Second", ()), ("Quixotic Crescent", cut)), 1):
+        popup = SkillPopup("Karin", name, 5, (), None, "", WHOLE, "", None, (), effects, 0.99)
+        store.save("c2011", popup, slot=slot)
+    window = MainWindow(context)
+    window.show_page("skills")
+    page: Any = window.page("skills")
+    table = page._table
+    names = [table.item(r, 1).text() for r in range(table.rowCount())]
+    karin = names.index("Blood Blade Karin")
+    text = table.item(karin, 4).text()
+    assert "complete, but" in text and "Quixotic Crescent: effect Vigor looks cut" in text
+    assert "effect Vigor" in table.item(karin, 4).toolTip()
+    assert "1 with a problem" in page._summary.text()
+    assert page._clear.isEnabled() and "(1)" in page._clear.text()
+    page._hide.setChecked(True)  # hiding the complete heroes does not hide one that still has something to hold
+    assert "Blood Blade Karin" in [table.item(r, 1).text() for r in range(table.rowCount())]
+    page._clear.click()
+    assert [s.name for s in store.load("c2011")] == ["Lethal Strike", "Second"]  # the skills read well stay
+    assert "Cleared 1 reading(s) of 1 hero(es)" in page._status.text()
+    assert "Blood Blade Karin" in [table.item(r, 1).text() for r in range(table.rowCount())]  # missing one: to read
+    assert not page._clear.isEnabled()
+    window.close()
+
+
 def test_the_skill_reader_page_lists_what_is_missing_and_exports_what_was_read(
     context: AppContext, synthetic_catalog: list[str], qapp: Any
 ) -> None:
@@ -843,8 +880,8 @@ def test_the_skill_reader_page_lists_what_is_missing_and_exports_what_was_read(
     from e7ac.vision.skill_popup import SkillPopup
 
     store = SkillStore(skills_dir(context.paths.home))
-    for name in ("Lethal Strike", "Second", "Third"):
-        store.save("c2011", SkillPopup("Karin", name, 5, (), None, "", "Attacks.", "", None, (), (), 0.99))
+    for slot, name in enumerate(("Lethal Strike", "Second", "Third"), 1):
+        store.save("c2011", SkillPopup("Karin", name, 5, (), None, "", WHOLE, "", None, (), (), 0.99), slot=slot)
     window = MainWindow(context)
     window.show_page("skills")
     page: Any = window.page("skills")
@@ -855,7 +892,7 @@ def test_the_skill_reader_page_lists_what_is_missing_and_exports_what_was_read(
     assert f"1 of {total} heroes complete" in page._summary.text() and "3 skills read" in page._summary.text()
     marks = {table.item(r, 1).text(): table.item(r, 3).text() for r in range(total)}
     other = next(h for h in shown if h != "Blood Blade Karin")
-    assert marks["Blood Blade Karin"] == "? ? ?" and marks[other] == "- - -"
+    assert marks["Blood Blade Karin"] == "S S S" and marks[other] == "- - -"
     karin = shown.index("Blood Blade Karin")
     assert table.item(karin, 4).text().endswith("complete")
     page._hide.setChecked(True)  # the list can be cut down to what is still to read

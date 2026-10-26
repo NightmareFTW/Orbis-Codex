@@ -29,12 +29,13 @@ from e7ac.roster.screen_import import resolve_hero_code
 from e7ac.settings import SettingsError, load_settings
 from e7ac.skills.clean import clean as clean_store
 from e7ac.skills.clean import find as find_junk
-from e7ac.skills.completeness import cut_effects, cut_parts, find_cut
+from e7ac.skills.completeness import cut_effects, cut_parts
 from e7ac.skills.export import export_text
 from e7ac.skills.hero import HeroMemory, decide
 from e7ac.skills.importer import import_export
 from e7ac.skills.merge import assign, place
 from e7ac.skills.own_ui import shows_window, without_badge
+from e7ac.skills.problems import clear_problems, find_problems
 from e7ac.skills.store import SkillStore, skills_dir
 from e7ac.skills.worklist import progress, worklist
 from e7ac.sources.epic7db import SkillInfo, fetch_kit, fetch_tier_order, slug
@@ -237,20 +238,28 @@ def import_command(
 
 
 @skills_app.command("check")
-def check() -> None:
-    """The readings that look cut (a description or an effect that stops at "by", "of", a number...): the skills to
-    hold again. An effect is also listed by the heroes whose skills show it."""
+def check(
+    clear: Annotated[
+        bool, typer.Option("--clear", help="Drop the readings that look wrong or cut, to hold them again.")
+    ] = False,
+) -> None:
+    """Every reading that has a problem: not a skill (the program's own text), cut (a description or an effect that
+    stops at "by", "of", a number...), or a skill whose place is not known. With --clear the first two are dropped, so
+    those skills can be held again (the ones read well stay)."""
     paths = default_paths()
     heroes = _heroes()
     store = SkillStore(skills_dir(paths.home))
-    cuts = find_cut(store)
-    for cut in cuts:
-        name = heroes[cut.hero].name if cut.hero in heroes else cut.hero
-        typer.echo(f"  {name}: {cut.skill!r}: {cut.part} looks cut")
+    problems = find_problems(store)
+    for problem in problems:
+        name = heroes[problem.code].name if problem.code in heroes else problem.code
+        typer.echo(f"  {name}: {problem.skill!r}: {problem.detail}")
     for title, codes in sorted(cut_effects(store).items()):
         names = ", ".join(heroes[c].name or c for c in codes if c in heroes)
         typer.echo(f"  effect {title!r} is stored cut (seen on: {names or '?'}): hold a skill that shows it")
-    typer.echo(f"{len(cuts)} reading(s) look cut." if cuts else "No reading looks cut.")
+    if clear:
+        gone = clear_problems(store)
+        typer.echo(f"{len(gone)} reading(s) dropped: hold those skills again." if gone else "Nothing to drop.")
+    typer.echo(f"{len(problems)} problem(s)." if problems else "No reading has a problem.")
 
 
 @skills_app.command("clean")

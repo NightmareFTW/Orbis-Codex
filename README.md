@@ -43,7 +43,7 @@ From a terminal opened in that folder (cmd or PowerShell), run commands as `.\Or
 | `e7 skills watch` | Reads the skill popup of the game while you hold each skill icon (also the Skill reader page of the window) |
 | `e7 arena results` | What the Arena watch predicted against what happened (Victory / Defeat read from the screen), with the Brier score; `--undo` removes the last line |
 | `e7 skills todo` / `show` / `read` / `export` | The heroes whose skills are still to read, what was read, captures read offline, one text file to send |
-| `e7 skills check` | Lists the readings that look cut (hold those skills again) |
+| `e7 skills check [--clear]` | Lists every reading with a problem (cut, not a skill, place unknown); --clear drops them to hold again |
 | `e7 skills import` / `clean` / `forget` | Load an export from another PC, drop readings that are not skills, drop a wrong reading of a hero |
 | `e7 roster scan captures\*.png` | Read hero screens (Equipment tab or Hero Info) and store the builds, checked against the catalog |
 
