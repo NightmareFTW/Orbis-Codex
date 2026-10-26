@@ -37,6 +37,15 @@ def looks_cut(text: str) -> bool:
     return last in DANGLING or bool(re.fullmatch(r"[\d.,]+%?", last))
 
 
+STRAY: Final = re.compile(r"[.!?]\+\d{1,2}$")
+
+
+def stray_badge(text: str) -> str | None:
+    """The "+3" of an enhancement badge that was read into the end of a description ("... on the target.+3")."""
+    found = STRAY.search(text.strip())
+    return found.group(0)[1:] if found else None
+
+
 def _plain(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip().lower().rstrip(".")
 

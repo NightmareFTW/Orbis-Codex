@@ -633,10 +633,12 @@ def test_a_popup_whose_effect_stops_short_is_stored_and_the_event_says_it_looks_
     store = SkillStore(isolated_home.home / "skills")
     cut = EffectPanel("Vigor", (), "Increases Attack and Defense by")
     event = store_popup(store, heroes, replace(popup(effects=(cut,)), hero="Blood Blade Karin"))
-    assert event.cut == ("effect Vigor",) and "LOOKS CUT (effect Vigor): hold the skill again" in describe(event)
+    assert event.cut == (
+        "effect Vigor looks cut",
+    ) and "PROBLEM (effect Vigor looks cut): hold the skill again" in describe(event)
     whole = EffectPanel("Vigor", (), "Increases Attack and Defense by 30%.")
     again = store_popup(store, heroes, replace(popup(effects=(whole,)), hero="Blood Blade Karin"))
-    assert again.cut == () and "LOOKS CUT" not in describe(again)
+    assert again.cut == () and "PROBLEM" not in describe(again)
 
 
 def test_every_kind_of_problem_is_found_and_the_ones_that_can_be_read_again_are_cleared(tmp_path: Path) -> None:
@@ -668,3 +670,16 @@ def test_a_panel_that_swallowed_the_next_one_is_a_problem() -> None:
     assert holds_title("Decreases Attack and Speed by 50%.", ["Bomb"]) is None
     assert holds_title("Bomb damage is unaffected by the number of turns.", ["Bomb"]) is None  # not a title: "damage"
     assert holds_title("Poison, Bleed, Burn, Venom, and Erosion damages are proportional.", ["Bleed"]) is None
+
+
+def test_a_badge_read_into_the_end_of_a_description_is_a_problem() -> None:
+    from e7ac.skills.completeness import stray_badge
+    from e7ac.skills.problems import skill_problems
+
+    assert stray_badge("... detonates bleedingeffects inflicted on the target.+3") == "+3"
+    assert stray_badge("Increases Attack by 50%.") is None and stray_badge("Grants +3 Speed.") is None
+    skill = StoredSkill(
+        "c1001", "This'll Sting!", 6, (), None, "", "Attacks the enemy with a scalpel, then it ends.+3", "", None, (),
+        (), 0.9, "", 1, False,
+    )  # fmt: skip
+    assert [p.detail for p in skill_problems(skill)] == ["its description ends with a stray '+3' (a badge)"]

@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from typing import Final
 
 from e7ac.skills.clean import why_junk
-from e7ac.skills.completeness import cut_parts
+from e7ac.skills.completeness import cut_parts, stray_badge
 from e7ac.skills.store import SkillStore, StoredSkill
 
 CLEARABLE: Final = frozenset({"junk", "cut"})
@@ -55,6 +55,8 @@ def skill_problems(skill: StoredSkill, titles: Collection[str] = ()) -> list[Pro
     if (why := why_junk(skill)) is not None:
         return [Problem(skill.hero, skill.name, "junk", why)]
     found = [Problem(skill.hero, skill.name, "cut", f"{part} looks cut") for part in cut_parts(skill)]
+    if (stray := stray_badge(skill.text)) is not None:
+        found.append(Problem(skill.hero, skill.name, "cut", f"its description ends with a stray {stray!r} (a badge)"))
     for panel in skill.effects:
         if (other := holds_title(panel.text, titles)) is not None:
             found.append(Problem(skill.hero, skill.name, "cut", f"effect {panel.title} also holds the text of {other}"))

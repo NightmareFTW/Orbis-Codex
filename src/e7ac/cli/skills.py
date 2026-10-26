@@ -29,13 +29,13 @@ from e7ac.roster.screen_import import resolve_hero_code
 from e7ac.settings import SettingsError, load_settings
 from e7ac.skills.clean import clean as clean_store
 from e7ac.skills.clean import find as find_junk
-from e7ac.skills.completeness import cut_effects, cut_parts
+from e7ac.skills.completeness import cut_effects
 from e7ac.skills.export import export_text
 from e7ac.skills.hero import HeroMemory, decide
 from e7ac.skills.importer import import_export
 from e7ac.skills.merge import assign, place
 from e7ac.skills.own_ui import shows_window, without_badge
-from e7ac.skills.problems import clear_problems, find_problems
+from e7ac.skills.problems import clear_problems, effect_titles, find_problems, skill_problems
 from e7ac.skills.store import SkillStore, skills_dir
 from e7ac.skills.worklist import progress, worklist
 from e7ac.sources.epic7db import SkillInfo, fetch_kit, fetch_tier_order, slug
@@ -74,7 +74,8 @@ class ReadEvent:
     """Which of the hero's skills it is (1, 2, 3), when epic7db's names place it."""
     passive: bool = False
     cut: tuple[str, ...] = ()
-    """The parts of the stored skill that look cut ("description", "effect Vigor"): hold the skill again (SPEC D106)."""
+    """What is wrong with the stored skill and a new reading may cure ("effect Vigor looks cut", a stray "+3"): hold
+    the skill again (SPEC D106/D107)."""
 
 
 def identify(
@@ -137,7 +138,7 @@ def store_popup(
         decision.how,
         slot,
         passive,
-        tuple(cut_parts(saved.stored)),
+        tuple(p.detail for p in skill_problems(saved.stored, effect_titles(store)) if p.clearable),
     )
 
 
@@ -149,7 +150,7 @@ def describe(event: ReadEvent) -> str:
     effects = f"; effects learned: {', '.join(event.new_effects)}" if event.new_effects else ""
     source = {"hero screen": " [hero from its own screen]", "start of the name": " [hero from the start of its name]"}
     which = f" [S{event.slot}{', passive' if event.passive else ''}]" if event.slot is not None else ""
-    cut = f"; LOOKS CUT ({', '.join(event.cut)}): hold the skill again" if event.cut else ""
+    cut = f"; PROBLEM ({'; '.join(event.cut)}): hold the skill again" if event.cut else ""
     return f"{event.hero}: {event.skill}{which}{level} ({what}){effects}{source.get(event.how, '')}{cut}"
 
 
@@ -414,8 +415,8 @@ def run_skill_watch(options: SkillWatchOptions, badge: WatchSignal, stop: thread
                 badge.say("Skills: hero not identified", event.problem[:60], AMBER)
                 typer.echo(f"  picture kept: {_keep(image, paths.captures_dir / 'skills')}")
             elif event.cut:
-                typer.echo(f"  picture of the cut reading{_evidence(image, counts, paths, 'cut')}")
-                badge.say(f"Read: {event.hero} (cut?)", f"{event.cut[0]} looks cut: hold it again", AMBER)
+                typer.echo(f"  picture of the reading with a problem{_evidence(image, counts, paths, 'cut')}")
+                badge.say(f"Read: {event.hero} (problem)", f"{event.cut[0]}: hold it again", AMBER)
             else:
                 top = f"Read: {event.hero}"
                 badge.say(top, f"{event.skill}" + (f" +{event.level}" if event.level is not None else ""), GREEN)
