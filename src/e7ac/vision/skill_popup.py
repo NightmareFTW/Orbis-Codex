@@ -169,6 +169,14 @@ def parse_skill_popup(lines: Sequence[TextLine]) -> SkillPopup | None:
     )
 
 
+def looks_like_popup(lines: Sequence[TextLine]) -> bool:
+    """Whether a screen shows a skill popup's own labels ("Skill Enhance", "Soulburn Effect", an "Acquire N Soul" row)
+    whether or not `parse_skill_popup` could read it: a popup the reader does not understand yet (a layout never seen)
+    is kept as a picture instead of being passed over in silence."""
+    texts = [clean(line.text).lower() for line in lines]
+    return any(text == "skill enhance" or text.startswith("soulburn effect") or ACQUIRE.search(text) for text in texts)
+
+
 def read_hero_name(lines: Sequence[TextLine]) -> str | None:
     """The hero's name on the hero's own screen (no popup open): the tallest text of the screen's top left, where the
     name is written large over the art, before a held skill's popup covers it (SPEC D97). Sizes are relative to the

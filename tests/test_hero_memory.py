@@ -17,7 +17,7 @@ from e7ac.paths import AppPaths
 from e7ac.skills.hero import REMEMBER, HeroMemory, decide, hero_starting_with, starts
 from e7ac.skills.store import SkillStore
 from e7ac.vision.ocr import RapidOcrReader
-from e7ac.vision.skill_popup import read_hero_name
+from e7ac.vision.skill_popup import looks_like_popup, parse_skill_popup, read_hero_name
 from tests.markers import FIXTURES_DIR
 from tests.test_skill_popup import line
 from tests.test_skills import Badge, named
@@ -163,3 +163,51 @@ def test_the_watch_remembers_the_hero_of_its_screen_and_files_the_popups_under_i
     ]
     assert SkillStore(isolated_home.home / "skills").heroes() == ["c2011"]
     assert skills_cli.describe(events[0]).endswith("[hero from its own screen]")
+
+
+# ---------------------------------------------------------------------------------------- a popup not understood
+
+
+def passive_without_title() -> list[Any]:
+    """A popup the reader cannot place yet: a skill at +0 that gains no Souls shows no "+N" badge and no "Acquire" row
+    (the user's Celine, Sixth Sense, 2026-10-26), so no title is found."""
+    return [
+        line("Damage suffered in one attack does not exceed", 455, 262, 650),
+        line("51% of max Health. Decreases skill cooldown by 1", 455, 305, 640),
+        line("turn when somebody dies.", 456, 348, 520),
+        line("Skill Enhance", 456, 640, 240),
+        line("+1", 456, 700, 50, 38),
+        line("+5% Combat Readiness", 530, 695, 420),
+        line("Promotion", 800, 1000, 150),
+    ]
+
+
+def test_a_popup_with_its_own_labels_is_told_from_a_screen_that_is_not_one() -> None:
+    assert parse_skill_popup(passive_without_title()) is None and looks_like_popup(passive_without_title())
+    assert not looks_like_popup(hero_screen())  # the buttons "Skill" and "Enhance" are two lines, not the label
+    assert not looks_like_popup([line("Arena", 10, 10), line("Shop", 10, 60), line("Heroes", 10, 110)])
+
+
+def test_the_watch_keeps_the_picture_of_a_popup_it_does_not_understand(
+    monkeypatch: pytest.MonkeyPatch, synthetic_catalog: list[str], isolated_home: AppPaths
+) -> None:
+    from e7ac.cli import arena as arena_cli
+    from e7ac.cli import skills as skills_cli
+    from e7ac.vision.window import Rect
+
+    frames = [np.full((36, 64, 3), shade, np.uint8) for shade in (40, 200)]
+    sequence = [f for f in frames for _ in range(6)]
+    monkeypatch.setattr(
+        arena_cli, "game_frames", lambda client, hwnd: iter([(f, Rect(0, 0, 64, 36)) for f in sequence])
+    )
+    ticks = iter(x * 0.5 for x in range(1000))
+    monkeypatch.setattr(skills_cli, "clock", lambda: next(ticks))
+    monkeypatch.setattr(roster_cli, "reader_factory", lambda: Script([hero_screen("Karin"), passive_without_title()]))
+    events: list[skills_cli.ReadEvent] = []
+    badge = Badge()
+    skills_cli.run_skill_watch(skills_cli.SkillWatchOptions(on_read=events.append), badge, threading.Event())
+    assert [e.problem.startswith("a skill popup was seen but not understood") for e in events] == [True]
+    kept = sorted((isolated_home.captures_dir / "skills").glob("*-unread.png"))
+    assert len(kept) == 1 and str(kept[0]) in events[0].problem
+    assert ("Skills: popup not understood", "its picture was kept - send it") in badge.said
+    assert SkillStore(isolated_home.home / "skills").heroes() == []  # nothing guessed

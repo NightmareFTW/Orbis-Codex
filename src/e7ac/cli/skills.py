@@ -34,7 +34,7 @@ from e7ac.skills.worklist import progress, worklist
 from e7ac.sources.epic7db import fetch_tier_order, slug
 from e7ac.storage.db import session_scope
 from e7ac.ui.watch_signal import AMBER, GREEN, LIGHT, NoSignal, WatchSignal
-from e7ac.vision.skill_popup import SkillPopup, parse_skill_popup, read_hero_name
+from e7ac.vision.skill_popup import SkillPopup, looks_like_popup, parse_skill_popup, read_hero_name
 
 skills_app = typer.Typer(help="Skills read from the game's own skill popup: read, watch, list what is missing, export.")
 _OFFLINE = typer.Option("--offline", help="Use cached pages only.")
@@ -254,6 +254,18 @@ def run_skill_watch(options: SkillWatchOptions, badge: WatchSignal, stop: thread
                 counts["ignored"] += 1
                 name = read_hero_name(lines)
                 seen = resolve_hero_code(name, heroes)[0] if name else None
+                if seen is None and looks_like_popup(
+                    lines
+                ):  # a popup this reader does not understand: keep it to learn
+                    kept = _keep(image, paths.captures_dir / "skills", "unread")
+                    lost = ReadEvent(
+                        None, "?", "?", None, False, False, (), f"a skill popup was seen but not understood: {kept}"
+                    )
+                    typer.echo("  ! " + describe(lost))
+                    if options.on_read is not None:
+                        options.on_read(lost)
+                    badge.say("Skills: popup not understood", "its picture was kept - send it", AMBER)
+                    continue
                 if seen is None:
                     badge.say("Skills: hold a skill icon", "no skill popup on this screen", LIGHT)
                     continue
@@ -299,12 +311,17 @@ def run_skill_watch(options: SkillWatchOptions, badge: WatchSignal, stop: thread
     typer.echo(f"Stopped. {counts['read']} skill popup(s) read, {counts['ignored']} screen(s) without one.")
 
 
-def _keep(image: Any, folder: Path) -> Path:
+def _keep(image: Any, folder: Path, tag: str = "skill") -> Path:
     """Keep a picture the watch could not make sense of, to read it again or to look at (local, never committed)."""
     import cv2
 
     folder.mkdir(parents=True, exist_ok=True)
-    path = folder / f"{time.strftime('%Y%m%d-%H%M%S')}-skill.png"
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    path = folder / f"{stamp}-{tag}.png"
+    for number in range(2, 100):  # two pictures in one second keep both
+        if not path.exists():
+            break
+        path = folder / f"{stamp}-{tag}-{number}.png"
     ok, data = cv2.imencode(".png", image)
     if ok:
         data.tofile(str(path))
