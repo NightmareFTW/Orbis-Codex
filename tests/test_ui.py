@@ -866,6 +866,22 @@ def test_the_skill_reader_page_lists_what_is_missing_and_exports_what_was_read(
     window.close()
 
 
+def test_the_skill_reader_takes_the_hero_named_in_its_box(
+    context: AppContext, synthetic_catalog: list[str], qapp: Any
+) -> None:
+    window = MainWindow(context)
+    window.show_page("skills")
+    page: Any = window.page("skills")
+    names = [page._hero.itemText(i) for i in range(page._hero.count())]
+    assert names and len(names) == len(context.heroes())  # nobody is complete: every hero can be picked
+    assert page._chosen == ""  # nothing named: the reader uses the name on the screen
+    page._hero.setEditText("  Blood Blade Karin ")
+    assert page._chosen == "Blood Blade Karin"
+    page.reload()  # a new list of heroes keeps what was typed
+    assert page._hero.currentText().strip() == "Blood Blade Karin" and page._chosen == "Blood Blade Karin"
+    window.close()
+
+
 def test_the_arena_watch_and_the_skill_reader_never_run_together(context: AppContext) -> None:
     context.skills._state = "running"  # as `start` leaves it
     assert not context.watch.start(offline=True, collect_only=False, overlay=False)

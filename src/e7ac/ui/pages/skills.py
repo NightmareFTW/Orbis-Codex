@@ -10,13 +10,15 @@ import sys
 import threading
 from typing import Any
 
-from PySide6.QtCore import QObject, QSize, Signal
+from PySide6.QtCore import QObject, QSize, Qt, Signal
 from PySide6.QtGui import QGuiApplication, QIcon
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
+    QCompleter,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QPlainTextEdit,
     QPushButton,
     QTableWidget,
@@ -33,6 +35,7 @@ from e7ac.ui.context import AppContext
 from e7ac.ui.pages.base import Page, card, heading
 from e7ac.ui.skill_controller import RUNNING, STOPPED, STOPPING
 from e7ac.ui.theme import status_style
+from e7ac.ui.widgets import SteadyComboBox
 
 HEADERS = ("#", "Hero", "Code", "Skills", "Why")
 LIST_SIZE = 400
@@ -72,7 +75,8 @@ class SkillsPage(Page):
             heading(
                 "Skill reader",
                 "Press Start, open a hero's Skill tab in the game and hold each skill icon for about two seconds: "
-                "the program reads the popup (numbers, enhancement steps, effect descriptions). Three skills a hero.",
+                "the program reads the popup (numbers, enhancement steps, effect descriptions). Three skills a hero. "
+                "Name the hero below when its name over the art is read badly; change it when you open the next hero.",
             )
         )
         controls = QHBoxLayout()
@@ -82,6 +86,22 @@ class SkillsPage(Page):
         self._overlay = QCheckBox("Badge on the game")
         self._overlay.setChecked(sys.platform == "win32")
         self._overlay.setEnabled(sys.platform == "win32")
+        self._hero = SteadyComboBox()
+        self._hero.setEditable(True)
+        self._hero.setInsertPolicy(SteadyComboBox.InsertPolicy.NoInsert)
+        self._hero.setMinimumWidth(240)
+        line = QLineEdit()
+        line.setPlaceholderText("Hero open in the game (empty: read its name)")
+        line.setClearButtonEnabled(True)
+        self._hero.setLineEdit(line)
+        completer = QCompleter(self._hero.model(), self._hero)
+        completer.setFilterMode(Qt.MatchFlag.MatchContains)
+        completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
+        self._hero.setCompleter(completer)
+        self._chosen = ""
+        """The hero named in the box: a plain string, because the reader asks for it from its own thread."""
+        self._hero.editTextChanged.connect(self._hero_named)
         self._hide = QCheckBox("Hide complete heroes")
         self._hide.setChecked(True)
         self._hide.toggled.connect(self._fill)
@@ -91,7 +111,7 @@ class SkillsPage(Page):
         copy = QPushButton("Copy export")
         copy.setToolTip("Everything read as text on the clipboard, to paste in the chat.")
         copy.clicked.connect(self._copy_export)
-        for widget in (self._start, self._overlay, self._hide):
+        for widget in (self._start, self._hero, self._overlay, self._hide):
             controls.addWidget(widget)
         controls.addStretch()
         controls.addWidget(export)
@@ -144,11 +164,24 @@ class SkillsPage(Page):
         self._rows = worklist(heroes, met_heroes(self.context.paths.home), self._tier_order, self._store)
         complete, started, skills, total = progress(self._rows)
         effects = len(self._store.effects())
+        self._fill_heroes()
         self._summary.setText(
             f"{complete} of {total} heroes complete  |  {started} started  |  {skills} skills read  |  "
             f"{effects} effects described"
         )
         self._fill()
+
+    def _hero_named(self, text: str) -> None:
+        self._chosen = text.strip()
+
+    def _fill_heroes(self) -> None:
+        """The heroes still to read, in the order of the table, to pick from (typing narrows the list)."""
+        typed = self._hero.currentText()
+        self._hero.blockSignals(True)
+        self._hero.clear()
+        self._hero.addItems([r.name for r in self._rows if not r.complete][:LIST_SIZE])
+        self._hero.setEditText(typed)
+        self._hero.blockSignals(False)
 
     def _fill(self) -> None:
         rows = [r for r in self._rows if not (self._hide.isChecked() and r.complete)][:LIST_SIZE]
@@ -176,7 +209,7 @@ class SkillsPage(Page):
             self._skills.stop()
             return
         self._log.clear()
-        if not self._skills.start(overlay=self._overlay.isChecked()):
+        if not self._skills.start(overlay=self._overlay.isChecked(), chosen=lambda: self._chosen or None):
             self._set_status("The Arena watch is running: stop it there first.", "warn")
             return
         self._set_status("Starting: reading the catalog...", "")

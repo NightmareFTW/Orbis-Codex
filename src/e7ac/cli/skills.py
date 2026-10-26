@@ -63,10 +63,22 @@ class ReadEvent:
 def identify(
     popup: SkillPopup, heroes: dict[str, ResolvedEntity], override: str | None = None
 ) -> tuple[str | None, str]:
-    """(hero code, "") for a popup: the name on the screen by the exact name or the margin rule, or the name given."""
-    if override:
-        return resolve_hero_code(override, heroes)
-    return resolve_hero_code(popup.hero, heroes)
+    """(hero code, "") for a popup: the name on the screen by the exact name or the margin rule, or the hero chosen.
+    The hero chosen wins when the screen's name is not clear (the name sits on the hero's art and is often cut short:
+    "Spirit Ey"), but never against a clear one: a name read exactly as another hero means the choice was not changed
+    when the next hero was opened (SPEC D96)."""
+    if not override:
+        return resolve_hero_code(popup.hero, heroes)
+    chosen, problem = (override, "") if override in heroes else resolve_hero_code(override, heroes)
+    if chosen is None:
+        return None, problem
+    seen, _ = resolve_hero_code(popup.hero, heroes) if popup.hero else (None, "")
+    if seen is not None and seen != chosen:
+        return None, (
+            f"the screen shows {heroes[seen].name!r} but the hero chosen is {heroes[chosen].name!r}: "
+            "choose the hero you opened (or clear the choice to use the name on the screen)"
+        )
+    return chosen, ""
 
 
 def store_popup(
@@ -203,6 +215,8 @@ class SkillWatchOptions:
     hwnd: int | None = None
     on_read: Callable[[ReadEvent], None] | None = None
     """Called with each popup stored (or refused)."""
+    chosen: Callable[[], str | None] | None = None
+    """The hero the user said is open (a name or code), asked at each popup; None or "" : read it from the screen."""
     status: Callable[[str], None] | None = None
 
 
@@ -230,7 +244,7 @@ def run_skill_watch(options: SkillWatchOptions, badge: WatchSignal, stop: thread
                 counts["ignored"] += 1
                 badge.say("Skills: hold a skill icon", "no skill popup on this screen", LIGHT)
                 continue
-            event = store_popup(store, heroes, popup)
+            event = store_popup(store, heroes, popup, options.chosen() if options.chosen is not None else None)
             counts["read"] += not event.problem
             typer.echo(("  " if not event.problem else "  ! ") + describe(event))
             if options.on_read is not None:
@@ -283,6 +297,9 @@ def _keep(image: Any, folder: Path) -> Path:
 def watch(
     hwnd: Annotated[int | None, typer.Option(help="Watch this window (handle from e7 capture --list-windows).")] = None,
     signal: Annotated[bool, typer.Option(help="Show a small badge on the game.")] = True,
+    hero: Annotated[
+        str | None, typer.Option(help="The hero you are reading (name or code), when its name is not read well.")
+    ] = None,
 ) -> None:
     """Watch the game and read each skill popup you open: in a hero's Skill tab, hold each skill icon for about two
     seconds (the popup stays while you hold it). Read-only: only screen pixels are copied. Ctrl+C stops."""
@@ -295,7 +312,7 @@ def watch(
         if why:
             typer.echo(f"note: {why}", err=True)
     try:
-        run_skill_watch(SkillWatchOptions(hwnd=hwnd), badge, stop)
+        run_skill_watch(SkillWatchOptions(hwnd=hwnd, chosen=(lambda: hero) if hero else None), badge, stop)
     except KeyboardInterrupt:
         stop.set()
     finally:

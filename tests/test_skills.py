@@ -223,6 +223,31 @@ def test_a_hero_that_is_not_in_the_catalog_is_not_stored_and_says_why(
     assert "Blood Blade Karin: The Caress of Mercy" in given.output
 
 
+def test_the_hero_chosen_wins_over_a_name_cut_short_but_never_over_a_clear_one(
+    synthetic_catalog: list[str], isolated_home: AppPaths
+) -> None:
+    """The name sits on the hero's art and is read cut short ("Spirit Ey"): the hero the user named is taken. A name
+    read exactly as another hero means the choice was not changed for the next hero (SPEC D96)."""
+    from dataclasses import replace
+
+    from e7ac.cli.roster import _catalog_heroes, _engine
+    from e7ac.cli.skills import identify
+    from e7ac.storage.db import session_scope
+
+    with session_scope(_engine()) as session:
+        heroes = _catalog_heroes(session) or {}
+    read = popup()
+    cut = replace(read, hero="Blood Bl")
+    assert identify(cut, heroes) == (None, "no catalog hero is called 'Blood Bl' (OCR error, or run: e7 catalog sync)")
+    assert identify(cut, heroes, "Blood Blade Karin") == ("c2011", "")
+    assert identify(replace(read, hero=None), heroes, "c2011") == ("c2011", "")
+    assert identify(replace(read, hero="Blood Blade Karin"), heroes, "Blood Blade Karin") == ("c2011", "")
+    code, problem = identify(replace(read, hero="Karin"), heroes, "Blood Blade Karin")
+    assert code is None and "shows 'Karin' but the hero chosen is 'Blood Blade Karin'" in problem
+    assert identify(replace(read, hero="Karin"), heroes) == ("c1011", "")  # nothing chosen: the screen decides
+    assert identify(cut, heroes, "Nobody Atall")[0] is None  # a hero that does not exist is not guessed
+
+
 class Badge:
     """A badge that records what it is told."""
 

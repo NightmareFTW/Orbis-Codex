@@ -4,6 +4,7 @@ Qt signals. Never at the same time as the Arena watch (both capture the game win
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
 from typing import Any, Final
 
 from PySide6.QtCore import QObject, Signal
@@ -40,15 +41,16 @@ class SkillController(QObject):
     def running(self) -> bool:
         return self._state != STOPPED
 
-    def start(self, *, overlay: bool) -> bool:
-        """False when something is already watching the game."""
+    def start(self, *, overlay: bool, chosen: Callable[[], str | None] | None = None) -> bool:
+        """False when something is already watching the game. `chosen`: the hero the user says is open, asked at each
+        popup (None: the name on the screen is used)."""
         if self.running or (self.rival is not None and self.rival.running):
             return False
         from e7ac.cli import arena as arena_cli
         from e7ac.cli import skills as skills_cli
 
         self._stop.clear()
-        options = skills_cli.SkillWatchOptions(on_read=self.read.emit)
+        options = skills_cli.SkillWatchOptions(on_read=self.read.emit, chosen=chosen)
         self._set_state(RUNNING)
 
         def job() -> None:
