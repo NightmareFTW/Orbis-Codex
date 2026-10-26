@@ -11,7 +11,7 @@ import threading
 from typing import Any
 
 from PySide6.QtCore import QObject, QSize, Qt, Signal
-from PySide6.QtGui import QGuiApplication, QIcon
+from PySide6.QtGui import QBrush, QColor, QGuiApplication, QIcon
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -30,11 +30,12 @@ from e7ac.arena.met import met_heroes
 from e7ac.cli.skills import describe
 from e7ac.skills.export import export_text
 from e7ac.skills.store import SkillStore, skills_dir
+from e7ac.skills.summary import hero_summary
 from e7ac.skills.worklist import SkillRow, progress, worklist
 from e7ac.ui.context import AppContext
 from e7ac.ui.pages.base import Page, card, heading
 from e7ac.ui.skill_controller import RUNNING, STOPPED, STOPPING
-from e7ac.ui.theme import status_style
+from e7ac.ui.theme import STATUS_COLOURS, status_style
 from e7ac.ui.widgets import SteadyComboBox
 
 HEADERS = ("#", "Hero", "Code", "Skills", "Why")
@@ -67,6 +68,8 @@ class SkillsPage(Page):
         self._skills = context.skills
         self._store = SkillStore(skills_dir(context.paths.home))
         self._rows: list[SkillRow] = []
+        self._codes: list[str] = []
+        """The hero of each row of the table, in order."""
         self._tier_order: list[str] = []
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 20, 24, 20)
@@ -105,7 +108,7 @@ class SkillsPage(Page):
         """The hero named in the box: a plain string, because the reader asks for it from its own thread."""
         self._hero.editTextChanged.connect(self._hero_named)
         self._hide = QCheckBox("Hide complete heroes")
-        self._hide.setChecked(True)
+        self._hide.setChecked(False)
         self._hide.toggled.connect(self._fill)
         export = QPushButton("Export file")
         export.setToolTip("Write everything read as one text file, to send.")
@@ -145,7 +148,14 @@ class SkillsPage(Page):
         self._table.verticalHeader().setDefaultSectionSize(40)
         self._table.verticalHeader().hide()
         self._table.horizontalHeader().setStretchLastSection(True)
+        self._table.itemSelectionChanged.connect(self._selected)
         layout.addWidget(self._table, 3)
+
+        self._detail = QPlainTextEdit()
+        self._detail.setReadOnly(True)
+        self._detail.setFixedHeight(170)
+        self._detail.setPlaceholderText("Select a hero: its three skills, in order, as they were read.")
+        layout.addWidget(self._detail)
 
         self._log = QPlainTextEdit()
         self._log.setReadOnly(True)
@@ -193,20 +203,52 @@ class SkillsPage(Page):
 
     def _fill(self) -> None:
         rows = [r for r in self._rows if not (self._hide.isChecked() and r.complete)][:LIST_SIZE]
+        keep = self._selected_code()
         table = self._table
+        table.blockSignals(True)
         table.setRowCount(len(rows))
+        self._codes = [r.code for r in rows]
+        done = QBrush(QColor(STATUS_COLOURS["ok"]))
         for number, row in enumerate(rows):
             cells = [
                 QTableWidgetItem(str(number + 1)),
                 QTableWidgetItem(QIcon(self.context.portraits.pixmap(row.code, 32)), row.name),
                 QTableWidgetItem(row.code),
                 QTableWidgetItem(row.marks),
-                QTableWidgetItem(row.why),
+                QTableWidgetItem(row.why + ("  -  complete" if row.complete else "")),
             ]
             for column, cell in enumerate(cells):
+                if row.complete:
+                    cell.setForeground(done)
                 table.setItem(number, column, cell)
         table.resizeColumnsToContents()
         table.horizontalHeader().setStretchLastSection(True)
+        table.blockSignals(False)
+        if keep in self._codes:
+            table.selectRow(self._codes.index(keep))
+        self._selected()
+
+    def _selected_code(self) -> str | None:
+        rows = self._table.selectionModel().selectedRows() if self._table.selectionModel() is not None else []
+        return self._codes[rows[0].row()] if rows and rows[0].row() < len(self._codes) else None
+
+    def _selected(self) -> None:
+        """The skills of the selected hero, in order, under the table."""
+        code = self._selected_code()
+        if code is None:
+            self._detail.clear()
+            return
+        name = next((r.name for r in self._rows if r.code == code), code)
+        self._detail.setPlainText(hero_summary(name, code, self._store.load(code)))
+
+    def show_hero(self, code: str) -> None:
+        """Select a hero's row (the one just read) and show it, scrolled into view."""
+        if code in self._codes:
+            row = self._codes.index(code)
+            self._table.selectRow(row)
+            item = self._table.item(row, 0)
+            if item is not None:
+                self._table.scrollToItem(item)
 
     def _tiers_ready(self, order: list[str]) -> None:
         self._tier_order = order
@@ -225,6 +267,8 @@ class SkillsPage(Page):
     def _read(self, event: Any) -> None:
         self._set_status(describe(event), "warn" if event.problem else "ok")
         self.reload()
+        if event.hero_code is not None:
+            self.show_hero(event.hero_code)  # the hero just read stays in view, with its skills in order
 
     def _said(self, top: str, bottom: str, _colour: str) -> None:
         if self._skills.running:

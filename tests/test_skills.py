@@ -189,6 +189,26 @@ def test_a_popup_is_placed_by_its_name_among_epic7dbs_skills_and_the_earlier_one
     assert assign(store, "c1", kit) == 0  # nothing left to place
 
 
+def test_a_hero_is_summarised_skill_by_skill_in_its_own_order(tmp_path: Path) -> None:
+    from e7ac.skills.summary import hero_summary
+
+    store = SkillStore(tmp_path)
+    store.save("c1", popup(name="Third Skill", cooldown=4), NOW, slot=3)
+    store.save("c1", popup(name="First Skill", level=None), NOW, slot=1)
+    text = hero_summary("Alpha", "c1", store.load("c1"))
+    lines = text.splitlines()
+    assert lines[0] == "Alpha (c1): 2 of 3 skills read"
+    assert lines[1].startswith("S1  First Skill") and "+0" in lines[1] and "no cooldown" in lines[1]
+    assert any(line == "S2  - not read yet" for line in lines)  # the skill that is missing is named
+    third = next(line for line in lines if line.startswith("S3  Third Skill"))
+    assert "cooldown 4" in third and "3 enhancement steps" in third and "effects: Decrease Defense" in third
+    store.save("c1", popup(name="Sixth Sense", cooldown=None), NOW, slot=2, passive=True)
+    passive = next(line for line in hero_summary("Alpha", "c1", store.load("c1")).splitlines() if "Sixth Sense" in line)
+    assert passive.startswith("S2  Sixth Sense (passive)")
+    store.save("c2", popup(name="Not placed"), NOW)
+    assert "?   Not placed" in hero_summary("Beta", "c2", store.load("c2"))
+
+
 def test_a_second_reading_keeps_the_effect_panels_the_first_one_caught(tmp_path: Path) -> None:
     store = SkillStore(tmp_path)
     store.save("c1", popup(), NOW)

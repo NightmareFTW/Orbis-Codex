@@ -850,16 +850,25 @@ def test_the_skill_reader_page_lists_what_is_missing_and_exports_what_was_read(
     page: Any = window.page("skills")
     table = page._table
     total = len(context.heroes())
+    assert table.rowCount() == total  # a hero that is complete stays in the list, so what was read can be seen
     shown = [table.item(r, 1).text() for r in range(table.rowCount())]
-    assert "Blood Blade Karin" not in shown and len(shown) == total - 1  # its three skills are read: hidden
     assert f"1 of {total} heroes complete" in page._summary.text() and "3 skills read" in page._summary.text()
-    page._hide.setChecked(False)
-    assert table.rowCount() == total
     marks = {table.item(r, 1).text(): table.item(r, 3).text() for r in range(total)}
-    assert marks["Blood Blade Karin"] == "? ? ?" and marks[shown[0]] == "- - -"
+    other = next(h for h in shown if h != "Blood Blade Karin")
+    assert marks["Blood Blade Karin"] == "? ? ?" and marks[other] == "- - -"
+    karin = shown.index("Blood Blade Karin")
+    assert table.item(karin, 4).text().endswith("complete")
+    page._hide.setChecked(True)  # the list can be cut down to what is still to read
+    assert [table.item(r, 1).text() for r in range(table.rowCount())] == [h for h in shown if h != "Blood Blade Karin"]
+    page._hide.setChecked(False)
     event = ReadEvent("c2011", "Blood Blade Karin", "Lethal Strike", 5, False, False, ())
     context.skills.read.emit(event)
     assert "Blood Blade Karin: Lethal Strike +5 (again)" in page._status.text()
+    assert table.item(table.currentRow(), 1).text() == "Blood Blade Karin"  # the hero just read is selected ...
+    detail = page._detail.toPlainText()
+    assert (
+        detail.startswith("Blood Blade Karin (c2011): 3 of 3 skills read") and "Lethal Strike" in detail
+    )  # ... and shown
     page._export()
     exported = (skills_dir(context.paths.home) / "skills_export.txt").read_text(encoding="utf-8")
     assert "== Blood Blade Karin (c2011)" in exported and "Lethal Strike" in exported
