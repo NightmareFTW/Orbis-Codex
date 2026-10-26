@@ -341,3 +341,62 @@ def test_text_far_to_the_right_of_a_popup_is_not_one_of_its_effect_panels() -> N
     beside = parse_skill_popup([*synthetic(), *column])
     assert plain is not None and beside is not None
     assert [e.title for e in beside.effects] == [e.title for e in plain.effects]
+
+
+def lilibet_passive() -> list[TextLine]:
+    """Designer Lilibet's passive, Emergency Stitching, as laid out in the user's capture (2026-10-26, 1268 x 873; the
+    boxes are read off the picture): no badge and no cost row, a paragraph, "Skill Enhance" with steps whose text
+    itself begins with "+3", and two effect panels at the right."""
+    description = [
+        "Starts the first battle with 30 Fighting",
+        "Spirit. When an enemy's turn ends, gains",
+        "10 Fighting Spirit for each debuff",
+        "inflicted on an ally, and when the",
+        "caster's Fighting Spirit is full, consumes",
+        "all Fighting Spirit to dispel all debuffs",
+        "from the caster and grants increased",
+        "Defense and immunity for 1 turn before",
+        "increasing Combat Readiness by 40%.",
+    ]
+    steps = [3, 4, 4, 4, 5]
+    rows = [
+        line("Dark", 80, 28, 60, 34),
+        line("WarriorCancer", 150, 26, 250, 38),
+        line("Designer Lilibet", 32, 68, 385, 60),
+        line("Health %", 134, 300, 100, 30),
+        line("Emergency Stitching", 452, 207, 281, 40),
+        *[line(text, 335, 322 + 29.5 * i, 450, 30) for i, text in enumerate(description)],
+        line("Skill Enhance", 336, 624, 157, 32),
+        line("Increase Defense", 897, 210, 210, 36),
+        line("Increases Defense by 60%.", 840, 262, 310, 28),
+        line("Immunity", 897, 343, 120, 34),
+        line("Cannot be affected by any debuffs", 840, 395, 385, 28),
+        line("or some harmful effects.", 840, 423, 250, 28),
+        line("Hero Rating", 95, 735, 135, 36),
+        line("Preview Skills", 770, 820, 180, 34),
+    ]
+    for number, spirit in enumerate(steps, 1):
+        y = 662 + 33 * (number - 1)
+        rows += [
+            line(f"+{number}", 336, y + 4, 26, 24),
+            line(f"+{spirit} Fighting Spirit at the start of the first battle", 387, y, 405, 30),
+        ]
+    return rows
+
+
+def test_a_step_that_begins_with_a_plus_is_not_taken_for_the_title() -> None:
+    """Without a badge the first step ("+1", "+3 Fighting Spirit at the start ...") looked like a badge with its title
+    and the skill was stored under that text (the user's Designer Lilibet, 2026-10-26)."""
+    popup = parse_skill_popup(lilibet_passive())
+    assert popup is not None
+    assert (popup.hero, popup.name, popup.level, popup.cooldown) == (
+        "Designer Lilibet",
+        "Emergency Stitching",
+        None,
+        None,
+    )
+    assert popup.text.startswith("Starts the first battle with 30 Fighting Spirit.")
+    assert popup.text.endswith("increasing Combat Readiness by 40%.")
+    assert [level for level, _ in popup.enhance] == [1, 2, 3, 4, 5]
+    assert popup.enhance[0][1] == "+3 Fighting Spirit at the start of the first battle" and popup.enhance[4][0] == 5
+    assert [e.title for e in popup.effects] == ["Increase Defense", "Immunity"]

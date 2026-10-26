@@ -120,7 +120,11 @@ def parse_skill_popup(lines: Sequence[TextLine], titles: Sequence[str] = ()) -> 
     rows = [(line, clean(line.text)) for line in lines if clean(line.text)]
     if len(rows) < MIN_LINES:
         return None
-    title = _title(rows) or _title_without_badge(rows) or _title_above_description(rows) or _title_named(rows, titles)
+    label = next((r for r in rows if r[1].lower() == "skill enhance"), None)
+    # The rows a title can be among: above the "Skill Enhance" label. The steps under it start with "+1", "+2" ...
+    # and one whose text begins "+3 Fighting Spirit at the start" looks like a badge with a title.
+    head = rows if label is None else [r for r in rows if r[0].box.y1 <= label[0].box.y0 + 4]
+    title = _title(head) or _title_without_badge(head) or _title_above_description(rows) or _title_named(rows, titles)
     if title is None:
         return None
     badge, title_line = title
