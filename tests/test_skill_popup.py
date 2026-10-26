@@ -459,6 +459,64 @@ def test_an_icon_glyph_read_beside_a_panel_title_is_not_taken_for_the_last_line_
     assert by_title["Bomb"] == "At the end of the duration, suffers damage."
 
 
+def assault_panels(merged: bool) -> list[TextLine]:
+    """The effect panels of the user's Assault capture (Tactical Archetype Coli, 2026-10-26) in the popup's scale: every
+    title has an icon at its left, the OCR reads the icon as "XV" (a row of its own, or merged into the title's line
+    when it is "Bomb"), the title of Energy Depletion wraps, Detonate has no icon, and Cancel shows behind."""
+    rows = [
+        line("XV", 1176, 28, 52, 53),
+        line("Overload (Unique Effect)", 1262, 31, 440, 56),
+        line("Increases Attack and Speed by", 1180, 104, 560, 50),
+        line("50%. Upon ending, inflicts energy", 1181, 144, 560, 49),
+        line("depletion for 1 turn.", 1182, 186, 360, 41),
+        line("XV", 1176, 283, 52, 67),
+        line("Energy Depletion (Unique", 1262, 280, 470, 52),
+        line("Effect)", 1260, 315, 130, 59),
+        line("Decreases Attack and Speed by", 1180, 368, 560, 49),
+        line("50%.", 1180, 405, 80, 50),
+        *(
+            [line("XV Bomb", 1174, 480, 260, 81)]
+            if merged
+            else [line("XV", 1176, 480, 52, 67), line("Bomb", 1262, 490, 150, 54)]
+        ),
+        line("At the end of the duration, suffers", 1182, 575, 560, 44),
+        line("damage proportional to the", 1182, 616, 520, 42),
+        line("caster's Attack and is stunned for", 1182, 653, 560, 39),
+        line("1 turn. Duration cannot be", 1182, 690, 480, 42),
+        line("extended or decreased, and stun", 1182, 729, 540, 41),
+        line("effect ignores Effect Resistance.", 1185, 767, 560, 41),
+        line("Detonate", 1180, 882, 170, 50),
+        line("Instantly activates designated", 1182, 955, 560, 44),
+        line("debuffs inflicted on the enemy.", 1182, 993, 560, 42),
+        line("ncel", 1500, 40, 60, 40),  # what is left of the Cancel button behind the first panel
+    ]
+    first = 105 - 31  # the first title sits on the popup title's row, as in the capture
+    moved = [line(r.text, r.box.x0, r.box.y0 + first, r.box.x1 - r.box.x0, r.box.height) for r in rows]
+    return [r for r in synthetic() if r.box.x0 < 1100] + moved
+
+
+def test_effect_panels_with_icons_stay_apart_whatever_the_icon_is_read_as() -> None:
+    """The Bomb title's icon, read as "XV", glued the Bomb panel to Energy Depletion's (the user's Assault)."""
+    for merged in (False, True):
+        popup = parse_skill_popup(assault_panels(merged))
+        assert popup is not None
+        assert [(e.title, e.marks) for e in popup.effects] == [
+            ("Overload", ("Unique Effect",)),
+            ("Energy Depletion", ("Unique Effect",)),
+            ("Bomb", ()),
+            ("Detonate", ()),
+        ], merged
+        text = {e.title: e.text for e in popup.effects}
+        assert (
+            text["Overload"] == "Increases Attack and Speed by 50%. Upon ending, inflicts energy depletion for 1 turn."
+        )
+        assert text["Energy Depletion"] == "Decreases Attack and Speed by 50%."
+        assert text["Bomb"].startswith("At the end of the duration, suffers") and text["Bomb"].endswith(
+            "Effect Resistance."
+        )
+        assert text["Detonate"] == "Instantly activates designated debuffs inflicted on the enemy."
+
+
 def test_the_journals_buttons_are_not_part_of_the_last_panel() -> None:
     rows = [*synthetic(), line("Preview Skills", 1180, 700, 200, 40)]
     popup = parse_skill_popup(rows)

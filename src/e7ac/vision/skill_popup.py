@@ -425,36 +425,66 @@ def _steps(rows: Sequence[tuple[TextLine, str]]) -> tuple[tuple[int, str], ...]:
 def _panels(
     side: Sequence[tuple[TextLine, str]], title: TextLine, tails: Sequence[tuple[TextLine, str]] = ()
 ) -> tuple[EffectPanel, ...]:
-    """The effect panels: the lines right of the main column from the title's row down, split where the vertical gap
-    between two lines grows (a panel's padding), the first line of each being its title. `tails`: short lines that
-    only count as the last wrapped line of a panel, right under its previous line (SPEC D106: "30%." and "it." were
-    dropped as noise and "decreases Evasion by" lost its number)."""
-    rows = sorted((r for r in side if r[0].box.y0 >= title.box.y0 - 30), key=lambda r: r[0].box.y0)
+    """The effect panels: the lines right of the main column from the title's row down, the first line of each being
+    its title (SPEC D106). A panel starts where the vertical gap grows (its padding) and also where a title shows
+    itself: it is indented by its icon (the user's Assault capture: titles at +58 px of the text's left edge), it is
+    taller than a text line (the icon is read with it: "XV Bomb"), or an icon glyph was read at its left ("XV").
+    `tails`: short lines that only count as the last wrapped line of a panel, right under its previous line ("30%.",
+    "it."), never an icon."""
+    top = title.box.y0 - 30
+    rows = sorted((r for r in side if r[0].box.y0 >= top), key=lambda r: r[0].box.y0)
     if not rows:
         return ()
     height = median(r[0].box.height for r in rows)
     lefts = sorted(r[0].box.x0 for r in rows)
     anchor = max(lefts, key=lambda x: sum(abs(y - x) <= 15 for y in lefts))  # the left edge most lines share
-    column = [r for r in (*side, *tails) if anchor - 15 <= r[0].box.x0 <= anchor + 3.2 * height]
+    column = [r for r in (*side, *tails) if anchor - 15 <= r[0].box.x0 <= anchor + 3.2 * height and r[0].box.y0 >= top]
     loose = {id(r) for r in tails}
-    titled = {  # a line with an icon glyph read at its left on the same row is a panel's title ("XV" + "Bomb")
-        id(r) for r in column if any(_same_row(r[0], t[0]) and t[0].box.x1 <= r[0].box.x0 + 8 for t in tails)
+    glyphs = {  # an icon glyph read beside a title: on its row, at its left
+        id(r)
+        for r in column
+        if id(r) in loose and any(_same_row(r[0], o[0]) and r[0].box.x1 <= o[0].box.x0 + 8 for o in column)
     }
-    kept = sorted((r for r in column if r[0].box.y0 >= title.box.y0 - 30), key=lambda r: r[0].box.y0)
+    titled = {
+        id(o)
+        for o in column
+        if any(_same_row(g[0], o[0]) and g[0].box.x1 <= o[0].box.x0 + 8 for g in column if id(g) in glyphs)
+    }
+    kept = sorted((r for r in column if id(r) not in glyphs), key=lambda r: r[0].box.y0)
     groups: list[list[tuple[TextLine, str]]] = []
-    for row in kept:
-        follows = bool(groups) and row[0].box.y0 - groups[-1][-1][0].box.y1 <= 0.8 * height and id(row) not in titled
-        if id(row) in loose and not (
+    starts: list[bool] = []  # whether the last row of the group is a title row
+    for original in kept:
+        row = _untangled(original, height)
+        line = row[0]
+        follows = bool(groups) and line.box.y0 - groups[-1][-1][0].box.y1 <= 0.8 * height
+        indented = line.box.x0 >= anchor + 1.2 * height
+        heading = id(original) in titled or indented or line.box.height >= TALL * height
+        if id(original) in loose and not (
             follows
-            and abs(row[0].box.x0 - groups[-1][-1][0].box.x0) <= height  # a wrapped line starts where the one above did
-            and not any(_same_row(row[0], other[0]) for other in column if other is not row)  # an icon is not a tail
+            and abs(line.box.x0 - groups[-1][-1][0].box.x0) <= height  # a wrapped line starts where the last did
         ):
             continue
-        if follows:
+        wraps = follows and heading and indented and starts[-1]  # the second line of a title that wraps
+        if follows and (not heading or wraps):
             groups[-1].append(row)
+            starts[-1] = heading
         else:
             groups.append([row])
+            starts.append(heading)
     return tuple(_panel(g) for g in _flag_bodies(groups, height) if len(g) >= 2)
+
+
+TALL: Final = 1.35
+"""A row this much taller than a text line has the panel's icon read with its title."""
+_GLYPH: Final = re.compile(r"^[^aeiouAEIOU\s\d]{1,3}\s+(?=\S)")
+
+
+def _untangled(row: tuple[TextLine, str], height: float) -> tuple[TextLine, str]:
+    """A title read together with its icon ("XV Bomb": a tall row) without the icon's glyph at its start."""
+    line, text = row
+    if line.box.height >= TALL * height:
+        return line, _GLYPH.sub("", text, count=1)
+    return row
 
 
 def _same_row(a: TextLine, b: TextLine) -> bool:
