@@ -49,6 +49,7 @@ class WatchSignal(Protocol):
     def say(self, top: str, bottom: str, colour: str) -> None: ...
     def capturable(self, on: bool) -> bool: ...
     def resize(self, size: str) -> None: ...
+    def region(self) -> Rect | None: ...
     def close(self) -> None: ...
 
 
@@ -64,6 +65,9 @@ class NoSignal:
         return False
 
     def resize(self, size: str) -> None: ...
+
+    def region(self) -> Rect | None:
+        return None
 
     def close(self) -> None: ...
 
@@ -114,6 +118,7 @@ class TkBadge:
         self._affinity = threading.Event()
         self.ready = threading.Event()
         self.excluded = False
+        self._region: Rect | None = None
         self._messages: queue.Queue[tuple[str, Any]] = queue.Queue()
         threading.Thread(target=self._run, name="e7-watch-signal", daemon=True).start()
 
@@ -152,6 +157,11 @@ class TkBadge:
     def resize(self, size: str) -> None:
         """Another size, at once (the window's size choice)."""
         self._messages.put(("size", size))
+
+    def region(self) -> Rect | None:
+        """Where the badge is on the screen now (None while it is hidden): the watches check whether it shows in the
+        picture they read (`ui.badge_probe`)."""
+        return self._region
 
     def close(self) -> None:
         self._messages.put(("close", None))
@@ -215,9 +225,11 @@ class TkBadge:
                 spot = _spot(value, self.excluded, root.winfo_screenheight(), *fitted[0])
                 if spot is None:
                     root.withdraw()
+                    self._region = None
                 else:
                     root.geometry(f"{fitted[0][0]}x{fitted[0][1]}+{spot[0]}+{spot[1]}")
                     root.deiconify()
+                    self._region = Rect(spot[0], spot[1], fitted[0][0], fitted[0][1])
             elif kind == "size":
                 size[0] = value
                 fitted[0] = fit()

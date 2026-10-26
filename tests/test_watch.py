@@ -76,6 +76,9 @@ class RecordingSignal:
     def result(self, name: str, outcome: str, waiting: int) -> None:
         self.events.append(("result", name, outcome, waiting))
 
+    def region(self) -> None:
+        return None
+
     def close(self) -> None:
         self.events.append(("close",))
 

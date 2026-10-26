@@ -6,10 +6,12 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any
 
+import numpy as np
 import pytest
 
 from e7ac.ui.badge_view import SHRINK, BadgeView, mix, shorten
 from e7ac.ui.watch_signal import AMBER, GREEN, LIGHT, metrics
+from e7ac.vision.window import Rect
 
 
 def test_mix_goes_from_one_colour_to_the_other() -> None:
@@ -82,3 +84,46 @@ def test_a_badge_without_buttons_has_no_plates_and_a_long_line_is_shrunk_then_cu
     text, font = badge.fitted(long_line, badge.fonts[1], "normal", 200)
     assert text.endswith("…") and abs(font.cget("size")) <= abs(full.cget("size"))
     assert abs(font.cget("size")) >= round(badge.fonts[1] * SHRINK) - 1
+
+
+def _badge_picture(game: np.ndarray, rect: Rect, alpha: float = 0.92) -> np.ndarray:
+    """The badge as BadgeView draws it (the panel's gradient, the gold edge), 92% opaque over the game."""
+    from e7ac.ui.badge_probe import _bgr
+    from e7ac.ui.badge_view import EDGE, PANEL_BOTTOM, PANEL_TOP
+
+    out = game.astype(np.float64)
+    top, bottom, gold = _bgr(PANEL_TOP), _bgr(PANEL_BOTTOM), _bgr(EDGE)
+    for y in range(rect.height):
+        colour = top + (bottom - top) * (y / (rect.height - 1))
+        row = out[rect.top + y, rect.left : rect.left + rect.width]
+        out[rect.top + y, rect.left : rect.left + rect.width] = (1 - alpha) * row + alpha * colour
+    for y in (0, rect.height - 1):
+        out[rect.top + y, rect.left : rect.left + rect.width] = (1 - alpha) * game[
+            rect.top + y, rect.left : rect.left + rect.width
+        ] + alpha * gold
+    return out.round().astype(np.uint8)
+
+
+def test_the_badge_is_told_in_the_picture_by_its_gradient_and_gold_edge_and_blanked() -> None:
+    from e7ac.ui.badge_probe import badge_visible, hide_badge
+
+    rng = np.random.default_rng(3)
+    rect = Rect(100, 8, 220, 60)
+    for game in (
+        rng.integers(0, 255, (400, 640, 3)).astype(np.uint8),  # a busy game screen
+        np.zeros((400, 640, 3), np.uint8),  # a black one
+        np.full((400, 640, 3), 90, np.uint8),
+    ):
+        assert not badge_visible(game, rect)  # the badge is hidden from the capture: nothing there
+        seen = _badge_picture(game, rect)
+        assert badge_visible(seen, rect)
+        assert not badge_visible(seen, Rect(300, 200, 220, 60))  # nor anywhere else
+    seen = _badge_picture(rng.integers(0, 255, (400, 640, 3)).astype(np.uint8), rect)
+    out, found = hide_badge(seen, Rect(0, 0, 640, 400), Rect(100, 8, 220, 60))
+    assert found and not out[8:68, 100:320].any() and out[0:8].any()  # only the badge's place is blanked
+    assert seen[8:68, 100:320].any()  # the picture handed in is not changed
+    same, found = hide_badge(seen, Rect(0, 0, 640, 400), None)  # no badge: nothing to hide
+    assert not found and same is seen
+    shifted, found = hide_badge(seen, Rect(50, 0, 640, 400), Rect(150, 8, 220, 60))  # the game window is not at 0, 0
+    assert found and not shifted[8:68, 100:320].any()
+    assert not hide_badge(seen, Rect(0, 0, 640, 400), Rect(500, 300, 220, 60))[1]  # the badge is elsewhere

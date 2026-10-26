@@ -202,5 +202,8 @@ class Relay:
     def resize(self, size: str) -> None:
         self._overlay.resize(size)
 
+    def region(self) -> Rect | None:
+        return self._overlay.region()
+
     def close(self) -> None:
         self._overlay.close()

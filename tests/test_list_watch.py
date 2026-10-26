@@ -363,6 +363,9 @@ def test_the_watch_says_what_it_sees_and_keeps_the_picture_when_nothing_is_found
         def say(self, top: str, bottom: str, colour: str) -> None:
             said.append((top, bottom))
 
+        def region(self) -> None:
+            return None
+
         def close(self) -> None: ...
 
     def stream(client: Any, hwnd: Any) -> Any:

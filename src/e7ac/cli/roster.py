@@ -692,6 +692,7 @@ def watch(
     import threading
 
     from e7ac.cli import capture as capture_cli
+    from e7ac.ui.badge_probe import hide_badge
     from e7ac.vision.capture import CaptureError, Frame, capture_name, save_png
     from e7ac.vision.watch import ScreenWatcher, thumbnail
     from e7ac.vision.window import PROFILES, WindowError, select_game_window
@@ -781,6 +782,7 @@ def watch(
             was_settling = watcher.settling
             if badge is not None:
                 badge.place(frame.window.client)
+                image, _ = hide_badge(image, frame.window.client, badge.region())  # SPEC D105
             if watcher.feed(thumbnail(image), watch_clock()):
                 with unread_lock:
                     unread[0] += 1

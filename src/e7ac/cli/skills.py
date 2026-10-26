@@ -39,6 +39,7 @@ from e7ac.skills.worklist import progress, worklist
 from e7ac.sources.epic7db import SkillInfo, fetch_kit, fetch_tier_order, slug
 from e7ac.sources.http import FetchError
 from e7ac.storage.db import session_scope
+from e7ac.ui.badge_probe import hide_badge
 from e7ac.ui.watch_signal import AMBER, GREEN, LIGHT, NoSignal, WatchSignal
 from e7ac.vision.skill_popup import SkillPopup, looks_like_popup, parse_skill_popup, read_hero_name
 
@@ -328,7 +329,7 @@ def run_skill_watch(options: SkillWatchOptions, badge: WatchSignal, stop: thread
     store = SkillStore(skills_dir(paths.home))
     reader = roster_cli.reader_factory()
     pending: queue.Queue[Any | None] = queue.Queue()
-    counts = {"read": 0, "ignored": 0}
+    counts = {"read": 0, "ignored": 0, "evidence": 0}
     kit_of = make_kit_of(paths)
     memory = HeroMemory()
     """The hero seen on its own screen (SPEC D97): its name is whole there, and covered once a skill is held."""
@@ -338,9 +339,13 @@ def run_skill_watch(options: SkillWatchOptions, badge: WatchSignal, stop: thread
             lines = reader.read(image)
             if shows_window(lines):  # the Orbis window is on top of the game: its text is not the game's
                 counts["ignored"] += 1
+                typer.echo(f"  ! the Orbis window is in the picture{_evidence(image, counts, paths, 'window')}")
                 badge.say("Skills: the Orbis window is over the game", "move it beside the game", AMBER)
                 continue
-            lines = without_badge(lines)  # nor is the badge's own text
+            clean_lines = without_badge(lines)  # nor is the badge's own text
+            if len(clean_lines) != len(lines):
+                typer.echo(f"  ! the badge's own text is in the picture{_evidence(image, counts, paths, 'badge')}")
+            lines = clean_lines
             popup = parse_skill_popup(lines)
             if popup is None and (known := memory.recall(clock())) is not None and heroes[known].name:
                 titles = [n for info in kit_of(heroes[known].name).values() for n in info.names]
@@ -387,12 +392,20 @@ def run_skill_watch(options: SkillWatchOptions, badge: WatchSignal, stop: thread
     typer.echo("Watching the game: open a hero's Skill tab and hold each skill icon for about 2 seconds. Ctrl+C stops.")
     watcher = ScreenWatcher(settle=SETTLE)
     was_settling = False
+    badge_seen = False
     for item in game_frames(client, options.hwnd):
         if stop.is_set():
             break
         if item is not None:
             frame, area = item
             badge.place(area)
+            frame, in_picture = hide_badge(frame, area, badge.region())
+            if in_picture and not badge_seen:
+                badge_seen = True
+                typer.echo(
+                    "  note: the badge shows in the screen capture on this PC (hiding it from the capture does not "
+                    "hold here): its place is blanked out of what is read"
+                )
             if watcher.feed(thumbnail(frame), clock()):
                 pending.put(frame)
                 badge.say("Skills: reading...", "keep holding until it says Read", LIGHT)
@@ -404,6 +417,18 @@ def run_skill_watch(options: SkillWatchOptions, badge: WatchSignal, stop: thread
     pending.put(None)
     thread.join(timeout=30)
     typer.echo(f"Stopped. {counts['read']} skill popup(s) read, {counts['ignored']} screen(s) without one.")
+
+
+EVIDENCE: Final = 3
+"""Pictures kept per run of a screen that showed the program's own text: to see what was on the screen."""
+
+
+def _evidence(image: Any, counts: dict[str, int], paths: AppPaths, tag: str) -> str:
+    """Keep the picture (the first `EVIDENCE` of a run) and say where; what to append to the console line."""
+    if counts["evidence"] >= EVIDENCE:
+        return ""
+    counts["evidence"] += 1
+    return f": picture kept at {_keep(image, paths.captures_dir / 'skills', 'own-' + tag)}"
 
 
 def _keep(image: Any, folder: Path, tag: str = "skill") -> Path:

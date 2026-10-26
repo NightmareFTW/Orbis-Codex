@@ -320,6 +320,9 @@ def test_watch_reads_your_team_then_the_attack_guide_and_shows_the_odds(monkeypa
         def say(self, top: str, bottom: str, colour: str) -> None:
             said.append((top, bottom))
 
+        def region(self) -> None:
+            return None
+
         def close(self) -> None: ...
 
     def frames(client: object, hwnd: int | None) -> Any:
@@ -407,6 +410,9 @@ def test_check_again_reads_another_opponent(monkeypatch: pytest.MonkeyPatch) -> 
         def say(self, top: str, bottom: str, colour: str) -> None:
             said.append(top)
 
+        def region(self) -> None:
+            return None
+
         def close(self) -> None: ...
 
     def factory(on_click: Any, on_share: Any) -> tuple[FakeBadge, str]:
@@ -465,6 +471,9 @@ def _watch_run(
     class FakeBadge:
         def place(self, area: object) -> None: ...
         def say(self, top: str, bottom: str, colour: str) -> None: ...
+        def region(self) -> None:
+            return None
+
         def close(self) -> None: ...
 
     predicted: list[str] = []
@@ -583,6 +592,9 @@ def test_save_picture_shows_the_badge_on_the_game(monkeypatch: pytest.MonkeyPatc
         def capturable(self, on: bool) -> bool:
             self.states.append(on)
             return self.allowed
+
+        def region(self) -> None:
+            return None
 
         def close(self) -> None: ...
 

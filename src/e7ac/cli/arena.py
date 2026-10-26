@@ -37,6 +37,7 @@ from e7ac.roster.store import list_owned
 from e7ac.settings import SettingsError, load_settings
 from e7ac.sources.assets import fetch_class_sprite, fetch_hero_icons, load_class_sprite, load_hero_icons
 from e7ac.storage.db import session_scope
+from e7ac.ui.badge_probe import hide_badge
 from e7ac.ui.watch_signal import AMBER, DEFAULT_SIZE, GREEN, LIGHT, RED, NoSignal, WatchSignal, open_signal
 from e7ac.vision.arena_badges import (
     WORK_HEIGHT,
@@ -180,8 +181,9 @@ def run_watch(
         _learn_taught(context, match)
         if item is not None:
             frame, area = item
-            match.frame = frame
             badge.place(area)
+            frame, _ = hide_badge(frame, area, badge.region())  # the badge's own text is not the game's (SPEC D105)
+            match.frame = frame
             if frame.shape[1::-1] != match.size:
                 match.size = (frame.shape[1], frame.shape[0])
                 typer.echo(f"  game picture: {match.size[0]}x{match.size[1]} (read at {WORK_HEIGHT} px high)")

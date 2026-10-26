@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -333,6 +334,10 @@ class Badge:
         return False
 
     def resize(self, size: str) -> None: ...
+
+    def region(self) -> Any:
+        return None
+
     def close(self) -> None: ...
 
 
@@ -357,6 +362,46 @@ def test_the_watch_reads_a_popup_once_the_screen_has_settled(
     assert [e.new for e in events] == [True, False]  # the same skill held again: read, not new
     assert ("Read: Blood Blade Karin", "The Caress of Mercy +5") in badge.said
     assert SkillStore(isolated_home.home / "skills").heroes() == ["c2011"]
+
+
+def test_the_watch_blanks_the_badge_when_it_shows_in_the_picture(
+    monkeypatch: pytest.MonkeyPatch,
+    synthetic_catalog: list[str],
+    isolated_home: AppPaths,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The badge is meant to be hidden from the capture; where it is not, its text must not be read as a popup."""
+    import threading
+
+    from e7ac.cli import arena as arena_cli
+    from e7ac.cli import skills as skills_cli
+    from e7ac.vision.window import Rect
+    from tests.test_badge_view import _badge_picture
+
+    place = Rect(100, 8, 220, 60)
+    frames = [_badge_picture(np.full((400, 640, 3), v, np.uint8), place) for v in [40] * 6 + [200] * 6]
+    monkeypatch.setattr(
+        arena_cli, "game_frames", lambda client, hwnd: iter([(f, Rect(0, 0, 640, 400)) for f in frames])
+    )
+    ticks = iter(x * 0.5 for x in range(1000))
+    monkeypatch.setattr(skills_cli, "clock", lambda: next(ticks))
+    seen: list[np.ndarray] = []
+
+    class Recording(FakeReader):
+        def read(self, image: object) -> list[TextLine]:
+            seen.append(np.array(image))
+            return super().read(image)
+
+    monkeypatch.setattr(roster_cli, "reader_factory", lambda: Recording(named("Blood Blade Karin")))
+
+    class Shown(Badge):
+        def region(self) -> Any:
+            return place
+
+    skills_cli.run_skill_watch(skills_cli.SkillWatchOptions(), Shown(), threading.Event())
+    assert seen and all(not image[8:68, 100:320].any() for image in seen)  # the badge's place is blank
+    assert seen[0][100:200, 100:200].all()  # the rest of the game is as it was
+    assert "the badge shows in the screen capture on this PC" in capsys.readouterr().out
 
 
 def test_a_skill_that_changes_form_is_found_by_either_of_its_names() -> None:
