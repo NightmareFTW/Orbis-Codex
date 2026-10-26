@@ -856,7 +856,7 @@ def test_the_skill_reader_page_lists_what_is_missing_and_exports_what_was_read(
     page._hide.setChecked(False)
     assert table.rowCount() == total
     marks = {table.item(r, 1).text(): table.item(r, 3).text() for r in range(total)}
-    assert marks["Blood Blade Karin"] == "S S S" and marks[shown[0]] == "- - -"
+    assert marks["Blood Blade Karin"] == "? ? ?" and marks[shown[0]] == "- - -"
     event = ReadEvent("c2011", "Blood Blade Karin", "Lethal Strike", 5, False, False, ())
     context.skills.read.emit(event)
     assert "Blood Blade Karin: Lethal Strike +5 (again)" in page._status.text()

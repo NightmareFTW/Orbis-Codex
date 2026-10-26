@@ -12,7 +12,7 @@ from __future__ import annotations
 import queue
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any, Final
@@ -24,14 +24,16 @@ from e7ac.catalog.resolve import ResolvedEntity
 from e7ac.cli import catalog as catalog_cli
 from e7ac.cli import roster as roster_cli
 from e7ac.cli.roster import _catalog_heroes, _engine, _fail
-from e7ac.paths import default_paths
+from e7ac.paths import AppPaths, default_paths
 from e7ac.roster.screen_import import resolve_hero_code
 from e7ac.settings import SettingsError, load_settings
 from e7ac.skills.export import export_text
 from e7ac.skills.hero import HeroMemory, decide
+from e7ac.skills.merge import assign, place
 from e7ac.skills.store import SkillStore, skills_dir
 from e7ac.skills.worklist import progress, worklist
-from e7ac.sources.epic7db import fetch_tier_order, slug
+from e7ac.sources.epic7db import SkillInfo, fetch_kit, fetch_tier_order, slug
+from e7ac.sources.http import FetchError
 from e7ac.storage.db import session_scope
 from e7ac.ui.watch_signal import AMBER, GREEN, LIGHT, NoSignal, WatchSignal
 from e7ac.vision.skill_popup import SkillPopup, looks_like_popup, parse_skill_popup, read_hero_name
@@ -61,6 +63,9 @@ class ReadEvent:
     """Why nothing was stored ("" when it was)."""
     how: str = ""
     """What the hero was taken from (`skills.hero.Decision.how`)."""
+    slot: int | None = None
+    """Which of the hero's skills it is (1, 2, 3), when epic7db's names place it."""
+    passive: bool = False
 
 
 def identify(
@@ -74,19 +79,43 @@ def identify(
     return decision.code, decision.problem
 
 
+KitOf = Callable[[str], Mapping[int, SkillInfo]]
+"""A hero's name -> epic7db's skills of it ({} when the page cannot be had)."""
+
+
+def make_kit_of(paths: AppPaths, offline: bool = False) -> KitOf:
+    """epic7db's skills of a hero (its page is cached on disk, and asked once a run): which slot each popup is."""
+    kits: dict[str, Mapping[int, SkillInfo]] = {}
+
+    def kit_of(name: str) -> Mapping[int, SkillInfo]:
+        if name not in kits:
+            try:
+                with catalog_cli.http_factory(paths, offline) as http:
+                    kits[name] = fetch_kit(http, name)
+            except (FetchError, OSError):  # not placed now: the table shows "?" for it
+                kits[name] = {}
+        return kits[name]
+
+    return kit_of
+
+
 def store_popup(
     store: SkillStore,
     heroes: dict[str, ResolvedEntity],
     popup: SkillPopup,
     override: str | None = None,
     remembered: str | None = None,
+    kit_of: KitOf | None = None,
 ) -> ReadEvent:
     decision = decide(popup.hero, heroes, override, remembered)
     code = decision.code
     shown = popup.hero or override or "?"
     if code is None:
         return ReadEvent(None, shown, popup.name, popup.level, False, False, (), decision.problem)
-    saved = store.save(code, popup)
+    kit = kit_of(heroes[code].name or "") if kit_of is not None and heroes[code].name else {}
+    slot, passive = place(popup.name, kit)
+    saved = store.save(code, popup, slot=slot, passive=passive)
+    assign(store, code, kit)  # the skills read before this one get their slot too
     return ReadEvent(
         code,
         heroes[code].name or code,
@@ -97,6 +126,8 @@ def store_popup(
         saved.new_effects,
         "",
         decision.how,
+        slot,
+        passive,
     )
 
 
@@ -107,7 +138,8 @@ def describe(event: ReadEvent) -> str:
     what = "new" if event.new else "changed" if event.changed else "again"
     effects = f"; effects learned: {', '.join(event.new_effects)}" if event.new_effects else ""
     source = {"hero screen": " [hero from its own screen]", "start of the name": " [hero from the start of its name]"}
-    return f"{event.hero}: {event.skill}{level} ({what}){effects}{source.get(event.how, '')}"
+    which = f" [S{event.slot}{', passive' if event.passive else ''}]" if event.slot is not None else ""
+    return f"{event.hero}: {event.skill}{which}{level} ({what}){effects}{source.get(event.how, '')}"
 
 
 # ------------------------------------------------------------------------------------------------ commands
@@ -136,6 +168,7 @@ def read(
         _fail(str(exc))
     heroes = _heroes()
     store = SkillStore(skills_dir(default_paths().home))
+    kit_of = make_kit_of(default_paths())
     reader = roster_cli.reader_factory()
     stored = 0
     for path in paths:
@@ -153,7 +186,7 @@ def read(
                 f"{path.name}: {popup.hero or '?'} -> {code or problem}: {popup.name} +{popup.level} | {popup.text}"
             )
             continue
-        event = store_popup(store, heroes, popup, hero)
+        event = store_popup(store, heroes, popup, hero, None, kit_of)
         stored += not event.problem
         typer.echo(f"{path.name}: {describe(event)}", err=bool(event.problem))
     typer.echo(f"{stored} skill(s) stored of {len(paths)} capture(s)." if not dry_run else "Dry run: nothing stored.")
@@ -243,6 +276,7 @@ def run_skill_watch(options: SkillWatchOptions, badge: WatchSignal, stop: thread
     reader = roster_cli.reader_factory()
     pending: queue.Queue[Any | None] = queue.Queue()
     counts = {"read": 0, "ignored": 0}
+    kit_of = make_kit_of(paths)
     memory = HeroMemory()
     """The hero seen on its own screen (SPEC D97): its name is whole there, and covered once a skill is held."""
 
@@ -274,7 +308,7 @@ def run_skill_watch(options: SkillWatchOptions, badge: WatchSignal, stop: thread
                 badge.say(f"Hero: {heroes[seen].name}", "now hold each skill icon ~2 s", GREEN)
                 continue
             chosen = options.chosen() if options.chosen is not None else None
-            event = store_popup(store, heroes, popup, chosen, memory.recall(clock()))
+            event = store_popup(store, heroes, popup, chosen, memory.recall(clock()), kit_of)
             counts["read"] += not event.problem
             typer.echo(("  " if not event.problem else "  ! ") + describe(event))
             if options.on_read is not None:

@@ -136,19 +136,66 @@ def test_the_merged_skill_gives_the_kit_reader_the_effects_it_could_not_see() ->
 
 def test_the_worklist_puts_what_is_met_first_then_the_tier_list_then_the_rest(tmp_path: Path) -> None:
     store = SkillStore(tmp_path)
-    store.save("c2", popup(name="One"), NOW)
-    store.save("c2", popup(name="Two"), NOW)
-    for name in ("A", "B", "C"):
-        store.save("c1", popup(name=name), NOW)
+    store.save("c2", popup(name="One"), NOW, slot=1)
+    store.save("c2", popup(name="Two"), NOW, slot=3)  # S2 is the one missing
+    store.save("c1", popup(name="A"), NOW, slot=1)
+    store.save("c1", popup(name="B"), NOW, slot=2, passive=True)
+    store.save("c1", popup(name="C"), NOW, slot=3)
     heroes = {"c1": "Alpha", "c2": "Beta", "c3": "Gamma", "c4": "Delta"}
     rows = worklist(heroes, [("c3", 5)], ["c4", "c3", "c2"], store)
     assert [r.code for r in rows] == ["c3", "c4", "c2", "c1"]
     assert [r.why for r in rows] == ["met 5x in your Arena", "RTA tier list #1", "RTA tier list #3", ""]
     assert [(r.read, r.marks, r.complete) for r in rows] == [(0, "- - -", False)] * 2 + [
-        (2, "S S -", False),
-        (3, "S S S", True),
+        (2, "S - S", False),
+        (3, "S P S", True),
     ]
     assert progress(rows) == (1, 2, 5, 4)
+
+
+def test_the_marks_follow_the_heros_skills_and_say_when_a_slot_is_not_known(tmp_path: Path) -> None:
+    from e7ac.skills.worklist import slot_marks
+
+    store = SkillStore(tmp_path)
+    assert slot_marks([]) == (("-", "-", "-"), 0)
+    store.save("c1", popup(name="Third"), NOW, slot=3)
+    store.save("c1", popup(name="Not placed"), NOW)  # its slot is not known: it takes the first free one, as "?"
+    marks, read = slot_marks(store.load("c1"))
+    assert marks == ("?", "-", "S") and read == 2
+    store.save("c1", popup(name="Third, misread"), NOW, slot=3)  # another reading of the slot: one skill, not two
+    assert slot_marks(store.load("c1")) == (("?", "-", "S"), 2)
+
+
+def test_a_popup_is_placed_by_its_name_among_epic7dbs_skills_and_the_earlier_ones_follow(tmp_path: Path) -> None:
+    from e7ac.skills.merge import assign, place
+
+    kit = {
+        1: SkillInfo(1, 0, {}, "", "Mighty Strike"),
+        2: SkillInfo(2, None, {}, "", "Sixth Sense"),
+        3: SkillInfo(3, 4, {}, "", "Spirit Gate: Burning Possession"),
+    }
+    assert place("Mighty Strike", kit) == (1, False)
+    assert place("Sixth Sense", kit) == (2, True)  # slot 2 without a cooldown: a passive
+    assert place("Spirit Gate: Burning Possession", kit) == (3, False)
+    assert place("Spirit Gate: Burning Possesion", kit) == (3, False)  # one letter off: the margin rule
+    assert place("Something else", kit) == (None, False) and place("Sixth Sense", {}) == (None, False)
+    store = SkillStore(tmp_path)
+    store.save("c1", popup(name="Sixth Sense"), NOW)  # read before slots existed
+    store.save("c1", popup(name="Mighty Strike"), NOW)
+    assert assign(store, "c1", kit) == 2
+    assert {s.name: (s.slot, s.passive) for s in store.load("c1")} == {
+        "Sixth Sense": (2, True),
+        "Mighty Strike": (1, False),
+    }
+    assert assign(store, "c1", kit) == 0  # nothing left to place
+
+
+def test_a_second_reading_keeps_the_effect_panels_the_first_one_caught(tmp_path: Path) -> None:
+    store = SkillStore(tmp_path)
+    store.save("c1", popup(), NOW)
+    again = store.save("c1", popup(effects=()), NOW)
+    assert [e.title for e in store.load("c1")[0].effects] == ["Decrease Defense"] and not again.changed
+    changed = store.save("c1", popup(text="Another text, 60% now.", effects=()), NOW)
+    assert changed.changed and store.load("c1")[0].effects == ()  # the skill itself changed: the old panels do not stay
 
 
 def test_the_export_is_the_games_own_words_per_hero_then_the_effects(tmp_path: Path) -> None:
@@ -209,7 +256,7 @@ def test_skills_read_stores_a_popup_and_show_and_export_say_what_was_read(
     exported = runner.invoke(app, ["skills", "export", "--out", str(out)])
     assert exported.exit_code == 0 and "== Blood Blade Karin (c2011)" in out.read_text(encoding="utf-8")
     todo = runner.invoke(app, ["skills", "todo", "--offline"])
-    assert todo.exit_code == 0 and "0 of" in todo.output and "S - -" in todo.output
+    assert todo.exit_code == 0 and "0 of" in todo.output and "? - -" in todo.output
 
 
 def test_a_hero_that_is_not_in_the_catalog_is_not_stored_and_says_why(

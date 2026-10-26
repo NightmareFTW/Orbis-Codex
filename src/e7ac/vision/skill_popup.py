@@ -111,7 +111,7 @@ def parse_skill_popup(lines: Sequence[TextLine]) -> SkillPopup | None:
     rows = [(line, clean(line.text)) for line in lines if clean(line.text)]
     if len(rows) < MIN_LINES:
         return None
-    title = _title(rows) or _title_without_badge(rows)
+    title = _title(rows) or _title_without_badge(rows) or _title_above_description(rows)
     if title is None:
         return None
     badge, title_line = title
@@ -218,6 +218,41 @@ def _title_without_badge(rows: Sequence[tuple[TextLine, str]]) -> tuple[None, Te
         if above:
             return None, min(above, key=lambda line: acquire.box.y0 - line.box.y1)
     return None
+
+
+def _title_above_description(rows: Sequence[tuple[TextLine, str]]) -> tuple[None, TextLine] | None:
+    """(None, title line) for a skill with neither a "+N" badge nor an "Acquire N Soul" row, a passive at +0 (Spirit Eye
+    Celine's Sixth Sense, the user's capture 2026-10-26): the popup's first line, right of the icon and above the first
+    line of the description. The description's left edge is the one of the "Skill Enhance" label, which a popup always
+    has; a line right of the popup (the effect panels, the screen's own buttons) is never the title."""
+    enhance = next((r for r in rows if r[1].lower() == "skill enhance"), None)
+    if enhance is None:
+        return None
+    left = enhance[0].box.x0
+    body = [
+        r
+        for r in rows
+        if r is not enhance
+        and abs(r[0].box.x0 - left) <= 14
+        and r[0].box.y0 < enhance[0].box.y0 - 4
+        and len(r[1]) >= 8
+        and not BADGE.match(r[1])
+    ]
+    if not body:
+        return None
+    first = min(body, key=lambda r: r[0].box.y0)
+    right = max(r[0].box.x1 for r in body)
+    reach = 4 * first[0].box.height + 120  # the title is within a few lines above the description
+    above = [
+        r
+        for r in rows
+        if left + 40 <= r[0].box.x0 < right
+        and r[0].box.y1 <= first[0].box.y0 + 4
+        and first[0].box.y0 - r[0].box.y0 <= reach
+        and r[1].lower() not in UI_LABELS
+        and sum(c.isalpha() for c in r[1]) >= 3
+    ]
+    return (None, min(above, key=lambda r: r[0].box.y0)[0]) if above else None
 
 
 def _title(rows: Sequence[tuple[TextLine, str]]) -> tuple[TextLine, TextLine] | None:

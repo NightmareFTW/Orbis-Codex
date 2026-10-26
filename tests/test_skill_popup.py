@@ -79,9 +79,10 @@ def test_the_parser_reads_every_part_of_a_popup() -> None:
 def test_too_little_text_is_not_a_popup() -> None:
     assert parse_skill_popup(synthetic()[:4]) is None
     bare = [ln for ln in synthetic() if ln.text not in ("+5", "Acquire 3 Soul")]
-    assert (
-        parse_skill_popup(bare) is None
-    )  # no badge and no cost row to find the title by: an enhancement step is not one
+    found = parse_skill_popup(bare)  # no badge and no cost row: the title is the first line above the description
+    assert found is not None and found.name == "The Caress of Mercy" and found.level is None
+    no_label = [ln for ln in bare if ln.text != "Skill Enhance"]
+    assert parse_skill_popup(no_label) is None  # without the popup's own label nothing says where its column is
 
 
 def test_a_skill_without_a_level_badge_is_found_by_its_cost_row() -> None:
@@ -189,3 +190,64 @@ def test_numbers_and_enhancement_steps_come_out_exact() -> None:
 @pytest.mark.fixtures(f"{SKILLS}/harsetti_full_c.webp")
 def test_a_screen_without_a_popup_is_not_read_as_one() -> None:
     assert popup_of("harsetti_full_c") is None
+
+
+def celine_passive() -> list[TextLine]:
+    """The popup of Spirit Eye Celine's Sixth Sense (a passive at +0: no "+N" badge, no "Acquire" row; its note
+    "Effect(s) upon death 1 turn" sits right under the title), with the boxes the OCR gave on the user's own capture
+    (2026-10-26, 925 x 878)."""
+    steps = ["-2%", "-2%", "-2%", "-3%", "-3%", "-3%", "-4%"]
+    rows = [
+        line("Light", 51, 26, 82, 41),
+        line("ThiefSagittarius", 160, 25, 262, 44),
+        line("Spirit Eye Celine", 10, 59, 410, 80),
+        line("Lv. Max/50", 16, 172, 230, 51),
+        line("Sixth Sense", 458, 200, 169, 41),
+        line("Effect(s) upon death 1 turn", 482, 266, 302, 37),
+        line("Effect", 122, 292, 75, 34),
+        line("Resistance + 9%", 122, 319, 188, 34),
+        line("When attacked, damage suffered in one", 342, 312, 453, 34),
+        line("attack does not exceed 70% of max", 342, 342, 413, 31),
+        line("Health. When someone dies, decreases", 341, 371, 450, 30),
+        line("skill cooldowns by 1 turn and gains 5", 339, 397, 426, 39),
+        line("Soul. Effects upon death are only", 340, 427, 378, 36),
+        line("activated upon a Hero's death.", 340, 457, 352, 36),
+        line("Skill Enhance", 340, 525, 171, 40),
+        line("Move to Grace of Growt", 73, 548, 243, 30),
+        line("Skill", 632, 831, 59, 39),
+        line("Promotion", 746, 846, 129, 31),
+    ]
+    for number, step in enumerate(steps, 1):
+        y = 565 + 33.5 * (number - 1)
+        rows += [line(f"+{number}", 345, y + 5, 32, 27), line(f"{step} damage received limit", 394, y, 292, 36)]
+    return rows
+
+
+def test_a_passive_at_plus_zero_is_found_by_the_line_above_its_description() -> None:
+    popup = parse_skill_popup(celine_passive())
+    assert popup is not None
+    assert (popup.hero, popup.name, popup.level, popup.cooldown) == ("Spirit Eye Celine", "Sixth Sense", None, None)
+    assert popup.cooldown_note == "Effect(s) upon death 1 turn" and popup.gains == ()
+    assert popup.text.startswith("When attacked, damage suffered in one attack does not exceed 70% of max Health.")
+    assert [level for level, _ in popup.enhance] == [1, 2, 3, 4, 5, 6, 7]
+    assert popup.enhance[0][1] == "-2% damage received limit" and popup.enhance[6][1] == "-4% damage received limit"
+
+
+def test_text_to_the_right_of_a_popup_is_never_taken_for_its_title() -> None:
+    """On a full window the screen's own buttons are far right and high: still not a title."""
+    rows = [*celine_passive(), line("Cancel", 1404, 30, 110, 42)]
+    popup = parse_skill_popup(rows)
+    assert popup is not None and popup.name == "Sixth Sense"
+
+
+@pytest.mark.fixtures(f"{SKILLS}/celine_s2_passive.webp")
+def test_the_users_own_passive_is_read_end_to_end() -> None:
+    popup = popup_of("celine_s2_passive")
+    assert popup is not None
+    assert (popup.hero, popup.name, popup.level) == ("Spirit Eye Celine", "Sixth Sense", None)
+    assert popup.cooldown_note == "Effect(s) upon death 1 turn" and "70% of max Health" in popup.text
+    assert [text for _, text in popup.enhance][::3] == [
+        "-2% damage received limit",
+        "-3% damage received limit",
+        "-4% damage received limit",
+    ]

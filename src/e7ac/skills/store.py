@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final
@@ -43,6 +43,10 @@ class StoredSkill:
     confidence: float
     captured_at: str
     """ISO time (UTC)."""
+    slot: int | None = None
+    """Which of the hero's three skills it is (1, 2, 3), by its name among epic7db's skills; None: not placed."""
+    passive: bool = False
+    """The slot-2 skill that has no cooldown: a passive (the rule the kit readers use)."""
 
     @property
     def key(self) -> str:
@@ -62,6 +66,8 @@ class StoredSkill:
             "effects": [{"title": e.title, "marks": list(e.marks), "text": e.text} for e in self.effects],
             "confidence": round(self.confidence, 3),
             "captured_at": self.captured_at,
+            "slot": self.slot,
+            "passive": self.passive,
         }
 
     @staticmethod
@@ -83,6 +89,8 @@ class StoredSkill:
             ),
             confidence=float(data.get("confidence", 0.0)),
             captured_at=str(data.get("captured_at", "")),
+            slot=data.get("slot") if data.get("slot") in (1, 2, 3) else None,
+            passive=bool(data.get("passive", False)),
         )
 
 
@@ -119,8 +127,11 @@ class SkillStore:
         except (OSError, ValueError, KeyError, TypeError):
             return []
 
-    def save(self, code: str, popup: SkillPopup, now: datetime | None = None) -> Saved:
-        """Keep a popup: it replaces the one read before for the same skill (the same name)."""
+    def save(
+        self, code: str, popup: SkillPopup, now: datetime | None = None, slot: int | None = None, passive: bool = False
+    ) -> Saved:
+        """Keep a popup: it replaces the one read before for the same skill (the same name). The effect panels of the
+        read before stay when the text is the same and this read missed some (a panel the OCR did not catch)."""
         when = (now or datetime.now(UTC)).astimezone(UTC).isoformat(timespec="seconds")
         stored = StoredSkill(
             code,
@@ -136,25 +147,35 @@ class SkillStore:
             popup.effects,
             popup.confidence,
             when,
+            slot,
+            passive,
         )
         skills = self.load(code)
         index = next((i for i, s in enumerate(skills) if s.key == stored.key), None)
         before = skills[index] if index is not None else None
+        if before is not None and before.text == stored.text:
+            seen = {e.title.lower() for e in stored.effects}
+            stored = replace(
+                stored, effects=(*stored.effects, *(e for e in before.effects if e.title.lower() not in seen))
+            )
         if index is None:
             skills.append(stored)
         else:
             skills[index] = stored
-        self.root.mkdir(parents=True, exist_ok=True)
-        write_text_atomic(
-            self._file(code),
-            json.dumps({"hero": code, "skills": [s.to_json() for s in skills]}, indent=1, ensure_ascii=False),
-        )
+        self.write(code, skills)
         changed = before is not None and (before.text, before.level, before.enhance) != (
             stored.text,
             stored.level,
             stored.enhance,
         )
         return Saved(stored, before is None, changed, self._learn(code, popup.effects, when))
+
+    def write(self, code: str, skills: list[StoredSkill]) -> None:
+        self.root.mkdir(parents=True, exist_ok=True)
+        write_text_atomic(
+            self._file(code),
+            json.dumps({"hero": code, "skills": [s.to_json() for s in skills]}, indent=1, ensure_ascii=False),
+        )
 
     def effects(self) -> dict[str, dict[str, Any]]:
         """Every effect described so far, by lower-case title."""

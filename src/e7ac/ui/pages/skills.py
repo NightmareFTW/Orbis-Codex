@@ -136,6 +136,12 @@ class SkillsPage(Page):
         self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self._table.setAlternatingRowColors(True)
         self._table.setIconSize(QSize(32, 32))
+        header = self._table.horizontalHeaderItem(HEADERS.index("Skills"))
+        if header is not None:
+            header.setToolTip(
+                "The hero's three skills in order (S1, S2, S3): S read, P a passive read, ? read but not placed "
+                "(its slot is not known), - not read."
+            )
         self._table.verticalHeader().setDefaultSectionSize(40)
         self._table.verticalHeader().hide()
         self._table.horizontalHeader().setStretchLastSection(True)

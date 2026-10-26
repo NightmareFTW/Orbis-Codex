@@ -12,11 +12,13 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from typing import Final
 
 from e7ac.catalog.names import normalise_name
-from e7ac.skills.store import StoredSkill
+from e7ac.skills.store import SkillStore, StoredSkill
 from e7ac.sources.epic7db import SkillInfo
+from e7ac.vision.labels import match_label
 
 _CUT: Final = re.compile(r"-\s*(\d+)\s*turns?\s*cooldown", re.IGNORECASE)
 _CHANCE_STEP: Final = re.compile(r"\+\s*(\d+)\s*%\s*effect chance", re.IGNORECASE)
@@ -31,6 +33,34 @@ def slot_of(name: str, skills: Mapping[int, SkillInfo]) -> int | None:
     wanted = normalise_name(name)
     found = [slot for slot, info in skills.items() if info.name and normalise_name(info.name) == wanted]
     return found[0] if len(found) == 1 else None
+
+
+def place(name: str, kit: Mapping[int, SkillInfo]) -> tuple[int | None, bool]:
+    """(slot, passive) of the skill a popup shows, among epic7db's skills of the hero: its name exactly once normalised,
+    else the margin rule (one clear best match, never a near-miss). `passive`: the slot-2 skill with no cooldown, the
+    rule the kit readers use. (None, False) when the name is not among them."""
+    names = {info.name: slot for slot, info in kit.items() if info.name}
+    found = match_label(name, names) if names else None
+    if found is None:
+        return None, False
+    slot = names[found]
+    return slot, slot == 2 and not kit[slot].cooldown
+
+
+def assign(store: SkillStore, code: str, kit: Mapping[int, SkillInfo]) -> int:
+    """Give the skills of a hero read before slots existed (or while epic7db was out of reach) their slot; returns how
+    many were placed."""
+    skills = store.load(code)
+    placed = 0
+    for index, skill in enumerate(skills):
+        if skill.slot is None:
+            slot, passive = place(skill.name, kit)
+            if slot is not None:
+                skills[index] = replace(skill, slot=slot, passive=passive)
+                placed += 1
+    if placed:
+        store.write(code, skills)
+    return placed
 
 
 def remaining(stored: StoredSkill) -> list[str]:
