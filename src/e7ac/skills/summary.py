@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+from e7ac.skills.completeness import cut_parts
 from e7ac.skills.store import StoredSkill
 from e7ac.skills.worklist import SKILLS_PER_HERO
 
@@ -23,6 +24,8 @@ def skill_line(skill: StoredSkill) -> list[str]:
         parts.append("soulburn")
     if skill.effects:
         parts.append("effects: " + ", ".join(e.title for e in skill.effects))
+    if cut := cut_parts(skill):
+        parts.append("LOOKS CUT: " + ", ".join(cut) + " - hold it again")
     text = skill.text if len(skill.text) <= EXCERPT else skill.text[:EXCERPT].rstrip() + "..."
     return [f"{skill.name}{kind}  |  " + "  |  ".join(parts), f"      {text}"]
 

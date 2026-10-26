@@ -15,7 +15,8 @@ from typing import Any, Final
 from e7ac.catalog.names import normalise_name
 from e7ac.domain.codes import is_hero_code
 from e7ac.fileio import write_text_atomic
-from e7ac.vision.skill_popup import EffectPanel, SkillPopup
+from e7ac.skills.completeness import fuller
+from e7ac.vision.skill_popup import EffectPanel, SkillPopup, repair_panel
 
 FOLDER: Final = "skills"
 EFFECTS_FILE: Final = "effects.json"
@@ -84,7 +85,7 @@ class StoredSkill:
             soulburn_cost=data.get("soulburn_cost"),
             enhance=tuple((int(n), str(d)) for n, d in data.get("enhance", [])),
             effects=tuple(
-                EffectPanel(str(e["title"]), tuple(e.get("marks", [])), str(e.get("text", "")))
+                repair_panel(EffectPanel(str(e["title"]), tuple(e.get("marks", [])), str(e.get("text", ""))))
                 for e in data.get("effects", [])
             ),
             confidence=float(data.get("confidence", 0.0)),
@@ -153,11 +154,16 @@ class SkillStore:
         skills = self.load(code)
         index = next((i for i, s in enumerate(skills) if s.key == stored.key), None)
         before = skills[index] if index is not None else None
+        if before is not None:
+            stored = replace(stored, text=fuller(before.text, stored.text))  # a cut reading never replaces a whole one
         if before is not None and before.text == stored.text:
-            seen = {e.title.lower() for e in stored.effects}
-            stored = replace(
-                stored, effects=(*stored.effects, *(e for e in before.effects if e.title.lower() not in seen))
+            old = {e.title.lower(): e for e in before.effects}
+            merged = tuple(
+                replace(e, text=fuller(old[e.title.lower()].text, e.text)) if e.title.lower() in old else e
+                for e in stored.effects
             )
+            seen = {e.title.lower() for e in merged}
+            stored = replace(stored, effects=(*merged, *(e for e in before.effects if e.title.lower() not in seen)))
         if index is None:
             skills.append(stored)
         else:
@@ -203,9 +209,25 @@ class SkillStore:
     def effects(self) -> dict[str, dict[str, Any]]:
         """Every effect described so far, by lower-case title."""
         try:
-            return dict(json.loads((self.root / EFFECTS_FILE).read_text(encoding="utf-8")))
+            raw = dict(json.loads((self.root / EFFECTS_FILE).read_text(encoding="utf-8")))
         except (OSError, ValueError, TypeError):
             return {}
+        known: dict[str, dict[str, Any]] = {}
+        for key, entry in raw.items():  # a title that wrapped over two lines is put right (SPEC D106)
+            panel = repair_panel(
+                EffectPanel(str(entry.get("title", key)), tuple(entry.get("marks", [])), str(entry.get("text", "")))
+            )
+            same = known.get(panel.title.lower())
+            text = fuller(str(same.get("text", "")), panel.text) if same else panel.text
+            heroes = sorted({*(same or {}).get("heroes", []), *entry.get("heroes", [])})
+            known[panel.title.lower()] = {
+                **entry,
+                "title": panel.title,
+                "marks": list(panel.marks),
+                "text": text,
+                "heroes": heroes,
+            }
+        return known
 
     def _learn(self, code: str, panels: Iterable[EffectPanel], when: str) -> tuple[str, ...]:
         known = self.effects()
@@ -213,9 +235,10 @@ class SkillStore:
         for panel in panels:
             key = panel.title.lower()
             entry = known.get(key)
-            if entry is None or entry.get("text") != panel.text:
+            text = fuller(str(entry.get("text", "")), panel.text) if entry is not None else panel.text
+            if entry is None or entry.get("text") != text:
                 fresh.append(panel.title)
-                entry = {"title": panel.title, "marks": list(panel.marks), "text": panel.text, "first_seen": when}
+                entry = {"title": panel.title, "marks": list(panel.marks), "text": text, "first_seen": when}
             entry["heroes"] = sorted({*entry.get("heroes", []), code})
             known[key] = entry
         if fresh or panels:

@@ -146,7 +146,9 @@ def parse_skill_popup(lines: Sequence[TextLine], titles: Sequence[str] = ()) -> 
     if enhance_row is None and burn_row is None:  # nothing marks where the text ends: the paragraph does
         main = _paragraph(main)
     reach = right_edge + PANEL_REACH * (right_edge - left)
-    side = [r for r in corner if right_edge - 10 <= r[0].box.x0 <= reach and _text_like(r[1])]
+    beside = [r for r in corner if right_edge - 10 <= r[0].box.x0 <= reach]
+    side = [r for r in beside if _text_like(r[1])]
+    tails = [r for r in beside if not _text_like(r[1]) and _tail_like(r[1])]
     first_desc = next((r for r in main if abs(r[0].box.x0 - left) <= max(12.0, tolerance) and not _cost(r[1])), None)
     cost_rows = [r for r in main if first_desc is None or r[0].box.y0 < first_desc[0].box.y0]
     gains = tuple((kind.title(), int(n)) for r in cost_rows for n, kind in ACQUIRE.findall(r[1]))
@@ -170,7 +172,7 @@ def parse_skill_popup(lines: Sequence[TextLine], titles: Sequence[str] = ()) -> 
     consume = next((CONSUME.search(r[1]) for r in main if burn_row and CONSUME.search(r[1])), None)
     steps = _steps([r for r in main if enhance_row and r[0].box.y0 > enhance_row[0].box.y1 - 6])
     used = [title_line, *(r[0] for r in cost_rows), *(r[0] for r in main if r[0].box.y0 >= title_line.box.y1)]
-    panels = _panels(side, title_line)
+    panels = _panels(side, title_line, tails)
     scores = [t.score for t in used if t.score] or [0.0]
     level = BADGE.match(clean(badge.text)) if badge else None
     return SkillPopup(
@@ -273,6 +275,12 @@ def _title_above_description(rows: Sequence[tuple[TextLine, str]]) -> tuple[None
         and sum(c.isalpha() for c in r[1]) >= 3
     ]
     return (None, min(above, key=lambda r: r[0].box.y0)[0]) if above else None
+
+
+def _tail_like(text: str) -> bool:
+    """A short line that can only be the last wrapped line of a panel ("it.", "up.", "30%"): two letters or a digit.
+    It is taken when it follows a panel's last line closely, never on its own (`_panels`)."""
+    return sum(c.isalnum() for c in text) >= 2 or any(c.isdigit() for c in text)
 
 
 def _text_like(text: str) -> bool:
@@ -414,34 +422,89 @@ def _steps(rows: Sequence[tuple[TextLine, str]]) -> tuple[tuple[int, str], ...]:
     return tuple(steps)
 
 
-def _panels(side: Sequence[tuple[TextLine, str]], title: TextLine) -> tuple[EffectPanel, ...]:
+def _panels(
+    side: Sequence[tuple[TextLine, str]], title: TextLine, tails: Sequence[tuple[TextLine, str]] = ()
+) -> tuple[EffectPanel, ...]:
     """The effect panels: the lines right of the main column from the title's row down, split where the vertical gap
-    between two lines grows (a panel's padding), the first line of each being its title."""
+    between two lines grows (a panel's padding), the first line of each being its title. `tails`: short lines that
+    only count as the last wrapped line of a panel, right under its previous line (SPEC D106: "30%." and "it." were
+    dropped as noise and "decreases Evasion by" lost its number)."""
     rows = sorted((r for r in side if r[0].box.y0 >= title.box.y0 - 30), key=lambda r: r[0].box.y0)
     if not rows:
         return ()
     height = median(r[0].box.height for r in rows)
     lefts = sorted(r[0].box.x0 for r in rows)
     anchor = max(lefts, key=lambda x: sum(abs(y - x) <= 15 for y in lefts))  # the left edge most lines share
-    kept = [r for r in rows if anchor - 15 <= r[0].box.x0 <= anchor + 3.2 * height]
+    column = [r for r in (*side, *tails) if anchor - 15 <= r[0].box.x0 <= anchor + 3.2 * height]
+    loose = {id(r) for r in tails}
+    kept = sorted((r for r in column if r[0].box.y0 >= title.box.y0 - 30), key=lambda r: r[0].box.y0)
     groups: list[list[tuple[TextLine, str]]] = []
     for row in kept:
-        if groups and row[0].box.y0 - groups[-1][-1][0].box.y1 <= 0.8 * height:
+        follows = bool(groups) and row[0].box.y0 - groups[-1][-1][0].box.y1 <= 0.8 * height
+        if follows:
             groups[-1].append(row)
-        else:
+        elif id(row) not in loose:
             groups.append([row])
-    return tuple(_panel(g) for g in groups if len(g) >= 2)
+    return tuple(_panel(g) for g in _flag_bodies(groups, height) if len(g) >= 2)
+
+
+def _flag_bodies(groups: list[list[tuple[TextLine, str]]], height: float) -> list[list[tuple[TextLine, str]]]:
+    """A panel that is only its title and a flag line ("(Undispellable)") has lost its description: it stands in the
+    next group when that is a single line (no panel is one line), a little further below than the usual padding
+    (SPEC D106: Superhumanization was stored as "(Undispellable)" and nothing else)."""
+    out: list[list[tuple[TextLine, str]]] = []
+    for group in groups:
+        if (
+            out
+            and len(group) == 1
+            and len(out[-1]) == 2
+            and re.match(r"^\([^)]*\)$", out[-1][1][1])
+            and group[0][0].box.y0 - out[-1][-1][0].box.y1 <= 2.2 * height
+        ):
+            out[-1] = [*out[-1], group[0]]
+        else:
+            out.append(group)
+    return out
 
 
 def _panel(lines: Sequence[tuple[TextLine, str]]) -> EffectPanel:
-    title, rest = lines[0][1], list(lines[1:])
-    if len(rest) > 1 and re.match(r"^\([^)]*\)$", rest[0][1]):  # "(Undispellable)" wrapped onto its own line
-        title, rest = f"{title} {rest[0][1]}", rest[1:]
+    title, rest = lines[0][1], [r[1] for r in lines[1:]]
     if len(rest) > 1 and title.split()[-1].lower() in CONTINUES:  # "Debuffs Which Prevent" / "Movement"
-        title, rest = f"{title} {rest[0][1]}", rest[1:]
+        title, rest = f"{title} {rest[0]}", rest[1:]
+    return repair_panel(EffectPanel(title, (), _join_text(rest)), rest)
+
+
+def _join_text(parts: Sequence[str]) -> str:
+    return clean(" ".join(p for p in parts if p.strip()))
+
+
+def _open(title: str) -> bool:
+    """A title with a flag that is not closed yet: "Energy Depletion (Unique:"."""
+    return title.count("(") > title.count(")")
+
+
+def repair_panel(panel: EffectPanel, lines: Sequence[str] = ()) -> EffectPanel:
+    """The panel with its title put right (SPEC D106). A long title wraps ("Energy Depletion (Unique:" / "Effect)")
+    and a flag may sit on a line of its own ("(Undispellable)"): the pieces are joined, the flags moved to `marks`, and
+    what is left is the description. Safe to run on a panel already right. `lines`: the panel's lines after the title,
+    when the screen gave them one by one (their order is kept)."""
+    title, text = panel.title, panel.text
+    if lines:
+        rest = list(lines)
+        while rest and _open(title) and ")" in rest[0]:  # the flag's closing line
+            title, rest = f"{title} {rest[0]}", rest[1:]
+    else:
+        rest = [text] if text else []
+        if rest and _open(title):  # one text: the closing piece is at its start ("Effect) Decreases ...")
+            first, closing, tail = rest[0].partition(")")
+            if closing and len(first.split()) <= 3:
+                title, rest = f"{title} {first})", [tail.strip()] if tail.strip() else []
+    if rest and re.match(r"^\([^)]*\)$", rest[0]):  # "(Undispellable)" wrapped onto its own line
+        title, rest = f"{title} {rest[0]}", rest[1:]
     flags = FLAGS.search(title)
-    marks = tuple(m.strip() for m in flags.group(1).split(",")) if flags else ()
-    return EffectPanel(FLAGS.sub("", title).strip() if flags else title, marks, _join(rest))
+    marks = (*panel.marks, *(m.strip() for m in flags.group(1).split(","))) if flags else panel.marks
+    name = FLAGS.sub("", title).strip() if flags else title
+    return EffectPanel(re.sub(r"\s+", " ", name).strip(), tuple(dict.fromkeys(marks)), _join_text(rest))
 
 
 def _hero(rows: Sequence[tuple[TextLine, str]], title: TextLine, left: float) -> str | None:

@@ -418,7 +418,59 @@ def test_the_last_wrapped_line_of_a_panel_keeps_its_number() -> None:
     assert target.text == "Increases damage suffered by 15% and decreases Evasion by 50%."
 
 
+def test_any_short_last_line_of_a_panel_is_kept_but_stray_marks_are_not() -> None:
+    """The fix for "50%." (SPEC D106) holds for every short last line, not only those with a percent sign: the real
+    OCR returns "it." and "30%." as lines of their own. A short line is taken only right under the panel's text."""
+
+    def panel(last: list[tuple[str, float]]) -> str:
+        rows = [
+            *synthetic(),
+            line("Vigor", 1262, 900, 200, 54),
+            line("Increases Attack and Defense by", 1180, 960, 560),
+            *(line(text, 1180, y, 90) for text, y in last),
+        ]
+        popup = parse_skill_popup(rows)
+        assert popup is not None
+        return next(e for e in popup.effects if e.title == "Vigor").text
+
+    assert panel([("30%.", 1000)]) == "Increases Attack and Defense by 30%."
+    assert panel([("it.", 1000)]) == "Increases Attack and Defense by it."  # the kept line is whatever the game printed
+    assert panel([("O", 1000)]) == "Increases Attack and Defense by"  # one letter is a mark, not a word
+    assert panel([("30%.", 1300)]) == "Increases Attack and Defense by"  # far below: not part of this panel
+    assert panel([("30%.", 1000), ("5", 1040)]) == "Increases Attack and Defense by 30%. 5"  # a chain of short lines
+
+
 def test_the_journals_buttons_are_not_part_of_the_last_panel() -> None:
     rows = [*synthetic(), line("Preview Skills", 1180, 700, 200, 40)]
     popup = parse_skill_popup(rows)
     assert popup is not None and all("Preview" not in e.text for e in popup.effects)
+
+
+def test_a_panel_title_that_wraps_or_has_a_flag_line_is_put_right() -> None:
+    """Panels the user's export held broken (SPEC D106): "Energy Depletion (Unique:" / "Effect)" and
+    "Superhumanization" / "(Undispellable)"."""
+    from e7ac.vision.skill_popup import EffectPanel, repair_panel
+
+    def panel(*rows: tuple[str, float]) -> EffectPanel:
+        popup = parse_skill_popup([*synthetic(), *(line(text, 1180, y, 560, 34) for text, y in rows)])
+        assert popup is not None
+        return popup.effects[-1]
+
+    wrapped = panel(
+        ("Energy Depletion (Unique:", 900), ("Effect)", 936), ("Decreases Attack and Speed by", 972), ("30%.", 1008)
+    )
+    assert (wrapped.title, wrapped.marks) == ("Energy Depletion", ("Unique: Effect",))
+    assert wrapped.text == "Decreases Attack and Speed by 30%."
+    flagged = panel(("Superhumanization", 900), ("(Undispellable)", 936), ("Increases Attack by 30%.", 1010))
+    assert (flagged.title, flagged.marks, flagged.text) == (
+        "Superhumanization",
+        ("Undispellable",),
+        "Increases Attack by 30%.",
+    )
+    # what was stored before the fix: the closing piece at the start of the text, or the flag as the whole text
+    old = repair_panel(EffectPanel("Energy Depletion (Unique", (), "Effect) Decreases Attack and Speed by"))
+    assert (old.title, old.marks, old.text) == ("Energy Depletion", ("Unique Effect",), "Decreases Attack and Speed by")
+    lone = repair_panel(EffectPanel("Superhumanization", (), "(Undispellable)"))
+    assert (lone.title, lone.marks, lone.text) == ("Superhumanization", ("Undispellable",), "")
+    right = EffectPanel("Fear", ("Undispellable",), "Cannot act for a certain number of turns.")
+    assert repair_panel(right) == right  # a panel already right is not changed

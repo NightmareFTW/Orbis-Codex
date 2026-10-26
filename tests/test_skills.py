@@ -552,3 +552,67 @@ def test_skills_import_loads_an_export_from_the_command_line(
     assert done.exit_code == 0 and "1 skill(s) of 1 hero(es) imported from export.txt." in done.output
     assert [s.name for s in SkillStore(isolated_home.home / "skills").load("c2011")] == ["Mighty Strike"]
     assert runner.invoke(app, ["skills", "import", str(tmp_path / "missing.txt")]).exit_code != 0
+
+
+def test_a_text_that_stops_where_a_sentence_cannot_looks_cut() -> None:
+    from e7ac.skills.completeness import fuller, looks_cut
+
+    for cut in (
+        "Decreases Attack and Speed by",
+        "Increases damage suffered by 15% and",
+        "Increases Attack by 50",
+        "Grants a barrier, and",
+        "Cannot be affected by any debuffs or",
+    ):
+        assert looks_cut(cut), cut
+    for whole in (
+        "Decreases Attack and Speed by 30%.",
+        "Cannot die for a certain number of turns.",
+        "Poison, Decrease Speed, Decrease Defense",  # the effect lists end on a word, without a stop
+        "",
+    ):
+        assert not looks_cut(whole), whole
+    old, new = "Decreases Evasion by 50%.", "Decreases Evasion by"
+    assert fuller(old, new) == old  # a reading that is only the start of the old one does not replace it
+    assert fuller(new, old) == old  # the whole one replaces the cut one
+    assert fuller("Decreases Defense by 70%.", "Decreases Defense by 60%.") == "Decreases Defense by 60%."  # an update
+    assert fuller("Removes it.", "Removes the debuff and") == "Removes it."  # a cut reading never beats a whole one
+
+
+def test_a_worse_reading_of_a_skill_never_replaces_a_better_one(tmp_path: Path) -> None:
+    from dataclasses import replace
+
+    store = SkillStore(tmp_path)
+    whole = EffectPanel("Vigor", (), "Increases Attack and Defense by 30%.")
+    store.save("c1001", popup(effects=(whole,)), NOW)
+    cut = replace(whole, text="Increases Attack and Defense by")
+    again = store.save("c1001", popup(effects=(cut,)), NOW)
+    assert store.load("c1001")[0].effects[0].text == whole.text and not again.new_effects
+    assert store.effects()["vigor"]["text"] == whole.text
+    # and the other way round: a skill first read cut is completed by the next reading
+    other = SkillStore(tmp_path / "other")
+    other.save("c1001", popup(effects=(cut,)), NOW)
+    other.save("c1001", popup(effects=(whole,)), NOW)
+    assert other.load("c1001")[0].effects[0].text == whole.text and other.effects()["vigor"]["text"] == whole.text
+    first = SkillStore(tmp_path / "text")
+    first.save(
+        "c1001", popup(text="Attacks the enemy and has a 60% chance to inflict decreased Defense for 1 turn."), NOW
+    )
+    first.save("c1001", popup(text="Attacks the enemy and has a 60% chance to inflict decreased Defense for"), NOW)
+    assert first.load("c1001")[0].text.endswith("for 1 turn.")
+
+
+def test_skills_check_lists_the_readings_that_look_cut_and_the_event_says_so(
+    reading: Path, synthetic_catalog: list[str], isolated_home: AppPaths
+) -> None:
+    from e7ac.skills.completeness import cut_parts
+
+    store = SkillStore(isolated_home.home / "skills")
+    cut = EffectPanel("Vigor", (), "Increases Attack and Defense by")
+    store.save("c2011", popup(name="Cut Skill", effects=(cut,)), NOW)
+    assert cut_parts(store.load("c2011")[0]) == ["effect Vigor"]
+    listed = runner.invoke(app, ["skills", "check"])
+    assert listed.exit_code == 0 and "Cut Skill" in listed.output and "effect Vigor looks cut" in listed.output
+    assert "stored cut" in listed.output and "1 reading(s) look cut." in listed.output
+    store.save("c2011", popup(name="Cut Skill", effects=(EffectPanel("Vigor", (), "Increases Attack by 30%."),)), NOW)
+    assert "No reading looks cut." in runner.invoke(app, ["skills", "check"]).output

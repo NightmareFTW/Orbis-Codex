@@ -29,6 +29,7 @@ from e7ac.roster.screen_import import resolve_hero_code
 from e7ac.settings import SettingsError, load_settings
 from e7ac.skills.clean import clean as clean_store
 from e7ac.skills.clean import find as find_junk
+from e7ac.skills.completeness import cut_effects, cut_parts, find_cut
 from e7ac.skills.export import export_text
 from e7ac.skills.hero import HeroMemory, decide
 from e7ac.skills.importer import import_export
@@ -71,6 +72,8 @@ class ReadEvent:
     slot: int | None = None
     """Which of the hero's skills it is (1, 2, 3), when epic7db's names place it."""
     passive: bool = False
+    cut: tuple[str, ...] = ()
+    """The parts of the stored skill that look cut ("description", "effect Vigor"): hold the skill again (SPEC D106)."""
 
 
 def identify(
@@ -133,6 +136,7 @@ def store_popup(
         decision.how,
         slot,
         passive,
+        tuple(cut_parts(saved.stored)),
     )
 
 
@@ -144,7 +148,8 @@ def describe(event: ReadEvent) -> str:
     effects = f"; effects learned: {', '.join(event.new_effects)}" if event.new_effects else ""
     source = {"hero screen": " [hero from its own screen]", "start of the name": " [hero from the start of its name]"}
     which = f" [S{event.slot}{', passive' if event.passive else ''}]" if event.slot is not None else ""
-    return f"{event.hero}: {event.skill}{which}{level} ({what}){effects}{source.get(event.how, '')}"
+    cut = f"; LOOKS CUT ({', '.join(event.cut)}): hold the skill again" if event.cut else ""
+    return f"{event.hero}: {event.skill}{which}{level} ({what}){effects}{source.get(event.how, '')}{cut}"
 
 
 # ------------------------------------------------------------------------------------------------ commands
@@ -229,6 +234,23 @@ def import_command(
     for item in done.left_out:
         typer.echo(f"  left out (not a skill): {item}")
     typer.echo(f"{done.skills} skill(s) of {done.heroes} hero(es) imported from {file.name}.")
+
+
+@skills_app.command("check")
+def check() -> None:
+    """The readings that look cut (a description or an effect that stops at "by", "of", a number...): the skills to
+    hold again. An effect is also listed by the heroes whose skills show it."""
+    paths = default_paths()
+    heroes = _heroes()
+    store = SkillStore(skills_dir(paths.home))
+    cuts = find_cut(store)
+    for cut in cuts:
+        name = heroes[cut.hero].name if cut.hero in heroes else cut.hero
+        typer.echo(f"  {name}: {cut.skill!r}: {cut.part} looks cut")
+    for title, codes in sorted(cut_effects(store).items()):
+        names = ", ".join(heroes[c].name or c for c in codes if c in heroes)
+        typer.echo(f"  effect {title!r} is stored cut (seen on: {names or '?'}): hold a skill that shows it")
+    typer.echo(f"{len(cuts)} reading(s) look cut." if cuts else "No reading looks cut.")
 
 
 @skills_app.command("clean")
@@ -382,6 +404,8 @@ def run_skill_watch(options: SkillWatchOptions, badge: WatchSignal, stop: thread
             if event.problem:
                 badge.say("Skills: hero not identified", event.problem[:60], AMBER)
                 typer.echo(f"  picture kept: {_keep(image, paths.captures_dir / 'skills')}")
+            elif event.cut:
+                badge.say(f"Read: {event.hero} (cut?)", f"{event.cut[0]} looks cut: hold it again", AMBER)
             else:
                 top = f"Read: {event.hero}"
                 badge.say(top, f"{event.skill}" + (f" +{event.level}" if event.level is not None else ""), GREEN)
