@@ -284,6 +284,9 @@ def run_skill_watch(options: SkillWatchOptions, badge: WatchSignal, stop: thread
         while (image := pending.get()) is not None:
             lines = reader.read(image)
             popup = parse_skill_popup(lines)
+            if popup is None and (known := memory.recall(clock())) is not None and heroes[known].name:
+                titles = [info.name for info in kit_of(heroes[known].name).values() if info.name]
+                popup = parse_skill_popup(lines, titles)  # a passive that has no badge and no "Skill Enhance"
             if popup is None:
                 counts["ignored"] += 1
                 name = read_hero_name(lines)

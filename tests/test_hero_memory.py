@@ -211,3 +211,43 @@ def test_the_watch_keeps_the_picture_of_a_popup_it_does_not_understand(
     assert len(kept) == 1 and str(kept[0]) in events[0].problem
     assert ("Skills: popup not understood", "its picture was kept - send it") in badge.said
     assert SkillStore(isolated_home.home / "skills").heroes() == []  # nothing guessed
+
+
+def test_the_watch_reads_a_passive_with_no_enhance_section_by_the_names_of_the_heros_skills(
+    monkeypatch: pytest.MonkeyPatch, synthetic_catalog: list[str], isolated_home: AppPaths
+) -> None:
+    """Harsetti's The Law of Skuggiheim (2026-10-26) has nothing a title can be found by but its own name."""
+    from e7ac.cli import arena as arena_cli
+    from e7ac.cli import skills as skills_cli
+    from e7ac.sources.epic7db import SkillInfo
+    from e7ac.vision.window import Rect
+    from tests.test_skill_popup import harsetti_passive
+
+    kit = {
+        1: SkillInfo(1, 0, {}, "", "Gambit"),
+        2: SkillInfo(2, None, {}, "", "The Law of Skuggiheim"),
+        3: SkillInfo(3, 5, {}, "", "Checkmate"),
+    }
+    monkeypatch.setattr(skills_cli, "make_kit_of", lambda paths, offline=False: lambda name: kit)
+    frames = [np.full((36, 64, 3), shade, np.uint8) for shade in (40, 200)]
+    sequence = [f for f in frames for _ in range(6)]
+    monkeypatch.setattr(
+        arena_cli, "game_frames", lambda client, hwnd: iter([(f, Rect(0, 0, 64, 36)) for f in sequence])
+    )
+    ticks = iter(x * 0.5 for x in range(1000))
+    monkeypatch.setattr(skills_cli, "clock", lambda: next(ticks))
+    popup_lines = [
+        line("Blood Blade Karin", t.box.x0, t.box.y0, t.box.x1 - t.box.x0, t.box.y1 - t.box.y0)
+        if t.text == "Harsetti"
+        else t
+        for t in harsetti_passive()
+    ]
+    monkeypatch.setattr(roster_cli, "reader_factory", lambda: Script([hero_screen("Blood Blade Karin"), popup_lines]))
+    events: list[skills_cli.ReadEvent] = []
+    skills_cli.run_skill_watch(skills_cli.SkillWatchOptions(on_read=events.append), Badge(), threading.Event())
+    assert [(e.skill, e.slot, e.passive, e.how, e.problem) for e in events] == [
+        ("The Law of Skuggiheim", 2, True, "hero screen", "")
+    ]
+    stored = SkillStore(isolated_home.home / "skills").load("c2011")
+    assert [(s.name, s.slot, s.passive) for s in stored] == [("The Law of Skuggiheim", 2, True)]
+    assert stored[0].text.startswith("At the start of battle, Speed of the caster is fixed")

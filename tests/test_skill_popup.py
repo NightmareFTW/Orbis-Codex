@@ -251,3 +251,50 @@ def test_the_users_own_passive_is_read_end_to_end() -> None:
         "-3% damage received limit",
         "-4% damage received limit",
     ]
+
+
+def harsetti_passive() -> list[TextLine]:
+    """The popup of Harsetti's passive, The Law of Skuggiheim, as laid out in the user's capture (2026-10-26, 1140 x
+    746; the boxes are read off the picture, not an OCR dump): a title right of the icon and a paragraph. It cannot
+    be enhanced, so it has no "+N" badge, no cost row, no "Skill Enhance" and no soulburn."""
+    text = [
+        "At the start of battle, Speed of the caster",
+        "is fixed going forward, and Speed of all",
+        "Heroes except for the caster is limited to",
+        "a maximum of 90% of the caster's",
+        "Speed. On the caster's turn, Combat",
+        "Readiness increase effects of all Heroes",
+        "is not applied. The Law of Skuggiheim",
+        "only applies to PvP.",
+    ]
+    return [
+        line("Dark", 60, 30, 70, 36),
+        line("MageLibra", 180, 28, 170, 40),
+        line("Harsetti", 18, 66, 195, 60),
+        line("Lv. Max/60", 18, 172, 222, 48),
+        line("Health + 21%", 125, 308, 143, 28),
+        line("The Law of Skuggiheim", 460, 313, 317, 40),
+        *[line(row, 343, 428 + 30.5 * i, 450, 30) for i, row in enumerate(text)],
+        line("Imprint Circuit: Takeoff Applied", 75, 550, 240, 26),
+        line("Skill", 632, 860, 59, 39),
+        line("Promotion", 746, 880, 129, 31),
+    ]
+
+
+def test_a_passive_that_cannot_be_enhanced_is_read_by_its_known_name() -> None:
+    assert parse_skill_popup(harsetti_passive()) is None  # nothing in it says where the title is ...
+    titles = ["Gambit", "The Law of Skuggiheim", "Checkmate"]
+    popup = parse_skill_popup(harsetti_passive(), titles)  # ... but the hero is known, and so are its skills
+    assert popup is not None
+    assert (popup.hero, popup.name, popup.level, popup.cooldown) == ("Harsetti", "The Law of Skuggiheim", None, None)
+    assert popup.text.startswith("At the start of battle, Speed of the caster is fixed going forward")
+    assert popup.text.endswith("The Law of Skuggiheim only applies to PvP.")
+    assert popup.enhance == () and popup.soulburn == "" and popup.effects == ()
+    assert "Promotion" not in popup.text and "Imprint" not in popup.text  # the screen's own text is not the paragraph
+
+
+def test_a_title_that_is_not_one_of_the_heros_skills_is_not_taken_for_one() -> None:
+    assert parse_skill_popup(harsetti_passive(), ["Gambit", "Checkmate"]) is None
+    assert parse_skill_popup(harsetti_passive(), []) is None
+    no_text = [ln for ln in harsetti_passive() if ln.box.x0 != 343]
+    assert parse_skill_popup(no_text, ["The Law of Skuggiheim"]) is None  # a name with no paragraph under it

@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from statistics import median
 from typing import Any, Final
 
+from e7ac.vision.labels import match_label
 from e7ac.vision.ocr import TextLine, TextReader
 
 BADGE: Final = re.compile(r"^\+\s*(\d{1,2})$")
@@ -107,11 +108,14 @@ def read_skill_popup(image: Any, reader: TextReader) -> SkillPopup | None:
     return parse_skill_popup(reader.read(image))
 
 
-def parse_skill_popup(lines: Sequence[TextLine]) -> SkillPopup | None:
+def parse_skill_popup(lines: Sequence[TextLine], titles: Sequence[str] = ()) -> SkillPopup | None:
+    """The popup on a screen. `titles`: the names of the skills of the hero the popup is known to belong to. A popup
+    with none of the marks the title is found by (a passive that cannot be enhanced has no badge, no cost row and no
+    "Skill Enhance") is still read when one of its lines is one of these names."""
     rows = [(line, clean(line.text)) for line in lines if clean(line.text)]
     if len(rows) < MIN_LINES:
         return None
-    title = _title(rows) or _title_without_badge(rows) or _title_above_description(rows)
+    title = _title(rows) or _title_without_badge(rows) or _title_above_description(rows) or _title_named(rows, titles)
     if title is None:
         return None
     badge, title_line = title
@@ -126,6 +130,8 @@ def parse_skill_popup(lines: Sequence[TextLine]) -> SkillPopup | None:
     aligned = [r for r in below if abs(r[0].box.x0 - left) <= max(12.0, tolerance)]
     right_edge = max((r[0].box.x1 for r in aligned), default=left)
     main = [r for r in below if r[0].box.x0 >= left - 12 and r[0].box.x0 < right_edge - 10]
+    if enhance_row is None and burn_row is None:  # nothing marks where the text ends: the paragraph does
+        main = _paragraph(main)
     side = [r for r in corner if r[0].box.x0 >= right_edge - 10 and len(re.sub(r"\W", "", r[1])) > 2]
     first_desc = next((r for r in main if abs(r[0].box.x0 - left) <= max(12.0, tolerance) and not _cost(r[1])), None)
     cost_rows = [r for r in main if first_desc is None or r[0].box.y0 < first_desc[0].box.y0]
@@ -253,6 +259,41 @@ def _title_above_description(rows: Sequence[tuple[TextLine, str]]) -> tuple[None
         and sum(c.isalpha() for c in r[1]) >= 3
     ]
     return (None, min(above, key=lambda r: r[0].box.y0)[0]) if above else None
+
+
+def _title_named(rows: Sequence[tuple[TextLine, str]], titles: Sequence[str]) -> tuple[None, TextLine] | None:
+    """(None, title line) when a line is one of the hero's skill names (exactly, or the margin rule) and a paragraph
+    starts below it, one icon to its left (The Law of Skuggiheim, Harsetti's passive, the user's capture 2026-10-26: a
+    title, then the text, nothing else)."""
+    if not titles:
+        return None
+    names = {name: name for name in titles if name}
+    for line, text in rows:
+        if line.box.height < 20 or match_label(text, names) is None:
+            continue
+        under = [
+            r
+            for r in rows
+            if line.box.x0 - 260 <= r[0].box.x0 <= line.box.x0 - 60 and 0 <= r[0].box.y0 - line.box.y1 <= 170
+        ]
+        if len(under) >= 2:
+            return None, line
+    return None
+
+
+def _paragraph(rows: Sequence[tuple[TextLine, str]]) -> list[tuple[TextLine, str]]:
+    """The rows from the first one down to the first vertical gap wider than most of a line: a paragraph of text and not
+    what the screen has further down."""
+    ordered = sorted(rows, key=lambda r: r[0].box.y0)
+    if not ordered:
+        return []
+    unit = median(r[0].box.height for r in ordered)
+    kept = [ordered[0]]
+    for row in ordered[1:]:
+        if row[0].box.y0 - kept[-1][0].box.y1 > 0.8 * unit:
+            break
+        kept.append(row)
+    return kept
 
 
 def _title(rows: Sequence[tuple[TextLine, str]]) -> tuple[TextLine, TextLine] | None:
