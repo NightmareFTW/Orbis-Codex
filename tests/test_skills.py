@@ -663,7 +663,7 @@ def test_every_kind_of_problem_is_found_and_the_ones_that_can_be_read_again_are_
 
 
 def test_a_panel_that_swallowed_the_next_one_is_a_problem() -> None:
-    from e7ac.skills.problems import holds_title
+    from e7ac.skills.completeness import holds_title
 
     glued = "Decreases Attack and Speed by 50%. XV Bomb At the end of the duration, suffers damage."
     assert holds_title(glued, ["Bomb", "Bleed"]) == "Bomb"
@@ -683,3 +683,21 @@ def test_a_badge_read_into_the_end_of_a_description_is_a_problem() -> None:
         (), 0.9, "", 1, False,
     )  # fmt: skip
     assert [p.detail for p in skill_problems(skill)] == ["its description ends with a stray '+3' (a badge)"]
+
+
+def test_a_whole_reading_repairs_a_panel_that_had_swallowed_the_next_one(tmp_path: Path) -> None:
+    """The glued text begins with the right one, so "only the start of the old text" must not keep it (the user held
+    Coli's Assault three times and it stayed glued)."""
+    store = SkillStore(tmp_path)
+    glued = EffectPanel(
+        "Energy Depletion", (), "Decreases Attack and Speed by 50%. XV Bomb At the end of the duration, stuns."
+    )
+    bomb = EffectPanel("Bomb", (), "At the end of the duration, suffers damage and is stunned.")
+    store.save("c1001", popup(effects=(glued, bomb)), NOW, slot=3)
+    assert [
+        p.kind for p in __import__("e7ac.skills.problems", fromlist=["x"]).hero_problems(store.load("c1001"), ["Bomb"])
+    ]
+    whole = EffectPanel("Energy Depletion", (), "Decreases Attack and Speed by 50%.")
+    again = store.save("c1001", popup(effects=(whole, bomb)), NOW, slot=3)
+    assert {e.title: e.text for e in again.stored.effects}["Energy Depletion"] == whole.text
+    assert store.effects()["energy depletion"]["text"] == whole.text

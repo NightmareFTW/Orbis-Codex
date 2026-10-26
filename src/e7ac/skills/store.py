@@ -154,12 +154,13 @@ class SkillStore:
         skills = self.load(code)
         index = next((i for i, s in enumerate(skills) if s.key == stored.key), None)
         before = skills[index] if index is not None else None
+        titles = self._titles(stored.effects)
         if before is not None:
             stored = replace(stored, text=fuller(before.text, stored.text))  # a cut reading never replaces a whole one
         if before is not None and before.text == stored.text:
             old = {e.title.lower(): e for e in before.effects}
             merged = tuple(
-                replace(e, text=fuller(old[e.title.lower()].text, e.text)) if e.title.lower() in old else e
+                replace(e, text=fuller(old[e.title.lower()].text, e.text, titles)) if e.title.lower() in old else e
                 for e in stored.effects
             )
             seen = {e.title.lower() for e in merged}
@@ -229,13 +230,19 @@ class SkillStore:
             }
         return known
 
+    def _titles(self, panels: Iterable[EffectPanel]) -> list[str]:
+        """The effect titles known, with those of the panels just read (to tell a panel that swallowed the next)."""
+        return [*(str(e.get("title", k)) for k, e in self.effects().items()), *(p.title for p in panels)]
+
     def _learn(self, code: str, panels: Iterable[EffectPanel], when: str) -> tuple[str, ...]:
         known = self.effects()
+        panels = list(panels)
+        titles = self._titles(panels)
         fresh: list[str] = []
         for panel in panels:
             key = panel.title.lower()
             entry = known.get(key)
-            text = fuller(str(entry.get("text", "")), panel.text) if entry is not None else panel.text
+            text = fuller(str(entry.get("text", "")), panel.text, titles) if entry is not None else panel.text
             if entry is None or entry.get("text") != text:
                 fresh.append(panel.title)
                 entry = {"title": panel.title, "marks": list(panel.marks), "text": text, "first_seen": when}

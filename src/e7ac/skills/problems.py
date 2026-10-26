@@ -11,13 +11,12 @@ store."""
 
 from __future__ import annotations
 
-import re
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from typing import Final
 
 from e7ac.skills.clean import why_junk
-from e7ac.skills.completeness import cut_parts, stray_badge
+from e7ac.skills.completeness import cut_parts, holds_title, stray_badge
 from e7ac.skills.store import SkillStore, StoredSkill
 
 CLEARABLE: Final = frozenset({"junk", "cut"})
@@ -38,15 +37,6 @@ class Problem:
 
     def line(self) -> str:
         return f"{self.skill}: {self.detail}"
-
-
-def holds_title(text: str, titles: Collection[str]) -> str | None:
-    """The effect title that starts a sentence inside the text ("... by 50%. XV Bomb At the end ..."): two panels read
-    as one (the title is followed by a capital, so "Bomb damage is ..." is not it)."""
-    for title in titles:
-        if title and re.search(rf"[.!%]\s+(?:[A-Za-z]{{1,3}}\s+)?{re.escape(title)}\s+[A-Z]", text):
-            return title
-    return None
 
 
 def skill_problems(skill: StoredSkill, titles: Collection[str] = ()) -> list[Problem]:

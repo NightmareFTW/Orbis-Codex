@@ -8,7 +8,7 @@ is judged from the text alone, so it also finds what was stored before the reade
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
+from collections.abc import Collection, Iterable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
@@ -50,11 +50,25 @@ def _plain(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip().lower().rstrip(".")
 
 
-def fuller(old: str, new: str) -> str:
+def holds_title(text: str, titles: Collection[str]) -> str | None:
+    """The effect title that starts a sentence inside the text ("... by 50%. XV Bomb At the end ..."): two panels read
+    as one (the title is followed by a capital, so "Bomb damage is ..." is not it)."""
+    for title in titles:
+        if title and re.search(rf"[.!%]\s+(?:[A-Za-z]{{1,3}}\s+)?{re.escape(title)}\s+[A-Z]", text):
+            return title
+    return None
+
+
+def fuller(old: str, new: str, titles: Collection[str] = ()) -> str:
     """The text to keep when a skill or an effect is read again: the new one, unless it is only the beginning of the
-    old one, or it looks cut and the old one does not (a worse reading never replaces a better one)."""
+    old one, or it looks cut and the old one does not (a worse reading never replaces a better one). An old text that
+    swallowed the next panel (`holds_title`) begins with the right one: the new one then replaces it."""
     if old and new != old:
-        if len(_plain(old)) > len(_plain(new)) and _plain(old).startswith(_plain(new)):
+        if (
+            holds_title(old, titles) is None
+            and len(_plain(old)) > len(_plain(new))
+            and (_plain(old).startswith(_plain(new)))
+        ):
             return old
         if looks_cut(new) and not looks_cut(old):
             return old
