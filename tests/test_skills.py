@@ -616,3 +616,23 @@ def test_skills_check_lists_the_readings_that_look_cut_and_the_event_says_so(
     assert "stored cut" in listed.output and "1 reading(s) look cut." in listed.output
     store.save("c2011", popup(name="Cut Skill", effects=(EffectPanel("Vigor", (), "Increases Attack by 30%."),)), NOW)
     assert "No reading looks cut." in runner.invoke(app, ["skills", "check"]).output
+
+
+def test_a_popup_whose_effect_stops_short_is_stored_and_the_event_says_it_looks_cut(
+    synthetic_catalog: list[str], isolated_home: AppPaths
+) -> None:
+    from dataclasses import replace
+
+    from e7ac.cli.roster import _catalog_heroes, _engine
+    from e7ac.cli.skills import describe, store_popup
+    from e7ac.storage.db import session_scope
+
+    with session_scope(_engine()) as session:
+        heroes = _catalog_heroes(session) or {}
+    store = SkillStore(isolated_home.home / "skills")
+    cut = EffectPanel("Vigor", (), "Increases Attack and Defense by")
+    event = store_popup(store, heroes, replace(popup(effects=(cut,)), hero="Blood Blade Karin"))
+    assert event.cut == ("effect Vigor",) and "LOOKS CUT (effect Vigor): hold the skill again" in describe(event)
+    whole = EffectPanel("Vigor", (), "Increases Attack and Defense by 30%.")
+    again = store_popup(store, heroes, replace(popup(effects=(whole,)), hero="Blood Blade Karin"))
+    assert again.cut == () and "LOOKS CUT" not in describe(again)

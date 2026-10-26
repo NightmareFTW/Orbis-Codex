@@ -405,6 +405,7 @@ def run_skill_watch(options: SkillWatchOptions, badge: WatchSignal, stop: thread
                 badge.say("Skills: hero not identified", event.problem[:60], AMBER)
                 typer.echo(f"  picture kept: {_keep(image, paths.captures_dir / 'skills')}")
             elif event.cut:
+                typer.echo(f"  picture of the cut reading{_evidence(image, counts, paths, 'cut')}")
                 badge.say(f"Read: {event.hero} (cut?)", f"{event.cut[0]} looks cut: hold it again", AMBER)
             else:
                 top = f"Read: {event.hero}"
