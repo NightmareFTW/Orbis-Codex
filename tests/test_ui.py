@@ -864,7 +864,13 @@ def test_a_hero_with_a_problem_stays_amber_in_the_list_and_the_button_clears_it(
     assert page._clear.isEnabled() and "(1)" in page._clear.text()
     page._hide.setChecked(True)  # hiding the complete heroes does not hide one that still has something to hold
     assert "Blood Blade Karin" in [table.item(r, 1).text() for r in range(table.rowCount())]
+    page._hide.setChecked(False)
+    assert page._wrong.isEnabled() and "(1)" in page._wrong.text()
+    page._wrong.setChecked(True)  # only what needs a fix
+    assert [table.item(r, 1).text() for r in range(table.rowCount())] == ["Blood Blade Karin"]
     page._clear.click()
+    assert not page._wrong.isChecked() and not page._wrong.isEnabled()  # nothing left to fix: the whole list is back
+    assert table.rowCount() == len(context.heroes())
     assert [s.name for s in store.load("c2011")] == ["Lethal Strike", "Second"]  # the skills read well stay
     assert "Cleared 1 reading(s) of 1 hero(es)" in page._status.text()
     assert "Blood Blade Karin" in [table.item(r, 1).text() for r in range(table.rowCount())]  # missing one: to read

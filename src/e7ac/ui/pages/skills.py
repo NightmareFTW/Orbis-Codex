@@ -126,13 +126,19 @@ class SkillsPage(Page):
         self._hide = QCheckBox("Hide complete heroes")
         self._hide.setChecked(False)
         self._hide.toggled.connect(self._fill)
+        self._wrong = QCheckBox("Only heroes with a problem")
+        self._wrong.setToolTip(
+            "Show only the heroes that need a fix: a text that looks cut, a reading that is not a skill."
+        )
+        self._wrong.setChecked(False)
+        self._wrong.toggled.connect(self._fill)
         export = QPushButton("Export file")
         export.setToolTip("Write everything read as one text file, to send.")
         export.clicked.connect(self._export)
         copy = QPushButton("Copy export")
         copy.setToolTip("Everything read as text on the clipboard, to paste in the chat.")
         copy.clicked.connect(self._copy_export)
-        for widget in (self._start, self._hero, self._overlay, self._hide, self._clear):
+        for widget in (self._start, self._hero, self._overlay, self._hide, self._wrong, self._clear):
             controls.addWidget(widget)
         controls.addStretch()
         controls.addWidget(export)
@@ -199,6 +205,10 @@ class SkillsPage(Page):
         complete, started, skills, total = progress(self._rows)
         effects = len(self._store.effects())
         wrong = sum(bool(r.problems) for r in self._rows)
+        self._wrong.setText(f"Only heroes with a problem ({wrong})")
+        self._wrong.setEnabled(wrong > 0)
+        if not wrong and self._wrong.isChecked():
+            self._wrong.setChecked(False)  # nothing is left to fix: the whole list is back
         self._clear.setEnabled(not self._skills.running and any(r.clearable for r in self._rows))
         self._clear.setText(f"Clear problem readings ({sum(len(r.clearable) for r in self._rows)})")
         self._fill_heroes()
@@ -221,7 +231,11 @@ class SkillsPage(Page):
         self._hero.blockSignals(False)
 
     def _fill(self) -> None:
-        rows = [r for r in self._rows if not (self._hide.isChecked() and r.done)][:LIST_SIZE]
+        rows = [
+            r
+            for r in self._rows
+            if not (self._hide.isChecked() and r.done) and not (self._wrong.isChecked() and not r.problems)
+        ][:LIST_SIZE]
         keep = self._selected_code()
         table = self._table
         table.blockSignals(True)
