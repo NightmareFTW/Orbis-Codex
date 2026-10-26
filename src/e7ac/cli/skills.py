@@ -28,12 +28,13 @@ from e7ac.paths import default_paths
 from e7ac.roster.screen_import import resolve_hero_code
 from e7ac.settings import SettingsError, load_settings
 from e7ac.skills.export import export_text
+from e7ac.skills.hero import HeroMemory, decide
 from e7ac.skills.store import SkillStore, skills_dir
 from e7ac.skills.worklist import progress, worklist
 from e7ac.sources.epic7db import fetch_tier_order, slug
 from e7ac.storage.db import session_scope
 from e7ac.ui.watch_signal import AMBER, GREEN, LIGHT, NoSignal, WatchSignal
-from e7ac.vision.skill_popup import SkillPopup, parse_skill_popup
+from e7ac.vision.skill_popup import SkillPopup, parse_skill_popup, read_hero_name
 
 skills_app = typer.Typer(help="Skills read from the game's own skill popup: read, watch, list what is missing, export.")
 _OFFLINE = typer.Option("--offline", help="Use cached pages only.")
@@ -58,39 +59,44 @@ class ReadEvent:
     new_effects: tuple[str, ...]
     problem: str = ""
     """Why nothing was stored ("" when it was)."""
+    how: str = ""
+    """What the hero was taken from (`skills.hero.Decision.how`)."""
 
 
 def identify(
-    popup: SkillPopup, heroes: dict[str, ResolvedEntity], override: str | None = None
+    popup: SkillPopup,
+    heroes: dict[str, ResolvedEntity],
+    override: str | None = None,
+    remembered: str | None = None,
 ) -> tuple[str | None, str]:
-    """(hero code, "") for a popup: the name on the screen by the exact name or the margin rule, or the hero chosen.
-    The hero chosen wins when the screen's name is not clear (the name sits on the hero's art and is often cut short:
-    "Spirit Ey"), but never against a clear one: a name read exactly as another hero means the choice was not changed
-    when the next hero was opened (SPEC D96)."""
-    if not override:
-        return resolve_hero_code(popup.hero, heroes)
-    chosen, problem = (override, "") if override in heroes else resolve_hero_code(override, heroes)
-    if chosen is None:
-        return None, problem
-    seen, _ = resolve_hero_code(popup.hero, heroes) if popup.hero else (None, "")
-    if seen is not None and seen != chosen:
-        return None, (
-            f"the screen shows {heroes[seen].name!r} but the hero chosen is {heroes[chosen].name!r}: "
-            "choose the hero you opened (or clear the choice to use the name on the screen)"
-        )
-    return chosen, ""
+    """(hero code, "") for a popup, or (None, why not): see `skills.hero.decide` for what is trusted first."""
+    decision = decide(popup.hero, heroes, override, remembered)
+    return decision.code, decision.problem
 
 
 def store_popup(
-    store: SkillStore, heroes: dict[str, ResolvedEntity], popup: SkillPopup, override: str | None = None
+    store: SkillStore,
+    heroes: dict[str, ResolvedEntity],
+    popup: SkillPopup,
+    override: str | None = None,
+    remembered: str | None = None,
 ) -> ReadEvent:
-    code, problem = identify(popup, heroes, override)
+    decision = decide(popup.hero, heroes, override, remembered)
+    code = decision.code
     shown = popup.hero or override or "?"
     if code is None:
-        return ReadEvent(None, shown, popup.name, popup.level, False, False, (), problem)
+        return ReadEvent(None, shown, popup.name, popup.level, False, False, (), decision.problem)
     saved = store.save(code, popup)
     return ReadEvent(
-        code, heroes[code].name or code, popup.name, popup.level, saved.new, saved.changed, saved.new_effects
+        code,
+        heroes[code].name or code,
+        popup.name,
+        popup.level,
+        saved.new,
+        saved.changed,
+        saved.new_effects,
+        "",
+        decision.how,
     )
 
 
@@ -100,7 +106,8 @@ def describe(event: ReadEvent) -> str:
         return f"not stored: {event.skill}{level}: {event.problem}"
     what = "new" if event.new else "changed" if event.changed else "again"
     effects = f"; effects learned: {', '.join(event.new_effects)}" if event.new_effects else ""
-    return f"{event.hero}: {event.skill}{level} ({what}){effects}"
+    source = {"hero screen": " [hero from its own screen]", "start of the name": " [hero from the start of its name]"}
+    return f"{event.hero}: {event.skill}{level} ({what}){effects}{source.get(event.how, '')}"
 
 
 # ------------------------------------------------------------------------------------------------ commands
@@ -236,15 +243,26 @@ def run_skill_watch(options: SkillWatchOptions, badge: WatchSignal, stop: thread
     reader = roster_cli.reader_factory()
     pending: queue.Queue[Any | None] = queue.Queue()
     counts = {"read": 0, "ignored": 0}
+    memory = HeroMemory()
+    """The hero seen on its own screen (SPEC D97): its name is whole there, and covered once a skill is held."""
 
     def work() -> None:
         while (image := pending.get()) is not None:
-            popup = parse_skill_popup(reader.read(image))
+            lines = reader.read(image)
+            popup = parse_skill_popup(lines)
             if popup is None:
                 counts["ignored"] += 1
-                badge.say("Skills: hold a skill icon", "no skill popup on this screen", LIGHT)
+                name = read_hero_name(lines)
+                seen = resolve_hero_code(name, heroes)[0] if name else None
+                if seen is None:
+                    badge.say("Skills: hold a skill icon", "no skill popup on this screen", LIGHT)
+                    continue
+                memory.see(seen, clock())
+                typer.echo(f"  hero screen: {heroes[seen].name}")
+                badge.say(f"Hero: {heroes[seen].name}", "now hold each skill icon ~2 s", GREEN)
                 continue
-            event = store_popup(store, heroes, popup, options.chosen() if options.chosen is not None else None)
+            chosen = options.chosen() if options.chosen is not None else None
+            event = store_popup(store, heroes, popup, chosen, memory.recall(clock()))
             counts["read"] += not event.problem
             typer.echo(("  " if not event.problem else "  ! ") + describe(event))
             if options.on_read is not None:

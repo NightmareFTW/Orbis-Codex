@@ -68,11 +68,15 @@ class NoSignal:
     def close(self) -> None: ...
 
 
-def metrics(size: str, dpi_scale: float) -> tuple[int, int, int, int, int]:
+WITH_BUTTONS: Final = 1.3
+"""A badge with buttons is this much wider: its lines have the plates to share the width with."""
+
+
+def metrics(size: str, dpi_scale: float, buttons: bool = False) -> tuple[int, int, int, int, int]:
     """(width, height, title font, line font, button font) in pixels for a size name on a screen of this scale."""
     factor = SIZES.get(size, SIZES[DEFAULT_SIZE]) * max(1.0, min(dpi_scale, 4.0))
     return (
-        round(WIDTH * factor),
+        round(WIDTH * factor * (WITH_BUTTONS if buttons else 1.0)),
         round(HEIGHT * factor),
         round(FONT_TITLE * factor),
         round(FONT_LINE * factor),
@@ -183,29 +187,15 @@ class TkBadge:
         root.attributes("-alpha", 0.92)
         dpi_scale = float(root.winfo_fpixels("1i")) / 96.0
         size = [self.size]
-        box = tk.Frame(root, bg=BACKGROUND, highlightthickness=3, highlightbackground=GREY)
-        box.pack(fill="both", expand=True)
-        top = tk.Label(box, text="Watching the game...", fg="white", bg=BACKGROUND, anchor="w")
-        bottom = tk.Label(box, text="", fg="#bbbbbb", bg=BACKGROUND, anchor="w")
-        presses: list[tk.Label] = []
-        if self.buttons:
-            column = tk.Frame(box, bg=BACKGROUND)
-            column.pack(side="right", fill="y", padx=(0, 4), pady=3)
-            for label, action in self.buttons:
-                press = tk.Label(column, text=label, fg="white", bg=GREY, cursor="hand2", padx=6)
-                press.pack(fill="both", expand=True, pady=1)
-                press.bind("<Button-1>", _on_click(action))
-                presses.append(press)
-        top.pack(fill="x", padx=8, pady=(4, 0))
-        bottom.pack(fill="x", padx=8)
+        from e7ac.ui.badge_view import BadgeView  # the drawing, away from this module's Windows parts
+
+        view = BadgeView(root, self.buttons)
+        view.canvas.pack(fill="both", expand=True)
 
         def fit() -> tuple[int, int]:
-            """Fonts and size for the current size name (sizes in pixels: negative font sizes)."""
-            width, height, title, line, button = metrics(size[0], dpi_scale)
-            top.config(font=("Segoe UI", -title, "bold"))
-            bottom.config(font=("Segoe UI", -line))
-            for press in presses:
-                press.config(font=("Segoe UI", -button, "bold"))
+            """Size and fonts for the current size name (fonts in pixels: negative sizes)."""
+            width, height, title, line, button = metrics(size[0], dpi_scale, bool(self.buttons))
+            view.resize(width, height, title, line, button)
             return width, height
 
         fitted = [fit()]
@@ -237,19 +227,15 @@ class TkBadge:
                 placed.clear()
                 apply("place", value)
             elif kind == "top":
-                text, colour = value
-                top.config(text=text, fg=colour)
-                box.config(highlightbackground=colour)
+                view.say_top(*value)
             elif kind == "bottom":
-                text, colour = value
-                bottom.config(text=text, fg=colour)
+                view.say_bottom(*value)
             elif kind == "affinity":
                 _set_affinity(hwnd, excluded=not value)
                 root.update_idletasks()
                 self._affinity.set()
             elif kind == "lines":  # both in one update: they never disagree on screen
-                apply("top", value[0])
-                apply("bottom", value[1])
+                view.say(value[0], value[1])
             return True
 
         def poll() -> None:

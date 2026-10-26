@@ -5,7 +5,7 @@
 ## How (no screenshots)
 
 1. `Orbis.cmd`, open **Dev tools > Skill reader**, press **Start reading** (or `e7 skills watch`).
-2. In the game open a hero's **Skill** tab and **hold each of its three skill icons for about two seconds**. The badge on the game says `Read: <hero>` for each. Nothing is pressed or clicked for you: the program only looks at the screen.
+2. In the game open the hero (its own screen, with the name large at the top left: the program reads and remembers the name there, so open it and wait a second) and **hold each of its three skill icons for about two seconds**. The badge on the game says `Read: <hero>` for each. Nothing is pressed or clicked for you: the program only looks at the screen.
 3. When you want me to have it: **Export file** (or **Copy export**) on the same page and send me the text (a few hundred KB for the whole list). The table shows who is still missing; the heroes met in your Arena come first.
 
 A hero is complete after three skills. The popups also show the description of every effect they name (Offering, Venom, Fear, ...), so a mechanic is learned once for everybody who has it.

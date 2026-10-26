@@ -169,6 +169,30 @@ def parse_skill_popup(lines: Sequence[TextLine]) -> SkillPopup | None:
     )
 
 
+def read_hero_name(lines: Sequence[TextLine]) -> str | None:
+    """The hero's name on the hero's own screen (no popup open): the tallest text of the screen's top left, where the
+    name is written large over the art, before a held skill's popup covers it (SPEC D97). Sizes are relative to the
+    text found, so a small window reads like a large one. None when nothing there looks like a name; whether it is a
+    hero is for the catalog to say (an exact name or the margin rule, never a guess)."""
+    rows = [(line, clean(line.text)) for line in lines if clean(line.text)]
+    if len(rows) < 3:
+        return None
+    wide = max(r[0].box.x1 for r in rows)
+    high = max(r[0].box.y1 for r in rows)
+    corner = [
+        r
+        for r in rows
+        if r[0].box.x0 <= 0.12 * wide
+        and r[0].box.y0 <= 0.25 * high
+        and not r[1].lower().startswith("lv")
+        and sum(c.isalpha() for c in r[1]) >= 3
+    ]
+    name = max(corner, key=lambda r: r[0].box.height, default=None)
+    if name is None or name[0].box.height < 0.04 * high:  # the name is the screen's largest text
+        return None
+    return re.sub(r"[^A-Za-z0-9' .&:-]+", "", name[1]).strip() or None
+
+
 def _title_without_badge(rows: Sequence[tuple[TextLine, str]]) -> tuple[None, TextLine] | None:
     """(None, title line) for a skill at +0, which shows no badge: the line right above its "Acquire N Soul" row."""
     for acquire, text in rows:

@@ -238,7 +238,7 @@ def test_the_hero_chosen_wins_over_a_name_cut_short_but_never_over_a_clear_one(
         heroes = _catalog_heroes(session) or {}
     read = popup()
     cut = replace(read, hero="Blood Bl")
-    assert identify(cut, heroes) == (None, "no catalog hero is called 'Blood Bl' (OCR error, or run: e7 catalog sync)")
+    assert identify(cut, heroes) == ("c2011", "")  # the start of one hero's name and of no other
     assert identify(cut, heroes, "Blood Blade Karin") == ("c2011", "")
     assert identify(replace(read, hero=None), heroes, "c2011") == ("c2011", "")
     assert identify(replace(read, hero="Blood Blade Karin"), heroes, "Blood Blade Karin") == ("c2011", "")

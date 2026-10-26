@@ -76,7 +76,9 @@ class SkillsPage(Page):
                 "Skill reader",
                 "Press Start, open a hero's Skill tab in the game and hold each skill icon for about two seconds: "
                 "the program reads the popup (numbers, enhancement steps, effect descriptions). Three skills a hero. "
-                "Name the hero below when its name over the art is read badly; change it when you open the next hero.",
+                "Open the hero first and wait a second: the program reads its name there and remembers it (the popup "
+                "covers the name). The Hero box is only for when that does not work: change or clear it for the next "
+                "hero.",
             )
         )
         controls = QHBoxLayout()
