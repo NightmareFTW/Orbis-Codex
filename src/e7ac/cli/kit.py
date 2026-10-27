@@ -254,6 +254,10 @@ def _passives(kit: Kit) -> list[str]:
         )
     if kit.death_cd:
         found.append(f"every cooldown -{kit.death_cd} turn each time a hero dies")
+    if kit.pen_resist:
+        found.append(f"Penetration Resistance {kit.pen_resist:.0%} for every ally")
+    if kit.ally_hit_cr:
+        found.append(f"+{kit.ally_hit_cr:.0%} Combat Readiness after every attack an ally suffers")
     return found
 
 
@@ -263,6 +267,9 @@ def _describe(effect: Effect) -> str:
     if effect.kind == "extra_attack":
         chance = f"{effect.chance:.0%} chance of " if effect.chance != 1 else ""
         return f"{chance}an extra attack with S{int(effect.value) or 1}"
+    if effect.kind == "random":
+        where = f" {effect.receivers}" if effect.receivers else ""
+        return "one of " + " / ".join(_describe(option) for option in effect.options) + where
     if effect.kind == "reset_cd":
         return f"reset the cooldown of S{effect.value:.0f}" + (f" if {effect.condition}" if effect.condition else "")
     form = f" [form {effect.form}]" if effect.form >= 0 else ""

@@ -26,10 +26,10 @@ only: newer ones have none) or by hand (`src/e7ac/predict/kits/<code>.toml`, fro
 | 7 | Notos (c2181) | done (D108) | what God of Battle doubles besides Attack / Defense / Speed; Sanctuary of Battle (NV-63) |
 | 6 | Belian (c1117) | done (D108) | the amounts of S2's random buff (NV-64); Hit Chance |
 | 6 | Setsuka (c1176) | S3 done (D108) | Demon Blade Unleashed and Blade Art: Bewitching Blossom, Fighting Spirit's maximum (NV-65) |
-| 5 | Genesis Ras (c2001) | not read | Sacred Covenant, seal and collapse |
-| 5 | Empyrean Ilynav (c2113) | not read | Injuries, Indomitable |
+| 5 | Genesis Ras (c2001) | done (D109) | the extra damage of S3 with fewer enemies; Soulburn |
+| 5 | Empyrean Ilynav (c2113) | done (D109) | the injuries (NV-68); the life steal; how Penetration Resistance lowers penetration (NV-67) |
 | 4 | Perfumer Byblis (c5154) | done (D89) | Soulburn; the 5% Health of Lingering Fragrance; injuries |
-| 4 | Zio (c1133), New Moon Luna (c2066), Witch of the Mere Tenebria (c6050) | not read | Deify; skill effect nullifier; rupture, restrict, block |
+| 4 | Zio (c1133), New Moon Luna (c2066), Witch of the Mere Tenebria (c6050) | done (D109) | Zio S3's damage by the target's current Health (NV-69); Luna S2's additional damage (NV-70); Rupture, the barrier and the debuff amounts of Tenebria (NV-71) |
 | 4 | Maid Chloe (c2049) | S1, S3 done | S2 |
 | 2-3 | Mort, Young Senya, Celine, Frieren, School Nurse Yulha, Tactical Archetype Coli, Afternoon Soak Flan, ... | Mort, Young Senya done | the rest, in this order |
 
@@ -91,8 +91,8 @@ effect on the result needs the fights of section 3; for the user's own heroes it
 
 ## Order of work
 
-1. The heroes at the top of the table (each one that is read removes a "~" from a lot of predictions): next Spirit Eye
-   Celine, Arbiter Vildred, Rhianna and Luciella, Notos, Belian, Setsuka.
+1. The heroes at the top of the table (each one that is read removes a "~" from a lot of predictions): next Maid Chloe's S2 and
+   the heroes of the user's next export (Spirit Eye Celine to Tenebria are done).
 2. The results log (section 3, built in SPEC D93): turns every later fix into a measured one; the lost fight is the first case to explain.
 3. The opponent build (section 2): only from results, since the game never shows it.
 4. The rest, as the fights say which of them matter.

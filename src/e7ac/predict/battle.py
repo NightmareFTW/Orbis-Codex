@@ -44,12 +44,19 @@ LAND_CAP: Final = 0.85
 FEAR_DISPEL: Final = 0.4
 """MECH-FEAR-01 (`verified`, in-game text): a feared hero cannot act; at the start of its turn it has a 40% chance to
 be dispelled."""
+DEIFY_CRIT: Final = 0.5
+"""Deify (`verified`, in-game text): "When attacking, increases Critical Hit Chance by 50%"."""
+DEIFY_REDUCTION: Final = 0.5
+"""Deify: "when attacked, grants 50% damage reduction" (applied to the damage of attacks, not to damage over time)."""
 SPOILS_STEP: Final = 0.2
 """Spoils (Rinak, MECH-SPOIL-01, `verified` in the in-game text): Attack and Defense up by 20% per stack, up to
 `SPOILS_CAP`."""
 SPOILS_CAP: Final = 4
 PILFER_STEP: Final = 0.2
 """Pilfer (`verified`): Attack and Defense of its holder down by 20%."""
+MIN_COOLDOWN: Final = 2
+"""MECH-CD-02 (`assumed`, NV-33): a 1-turn cooldown (New Moon Luna's S3 at +3) would, counted as MECH-CD-01 does, be
+ready again at the very next own turn, i.e. no cooldown at all; it is read as "ready again two own turns later"."""
 MAX_ACTIONS: Final = 200
 """A battle still going after this many actions is a draw (nobody can defeat anybody with the modelled skills)."""
 
@@ -179,21 +186,23 @@ def _play(
             state[i].spirit = unit.kit.spirit_start + (unit.kit.spirit_bonus if earth else 0)
     for actions in range(1, MAX_ACTIONS + 1):
         alive = [i for i in range(n) if hp[i] > 0]
-        speed = [speeds[i] * (1.0 if units[i].kit.speed_cap else state[i].factor("spd")) for i in range(n)]
+        caps = [_kit(units, state, i).speed_cap for i in range(n)]
+        speed = [speeds[i] * (1.0 if caps[i] else state[i].factor("spd")) for i in range(n)]
         for c in alive:  # a speed cap (Harsetti): every other hero at most this share of the caster's speed
-            if units[c].kit.speed_cap:
-                speed = [v if i == c else min(v, units[c].kit.speed_cap * speed[c]) for i, v in enumerate(speed)]
+            if caps[c]:
+                speed = [v if i == c else min(v, caps[c] * speed[c]) for i, v in enumerate(speed)]
         actor = min(alive, key=lambda i: (1 - cr[i]) / speed[i])
         elapsed = max(0.0, (1 - cr[actor]) / speed[actor])
         for i in alive:
             cr[i] += elapsed * speed[i]
         cr[actor] = 0.0
         unit, me = units[actor], state[actor]
-        frozen = list(cr) if unit.kit.cr_lock else None  # MECH-CRLOCK-01: Combat Readiness cannot go up on this turn
-        for effect in unit.kit.on_turn:  # passive heals / barriers at the start of the turn
+        kit = _kit(units, state, actor)  # a sealed hero plays without its passives
+        frozen = list(cr) if kit.cr_lock else None  # MECH-CRLOCK-01: Combat Readiness cannot go up on this turn
+        for effect in kit.on_turn:  # passive heals / barriers at the start of the turn
             _use(effect, actor, [], units, hp, cr, state, rng)
         if me.hots:  # continuous healing at the start of the turn
-            maximum = unit.stats[Stat.HP]
+            maximum = _max_hp(units, state, actor)
             for share, _ in me.hots:
                 hp[actor] = min(maximum, hp[actor] + share * maximum)
             me.hots = [(share, turns - 1) for share, turns in me.hots if turns > 1]
@@ -224,7 +233,7 @@ def _play(
                 continue
         if me.timers.get("fear", 0) > 0 and rng.random() < FEAR_DISPEL:
             del me.timers["fear"]
-        if me.timers.get("stun", 0) > 0 or me.timers.get("fear", 0) > 0:
+        if _cannot_act(me):
             me.tick()
             continue
         for ready in waiting[actor]:
@@ -237,16 +246,14 @@ def _play(
         held = any(me.timers.get(kind, 0) > 0 for kind in ("silence", "provoke", "redirect_provoke"))
         slot = 1 if held else _choose(unit, waiting[actor], acted[actor], dead_ally)
         if slot != 1 and unit.cooldowns.get(slot):
-            waiting[actor][slot] = unit.cooldowns[slot]  # counts down at the start of each own turn (MECH-CD-01)
+            # counts down at the start of each own turn (MECH-CD-01, MECH-CD-02)
+            waiting[actor][slot] = max(unit.cooldowns[slot], MIN_COOLDOWN)
         acted[actor] = True
         enemies = [j for j in alive if units[j].side != unit.side]
         skill = unit.skills.get(slot)
-        if slot == 1 and unit.kit.variant_slot in unit.skills and me.buffed:  # Nimble Sword: S1 with a buff
-            skill = unit.skills[unit.kit.variant_slot]
+        if slot == 1 and kit.variant_slot in unit.skills and me.buffed:  # Nimble Sword: S1 with a buff
+            skill = unit.skills[kit.variant_slot]
             for effect in unit.kit.variant_effects:
-                _use(effect, actor, [], units, hp, cr, state, rng)
-        for effect in unit.kit.before_use.get(slot, []):  # "after granting increased Attack ..., attacks"
-            if effect.form < 0 or effect.form == me.form:
                 _use(effect, actor, [], units, hp, cr, state, rng)
         targets: list[int] = []
         killed = False
@@ -257,13 +264,18 @@ def _play(
             elif skill.targets > 1:
                 targets = enemies
             else:  # a hero in front with Ferocious Stand is the only one a single-target skill can pick
-                taunting = [j for j in enemies if units[j].kit.taunt and j == _front(units, hp, units[j].side)]
-                targets = taunting[:1] or [min(enemies, key=lambda j: hp[j] / hits[(actor, j, slot)])]
+                # a hero in stealth cannot be picked while it has an ally (MECH-STEALTH-01)
+                open_to_it = [j for j in enemies if not _hidden(units, hp, state, j)] or enemies
+                taunting = [j for j in open_to_it if units[j].kit.taunt and j == _front(units, hp, units[j].side)]
+                targets = taunting[:1] or [min(open_to_it, key=lambda j: hp[j] / hits[(actor, j, slot)])]
             if me.timers.get("provoke", 0) > 0 and me.provoker in enemies:
                 targets = [me.provoker]  # provoked: attacks its provoker
             if me.timers.get("redirect_provoke", 0) > 0:  # MECH-PROV-01 (verified in game): basic skill on the enemy
                 targets = [max(enemies, key=lambda j: units[j].stats[Stat.HP])]  # with the highest max Health
-            crit = skill.can_crit and rng.random() < min(unit.stats[Stat.CRIT_CHANCE], 1.0)
+            for effect in unit.kit.before_use.get(slot, []):  # "after inflicting seal ..., attacks": on the targets
+                if effect.form < 0 or effect.form == me.form:
+                    _use(effect, actor, targets, units, hp, cr, state, rng)
+            crit = skill.can_crit and rng.random() < _crit_chance(units, state, actor)
             factor = min(unit.stats[Stat.CRIT_DAMAGE], CD_CAP) if crit else 1.0
             attack = {**unit.stats, Stat.ATK: unit.stats[Stat.ATK] * me.factor("atk")}
             for j in targets:
@@ -272,6 +284,9 @@ def _play(
                 top = unit.kit.pierce_top.get(slot)
                 if top and j == max(enemies, key=lambda e: units[e].stats[Stat.HP]):
                     used = replace(skill, penetration=max(skill.penetration, top))
+                resisted = max((_kit(units, state, m).pen_resist for m in _allies(units, hp, j)), default=0.0)
+                if resisted and used.penetration:  # Penetration Resistance of the target's side (MECH-PENRES-01)
+                    used = replace(used, penetration=used.penetration * (1 - min(resisted, 1.0)))
                 lost, lethal = _strike(units, hp, cr, state, j, base_hit(attack, used, guard) * factor, rng, actor)
                 if lethal:
                     killed = killed or hp[j] <= 0
@@ -283,6 +298,7 @@ def _play(
         stunned = {j: state[j].timers.get("stun", 0) for j in targets}
         form = me.form  # the effects of a skill act in the form it was used in, even if the skill swaps
         proc = False
+        proc_kill = False
         for effect in unit.kit.on_use.get(slot, []):
             if effect.form >= 0 and effect.form != form:
                 continue
@@ -296,6 +312,10 @@ def _play(
                 continue
             if effect.condition == "proc" and not proc:
                 continue
+            if effect.condition == "proc_kill" and not proc_kill:
+                continue
+            if effect.condition == "cd3" and waiting[actor].get(3, 0) <= 0:  # while its S3 is on cooldown
+                continue
             if effect.condition == "half" and not any(0 < hp[j] <= 0.5 * units[j].stats[Stat.HP] for j in targets):
                 continue
             if effect.kind == "swap":  # Rhianna <-> Luciella
@@ -304,10 +324,10 @@ def _play(
             if effect.kind == "extra_attack":  # an attack again, with S1 or the skill of `value` (Belian's Incursion)
                 proc = rng.random() < effect.chance
                 if proc:
-                    _extra_attack(actor, targets, units, hp, cr, state, hits, rng, int(effect.value) or 1)
+                    proc_kill = _extra_attack(actor, targets, units, hp, cr, state, hits, rng, int(effect.value) or 1)
                 continue
             if effect.kind == "dual_attack":
-                _dual_attack(actor, targets, units, hp, cr, state, hits, rng)
+                _dual_attack(actor, targets, units, hp, cr, state, hits, rng, effect.receivers == "highest_atk")
                 continue
             if effect.kind == "reset_cd":  # the cooldown of a skill is over at once (Arbiter Vildred's Dark Blade)
                 waiting[actor][int(effect.value)] = 0
@@ -399,6 +419,8 @@ class _State:
     """Which of its two forms the hero is in (Rhianna and Luciella swap at each S2)."""
     erosions: list[tuple[float, int]] = field(default_factory=list)
     """Erosion: (share of the holder's lost Health per turn, turns left); it ticks at the start of the holder's turn."""
+    collapse: float = 0.0
+    """Collapse: share of max Health the holder cannot have while the "collapse" timer runs."""
 
     @property
     def buffed(self) -> bool:
@@ -426,13 +448,14 @@ class _State:
 
     def factor(self, kind: str) -> float:
         extra = (SPOILS_STEP * self.spoils - PILFER_STEP * self.pilfer) if kind in ("atk", "def") else 0.0
-        return max(0.0, 1 + self.buffs.get(kind, (0.0, 0))[0] + self.debuffs.get(kind, (0.0, 0))[0] + extra)
+        buff = 0.0 if self.timers.get("block", 0) > 0 else self.buffs.get(kind, (0.0, 0))[0]  # block: no buff counts
+        return max(0.0, 1 + buff + self.debuffs.get(kind, (0.0, 0))[0] + extra)
 
     def apply(self, effect: Effect) -> None:
         if effect.kind == "revive_buff":
             self.timers["revive_buff"] = max(self.timers.get("revive_buff", 0), effect.turns)
             self.revive_hp = effect.value
-        elif effect.kind in ("atk", "def", "spd", "eff"):
+        elif effect.kind in ("atk", "def", "spd", "eff", "res"):
             table = self.debuffs if effect.debuff else self.buffs
             old = table.get(effect.kind, (0.0, 0))
             table[effect.kind] = (effect.value if abs(effect.value) >= abs(old[0]) else old[0], effect.turns)
@@ -551,8 +574,26 @@ _TIMERS: Final = (
     "unable_counter",
     "unable_buff",
     "abundance",
+    "seal",
+    "collapse",
+    "deify",
+    "nullifier",
+    "sleep",
+    "restrict",
+    "stealth",
+    "block",
 )
-_BUFF_TIMERS: Final = ("immortal", "invincible", "immunity", "counter", "revive_buff", "abundance")
+_BUFF_TIMERS: Final = (
+    "immortal",
+    "invincible",
+    "immunity",
+    "counter",
+    "revive_buff",
+    "abundance",
+    "deify",
+    "nullifier",
+    "stealth",
+)
 _DEBUFF_TIMERS: Final = (
     "stun",
     "fear",
@@ -561,6 +602,11 @@ _DEBUFF_TIMERS: Final = (
     "redirect_provoke",
     "unable_counter",
     "unable_buff",
+    "seal",
+    "collapse",
+    "sleep",
+    "restrict",
+    "block",
 )
 _BUFFS: Final = frozenset(
     {
@@ -568,7 +614,11 @@ _BUFFS: Final = frozenset(
         "def",
         "spd",
         "eff",
+        "res",
         "abundance",
+        "deify",
+        "nullifier",
+        "stealth",
         "immortal",
         "immunity",
         "invincible",
@@ -580,6 +630,33 @@ _BUFFS: Final = frozenset(
 )
 """What "unable to be buffed" blocks (MECH-BUFF-01 `assumed`): stat buffs, status buffs, continuous healing, barriers;
 not heals, Combat Readiness or cleanses."""
+
+
+def _kit(units: Sequence[Combatant], state: Sequence[_State], j: int) -> Kit:
+    """The kit of `j` as it works now: a sealed hero has lost its passives (MECH-SEAL-01)."""
+    return units[j].kit.sealed() if state[j].timers.get("seal", 0) > 0 else units[j].kit
+
+
+def _hidden(units: Sequence[Combatant], hp: Sequence[float], state: Sequence[_State], j: int) -> bool:
+    """Stealth: "when another ally is present, prevents enemies from selecting the bearer as a skill target"."""
+    return state[j].timers.get("stealth", 0) > 0 and len(_allies(units, hp, j)) > 1
+
+
+def _cannot_act(state: _State) -> bool:
+    """Stunned, feared or asleep: no turn and no counterattack."""
+    return any(state.timers.get(kind, 0) > 0 for kind in ("stun", "fear", "sleep"))
+
+
+def _crit_chance(units: Sequence[Combatant], state: Sequence[_State], i: int) -> float:
+    """Critical Hit Chance of `i` now: Deify adds 50 points while it attacks (MECH-DEIFY-01)."""
+    bonus = DEIFY_CRIT if state[i].timers.get("deify", 0) > 0 else 0.0
+    return min(units[i].stats[Stat.CRIT_CHANCE] + bonus, 1.0)
+
+
+def _max_hp(units: Sequence[Combatant], state: Sequence[_State], j: int) -> float:
+    """Max Health of `j` now: a collapsed hero has lost a share of it (MECH-COLLAPSE-01)."""
+    full = units[j].stats[Stat.HP]
+    return full * (1 - state[j].collapse) if state[j].timers.get("collapse", 0) > 0 else full
 
 
 def _allies(units: Sequence[Combatant], hp: Sequence[float], i: int) -> list[int]:
@@ -604,7 +681,9 @@ def _strike(
     """Direct damage to `j` (a hit, a counter, a reflect, fixed damage): the ally holding its side's offering takes its
     share instead (MECH-OFFER-01, `verified` in the in-game text), then barrier and Health, then the lethal rules.
     Returns the Health `j` itself lost and whether the damage was lethal to it (before immortality or a revive)."""
-    cap = units[j].kit.hit_cap
+    if by >= 0 and state[j].timers.get("deify", 0) > 0:  # an attack on a hero holding Deify: 50% less (MECH-DEIFY-01)
+        damage *= 1 - DEIFY_REDUCTION
+    cap = _kit(units, state, j).hit_cap
     if cap:  # damage suffered in one attack never exceeds a share of max Health (Sixth Sense, `verified`)
         damage = min(damage, cap * units[j].stats[Stat.HP])
     before = hp[j]
@@ -618,6 +697,9 @@ def _strike(
         if hp[holder] <= 0:
             _lethal(units, hp, cr, state, holder, rng)
     state[j].hurt(hp, j, damage)
+    if by >= 0 and damage > 0:  # an attack wakes a sleeper (`assumed`, NV-72) and ends stealth (`verified`)
+        state[j].timers.pop("sleep", None)
+        state[j].timers.pop("stealth", None)
     lethal = hp[j] <= 0
     if lethal:
         _lethal(units, hp, cr, state, j, rng)
@@ -629,7 +711,7 @@ def _lethal(
 ) -> None:
     """Lethal damage: immortality keeps 1 HP; the offering holder is immortal once (MECH-OFFER-01); a revive passive
     works once (MECH via SPEC D63, `assumed`)."""
-    kit = units[j].kit
+    kit = _kit(units, state, j)
     if state[j].timers.get("immortal", 0) > 0:
         hp[j] = 1.0
     elif state[j].offering and not state[j].offering_used:
@@ -652,8 +734,8 @@ def _lethal(
                 state[j].apply(effect)
     if hp[j] <= 0:  # a hero died: the heroes with Sixth Sense lose a turn of cooldown
         for m in range(len(units)):
-            if hp[m] > 0 and units[m].kit.death_cd:
-                state[m].cd_cut += units[m].kit.death_cd
+            if hp[m] > 0 and (cut := _kit(units, state, m).death_cd):
+                state[m].cd_cut += cut
     if hp[j] <= 0 and state[j].offering:  # the ally granted offering died: the granter's heal
         state[j].offering = False
         owner = state[j].offering_by
@@ -662,18 +744,20 @@ def _lethal(
                 _use(effect, owner, [], units, hp, cr, state, rng)
 
 
-def _raise_cr(units: Sequence[Combatant], hp: Sequence[float], cr: list[float], i: int, amount: float) -> None:
+def _raise_cr(
+    units: Sequence[Combatant], hp: Sequence[float], cr: list[float], state: Sequence[_State], i: int, amount: float
+) -> None:
     """Combat Readiness of `i` goes up by `amount` (never above 100%); every living enemy with a CR mirror gains its
     share of what was added (MECH-CRMIRROR-01, `verified`: Lady of the Scales S2)."""
-    if units[i].kit.cr_immune:  # unaffected by Combat Readiness increases (Notos)
+    if units[i].kit.cr_immune or state[i].timers.get("restrict", 0) > 0:  # Notos; Restrict (MECH-RESTRICT-01)
         return
     gained = max(0.0, min(1.0, cr[i] + amount) - cr[i])
     cr[i] += gained
     if gained <= 0:
         return
     for m in range(len(units)):
-        if units[m].side != units[i].side and hp[m] > 0 and units[m].kit.cr_mirror:
-            cr[m] = min(1.0, cr[m] + units[m].kit.cr_mirror * gained)
+        if units[m].side != units[i].side and hp[m] > 0 and (mirror := _kit(units, state, m).cr_mirror):
+            cr[m] = min(1.0, cr[m] + mirror * gained)
 
 
 def _lift_pilfers(state: Sequence[_State], j: int) -> None:
@@ -713,6 +797,11 @@ def _use(
         return
     caster = units[actor].stats
     enemies = [j for j in range(len(units)) if units[j].side != units[actor].side and hp[j] > 0]
+    if effect.kind == "random":  # one of several effects, picked for each target (Tenebria's random debuff)
+        for j in enemies if effect.receivers == "enemies" else [t for t in targets if hp[t] > 0]:
+            picked = rng.choice(effect.options)
+            _use(replace(picked, chance=picked.chance * effect.chance), actor, [j], units, hp, cr, state, rng)
+        return
     if effect.kind == "sacrifice":  # health paid by the caster, never to death
         hp[actor] = max(1.0, hp[actor] * (1 - effect.value))
         return
@@ -758,14 +847,14 @@ def _use(
         return
     if not effect.debuff:
         for r in _receivers(effect, actor, units, hp, state):
-            if effect.kind in _BUFFS and state[r].timers.get("unable_buff", 0) > 0:
-                continue  # MECH-BUFF-01
+            if effect.kind in _BUFFS and any(state[r].timers.get(k, 0) > 0 for k in ("unable_buff", "block")):
+                continue  # MECH-BUFF-01 (a blocked hero cannot be buffed either)
             if effect.kind == "extra_turn":
                 cr[r] = 1.0
             elif effect.kind == "cr":
-                _raise_cr(units, hp, cr, r, effect.value)
+                _raise_cr(units, hp, cr, state, r, effect.value)
             elif effect.kind == "heal":
-                restored = min(units[r].stats[Stat.HP], hp[r] + amount)
+                restored = min(_max_hp(units, state, r), hp[r] + amount)
                 state[actor].healed += max(0.0, restored - hp[r])
                 hp[r] = restored
             elif effect.kind == "hot":
@@ -786,12 +875,14 @@ def _use(
     for j in hit:
         if hp[j] <= 0 or (not own and (state[j].timers.get("immunity", 0) > 0 or effect.kind in units[j].kit.immune)):
             continue
-        resistance = units[j].stats.get(Stat.EFFECT_RESISTANCE, 0.0)
+        resistance = units[j].stats.get(Stat.EFFECT_RESISTANCE, 0.0) + state[j].buffs.get("res", (0.0, 0))[0]
         if units[actor].kit.ignore_resist and units[j].stats[Stat.HP] < caster[Stat.HP]:
             resistance = 0.0  # ignores the Effect Resistance of weaker (less max Health) targets
         land = 1.0 if own else effect.chance * min(max(1 + effectiveness - resistance, 0.0), LAND_CAP)  # MECH-EFF-01
         for _ in range(max(1, effect.count) if effect.kind == "venom" else 1):  # each venom stack has its own chance
             if rng.random() >= land:
+                continue
+            if not own and state[j].timers.pop("nullifier", 0) > 0:  # an enemy skill's effect nullified (MECH-NULL-01)
                 continue
             if effect.kind == "cr":
                 if not units[j].kit.cr_immune:
@@ -812,6 +903,14 @@ def _use(
                 state[j].venoms.append((effect.value, effect.turns))
             elif effect.kind == "erosion":
                 state[j].erosions.append((effect.value, effect.turns))
+            elif (
+                effect.kind == "collapse"
+            ):  # max Health down: the Health above the new maximum is lost (MECH-COLLAPSE-01)
+                state[j].collapse = max(
+                    state[j].collapse if state[j].timers.get("collapse", 0) > 0 else 0.0, effect.value
+                )
+                state[j].timers["collapse"] = max(state[j].timers.get("collapse", 0), effect.turns)
+                hp[j] = min(hp[j], _max_hp(units, state, j))
             elif effect.kind == "beguile":
                 state[j].beguiled = effect.value
             elif effect.kind == "pilfer":
@@ -839,9 +938,9 @@ def _after_hit(
 ) -> None:
     """What a hero does after a hit it survives (SPEC D76): reflect part of the Health lost, trigger its low-Health
     effects, counterattack."""
-    kit = units[j].kit
+    kit = _kit(units, state, j)
     if kit.hit_cr:  # Combat Readiness gained after being attacked (Boss Arunka S2)
-        _raise_cr(units, hp, cr, j, kit.hit_cr)
+        _raise_cr(units, hp, cr, state, j, kit.hit_cr)
     if kit.spirit_full:  # Fighting Spirit: Help! Help! when full (Young Senya S2)
         state[j].spirit += kit.spirit_hit
         if state[j].spirit >= kit.spirit_full:
@@ -855,7 +954,9 @@ def _after_hit(
             for e in range(len(units)):
                 if units[e].side != units[j].side and hp[e] > 0:
                     _strike(units, hp, cr, state, e, extra, rng, j)
-    fragrance = max((units[m].kit.fragrance for m in _allies(units, hp, j)), default=0.0)  # Lingering Fragrance
+    fragrance = max(
+        (_kit(units, state, m).fragrance for m in _allies(units, hp, j)), default=0.0
+    )  # Lingering Fragrance
     for share in (kit.reflect, fragrance):
         if share and lost > 0 and hp[attacker] > 0:
             _strike(units, hp, cr, state, attacker, min(share * lost, units[j].stats[Stat.HP]), rng, j)
@@ -863,8 +964,11 @@ def _after_hit(
         state[j].low_wait = kit.low_hp_cooldown
         for effect in kit.low_hp_effects:
             _use(effect, j, [], units, hp, cr, state, rng)
+    for m in _allies(units, hp, j):
+        if m != j and (gain := _kit(units, state, m).ally_hit_cr):  # Dragon's Pride: CR after an ally's attack
+            _raise_cr(units, hp, cr, state, m, gain)
     for m in _allies(units, hp, j):  # an ally was left low: La Vie en Rose (Perfumer Byblis S2)
-        helper = units[m].kit
+        helper = _kit(units, state, m)
         if helper.ally_low and hp[j] <= helper.ally_low * units[j].stats[Stat.HP] and state[m].ally_wait == 0:
             state[m].ally_wait = helper.ally_low_cooldown
             for effect in helper.ally_low_effects:
@@ -872,15 +976,15 @@ def _after_hit(
     if not counterable:  # a skill that cannot trigger a counterattack (BBK S3)
         return
     for m in range(len(units)):  # an ally was attacked: a guard (Mort) may counterattack for it
-        mate = units[m]
-        if m == j or mate.side != units[j].side or hp[m] <= 0 or not mate.kit.guard or 1 not in mate.skills:
+        mate, guarding = units[m], _kit(units, state, m)
+        if m == j or mate.side != units[j].side or hp[m] <= 0 or not guarding.guard or 1 not in mate.skills:
             continue
-        blocked = state[m].timers.get("stun", 0) > 0 or state[m].timers.get("unable_counter", 0) > 0
-        if hp[attacker] > 0 and not blocked and rng.random() < mate.kit.guard:
+        blocked = _cannot_act(state[m]) or state[m].timers.get("unable_counter", 0) > 0
+        if hp[attacker] > 0 and not blocked and rng.random() < guarding.guard:
             _counterattack(m, attacker, units, hp, cr, state, hits, rng)
             if state[m].guard_wait == 0:
-                state[m].guard_wait = mate.kit.guard_cooldown
-                for effect in mate.kit.guard_effects:
+                state[m].guard_wait = guarding.guard_cooldown
+                for effect in guarding.guard_effects:
                     _use(effect, m, [], units, hp, cr, state, rng)
     if hp[attacker] > 0 and _counters(units, hp, j, state, rng):
         _counterattack(j, attacker, units, hp, cr, state, hits, rng)
@@ -901,8 +1005,10 @@ def _dual_attack(
     state: list[_State],
     hits: Mapping[tuple[int, int, int], float],
     rng: random.Random,
+    strongest: bool = False,
 ) -> None:
-    """Dual Attack: a random ally able to act attacks the same target with a basic attack (never by counterattacks)."""
+    """Dual Attack: a random ally able to act (the one with the highest Attack when `strongest`) attacks the same target
+    with a basic attack (never by counterattacks)."""
     target = next((j for j in targets if hp[j] > 0), None)
     mates = [
         m
@@ -911,13 +1017,12 @@ def _dual_attack(
         and units[m].side == units[actor].side
         and hp[m] > 0
         and 1 in units[m].skills
-        and state[m].timers.get("stun", 0) == 0
-        and state[m].timers.get("fear", 0) == 0
+        and not _cannot_act(state[m])
     ]
     if target is None or not mates:
         return
-    m = rng.choice(mates)
-    crit = units[m].skills[1].can_crit and rng.random() < min(units[m].stats[Stat.CRIT_CHANCE], 1.0)
+    m = max(mates, key=lambda a: units[a].stats[Stat.ATK] * state[a].factor("atk")) if strongest else rng.choice(mates)
+    crit = units[m].skills[1].can_crit and rng.random() < _crit_chance(units, state, m)
     factor = min(units[m].stats[Stat.CRIT_DAMAGE], CD_CAP) if crit else 1.0
     _strike(units, hp, cr, state, target, hits[(m, target, 1)] * state[m].factor("atk") * factor, rng, m)
 
@@ -932,20 +1037,24 @@ def _extra_attack(
     hits: Mapping[tuple[int, int, int], float],
     rng: random.Random,
     slot: int = 1,
-) -> None:
+) -> bool:
     """The caster attacks again with the skill of `slot` (S1: Rhianna's Waning Moon Slash; Belian's Incursion is her
-    "S2" data): the first living target, or every target when that skill hits all enemies. It triggers nothing else."""
+    "S2" data; Zio's Disappear): the first living target, or every target when that skill hits all enemies. It triggers
+    nothing else. Returns whether it defeated an enemy."""
     unit = units[actor]
     skill = unit.skills.get(slot)
     living = [j for j in targets if hp[j] > 0]
     if skill is None or not living:
-        return
-    crit = skill.can_crit and rng.random() < min(unit.stats[Stat.CRIT_CHANCE], 1.0)
+        return False
+    crit = skill.can_crit and rng.random() < _crit_chance(units, state, actor)
     factor = min(unit.stats[Stat.CRIT_DAMAGE], CD_CAP) if crit else 1.0
+    killed = False
     for target in living if skill.targets > 1 else living[:1]:
         _strike(
             units, hp, cr, state, target, hits[(actor, target, slot)] * state[actor].factor("atk") * factor, rng, actor
         )
+        killed = killed or hp[target] <= 0
+    return killed
 
 
 def _counters(
@@ -954,11 +1063,11 @@ def _counters(
     """A counterattack (S1 back at the attacker): always with the counterattack buff, else the passive chance; never
     while stunned, nor while another hero's "nobody else counterattacks" holds (`assumed`)."""
     unit, me = units[j], state[j]
-    if me.timers.get("stun", 0) > 0 or me.timers.get("unable_counter", 0) > 0 or 1 not in unit.skills:
+    if _cannot_act(me) or me.timers.get("unable_counter", 0) > 0 or 1 not in unit.skills:
         return False
-    if any(units[i].kit.no_counter and hp[i] > 0 and i != j for i in range(len(units))):
+    if any(_kit(units, state, i).no_counter and hp[i] > 0 and i != j for i in range(len(units))):
         return False
-    chance = 1.0 if me.timers.get("counter", 0) > 0 else unit.kit.counter
+    chance = 1.0 if me.timers.get("counter", 0) > 0 else _kit(units, state, j).counter
     return chance > 0 and rng.random() < chance
 
 
@@ -973,7 +1082,7 @@ def _counterattack(
     rng: random.Random,
 ) -> None:
     unit, skill = units[j], units[j].skills[1]
-    crit = skill.can_crit and rng.random() < min(unit.stats[Stat.CRIT_CHANCE], 1.0)
+    crit = skill.can_crit and rng.random() < _crit_chance(units, state, j)
     factor = min(unit.stats[Stat.CRIT_DAMAGE], CD_CAP) if crit else 1.0
     _strike(units, hp, cr, state, attacker, hits[(j, attacker, 1)] * state[j].factor("atk") * factor, rng, j)
 

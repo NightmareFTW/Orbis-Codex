@@ -1,0 +1,56 @@
+# Genesis Ras
+hero = "c2001"
+source = "in-game skill popups read by the Skill reader (the user's export, 2026-10-26, the Journal's Preview Skills): S1 and S3 at +5, S2 at +0, with their enhancement steps and effect panels; multipliers, target counts and penetration from Fribbels' skill data (community)"
+status = "verified"
+replace = [2, 3]
+handles = ["Seal", "Collapse", "Penetrate", "Sacred Covenant", "Extra Turn"]
+cooldowns = { 2 = 3, 3 = 4 }  # S2 "3 turns" and S3 "4 turns" on the popups; no cooldown step in their enhancements
+unmodelled = [
+    "S3: damage rises with fewer enemies (the text gives no number)",
+    "S2 Soulburn (10 Souls): ignores Effect Resistance (Souls are not simulated)",
+]
+
+# S1 Sacred Blade: attacks the enemy and increases the caster's Combat Readiness by 25% (kept from epic7db: it matches
+# the popup); the damage grows with the caster's max Health (Fribbels' skill data).
+
+# S2 Chains of Sealing (3 turns): "After inflicting seal and collapse on the enemy for 2 turns, attacks the enemy. A
+# critical hit will grant an extra turn."
+# Seal: passive skill effects do not activate (Heroes only). Collapse: decreases max Health by 25%, doubled on Heroes: 50%.
+[[effect]]
+slot = 2
+when = "before"
+kind = "seal"
+turns = 2
+note = "S2: seal for 2 turns (the target's passives do not work)"
+
+[[effect]]
+slot = 2
+when = "before"
+kind = "collapse"
+value = 0.5
+turns = 2
+note = "S2: collapse for 2 turns: max Health down 25%, doubled on Heroes"
+
+[[effect]]
+slot = 2
+kind = "extra_turn"
+condition = "crit"
+note = "S2: a critical hit grants an extra turn"
+
+# S3 Goddess's Judgment (4 turns): attacks all enemies and penetrates the target's Defense (100%, Fribbels' data).
+# "At the start of the first battle, grants Sacred Covenant for 5 turns": cannot be affected by any debuffs or some
+# harmful effects; upon dying, revives with 100% Health.
+[[effect]]
+slot = 3
+when = "start"
+kind = "immunity"
+turns = 5
+note = "S3: Sacred Covenant, 5 turns from the start of the battle: no debuffs"
+
+[[effect]]
+slot = 3
+when = "start"
+kind = "revive_buff"
+value = 1.0
+turns = 5
+note = "S3: Sacred Covenant: upon dying, revives with 100% Health"

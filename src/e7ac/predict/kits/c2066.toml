@@ -1,0 +1,63 @@
+# New Moon Luna
+hero = "c2066"
+source = "in-game skill popups read by the Skill reader (the user's export, 2026-10-26, the Journal's Preview Skills): S1, S2 and S3 at +0, with their enhancement steps and effect panels; multipliers and target counts from Fribbels' skill data (community)"
+status = "verified"
+replace = [1, 2, 3]
+handles = ["Seal", "Cannot Buff", "Skill Effect Nullifier", "Decrease Defense"]
+cooldowns = { 2 = 2, 3 = 1 }  # S2 "2 turns" (no cooldown step); S3 "4 turns" at +0, then three -1 turn steps (+1 to +3)
+unmodelled = [
+    "S2: additional damage to all enemies, in proportion to the caster's max Health (Fribbels gives no multiplier for it: S2 damage is understated, NV-70)",
+    "S3 Soulburn (20 Souls): ignores Effect Resistance (Souls are not simulated)",
+]
+
+# S1 Radiant Strike: attacks the enemy and increases the caster's Combat Readiness by 20% (+2% at +2, +3% at +5: 25%).
+[[effect]]
+slot = 1
+kind = "cr"
+value = 0.25
+note = "S1: Combat Readiness +25% (20% at +0)"
+
+# S2 Demon-Sealing Spear (2 turns): attacks the enemy, decreases Defense by 70% for 1 turn and increases the caster's
+# Combat Readiness by 50%.
+[[effect]]
+slot = 2
+kind = "def"
+value = -0.7
+turns = 1
+note = "S2: decreased Defense (70%) for 1 turn"
+
+[[effect]]
+slot = 2
+kind = "cr"
+value = 0.5
+note = "S2: Combat Readiness +50%"
+
+# S3 Moon's Judgment (4 turns at +0, 1 turn at +3): "dispels all buffs from all enemies before sealing and making them
+# unable to be buffed for 2 turns" (no attack). "At the start of the first battle, grants skill effect nullifier once to
+# the caster": the first effect of an enemy skill that would land on her is nullified.
+[[effect]]
+slot = 3
+kind = "dispel"
+receivers = "enemies"
+note = "S3: dispels all buffs from all enemies"
+
+[[effect]]
+slot = 3
+kind = "seal"
+turns = 2
+receivers = "enemies"
+note = "S3: seals all enemies for 2 turns"
+
+[[effect]]
+slot = 3
+kind = "unable_buff"
+turns = 2
+receivers = "enemies"
+note = "S3: all enemies cannot receive buffs for 2 turns"
+
+[[effect]]
+slot = 3
+when = "start"
+kind = "nullifier"
+turns = 99
+note = "S3: Skill Effect Nullifier, once, from the start of the first battle"

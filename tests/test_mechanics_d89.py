@@ -122,13 +122,13 @@ def test_abundance_adds_damage_after_each_attack_and_not_to_the_offering_holder(
 
 
 def test_an_enemys_combat_readiness_increase_is_mirrored_by_lady() -> None:
-    units, hp, cr, _ = world(unit("lady", "you", Kit(cr_mirror=0.5)), unit("foe", "them"), unit("foe2", "them"))
-    _raise_cr(units, hp, cr, 1, 0.4)
+    units, hp, cr, state = world(unit("lady", "you", Kit(cr_mirror=0.5)), unit("foe", "them"), unit("foe2", "them"))
+    _raise_cr(units, hp, cr, state, 1, 0.4)
     assert cr == [0.2, 0.4, 0.0]
     cr[2] = 0.9
-    _raise_cr(units, hp, cr, 2, 0.4)  # only the 10% that was really added counts, nothing above 100%
+    _raise_cr(units, hp, cr, state, 2, 0.4)  # only the 10% that was really added counts, nothing above 100%
     assert cr[2] == 1.0 and cr[0] == pytest.approx(0.25)
-    _raise_cr(units, hp, cr, 0, 0.3)  # her own side's increase is not mirrored
+    _raise_cr(units, hp, cr, state, 0, 0.3)  # her own side's increase is not mirrored
     assert cr[1] == 0.4
 
 

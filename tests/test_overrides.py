@@ -515,9 +515,10 @@ def test_notos_belian_and_setsuka_mechanics_work_in_battle() -> None:
 
     team = [unit("n", "you", Kit(cr_immune=True)), unit("b", "them")]
     cr = [0.0, 0.0]
-    _raise_cr(team, [1.0, 1.0], cr, 0, 0.5)
+    quiet = [_State(), _State()]
+    _raise_cr(team, [1.0, 1.0], cr, quiet, 0, 0.5)
     assert cr[0] == 0.0  # increases do not move her
-    _raise_cr(team, [1.0, 1.0], cr, 1, 0.5)
+    _raise_cr(team, [1.0, 1.0], cr, quiet, 1, 0.5)
     assert cr[1] == 0.5
     _use(Effect("cr", True, -0.4, 1, 2.0), 1, [0], team, [1.0, 1.0], [0.9, 0.0], [_State(), _State()], random.Random(1))
     assert team[0].kit.cr_immune  # (a decrease on her is skipped: checked below on the Combat Readiness list)
@@ -581,3 +582,305 @@ def test_notos_belian_and_setsuka_kits_carry_the_popup_numbers() -> None:
         "dispel": (0.0, 0, "enemies"),
         "beguile": (0.10, 0, "enemies"),
     }
+
+
+def test_seal_collapse_and_effects_before_the_attack_work_in_battle() -> None:
+    """Genesis Ras (SPEC D109): seal switches a hero's passives off, collapse takes a share of its max Health, and an
+    effect before the attack acts on the targets the attack has picked."""
+    import random
+
+    from e7ac.predict.battle import _State, _strike, _use
+    from tests.test_effects import unit
+
+    rng = random.Random(1)
+    team = [unit("a", "you"), unit("b", "them", Kit(hit_cap=0.1))]
+    hp, cr, state = [10000.0, 10000.0], [0.0, 0.0], [_State(), _State()]
+    _use(Effect("collapse", True, 0.5, 2, 2.0), 0, [1], team, hp, cr, state, rng)
+    assert hp[1] == 5000 and state[1].debuffed  # the Health above the new maximum is gone
+    heal = Effect("heal", False, 0.0, 0, 1.0, scaling=(1.0, 0.0, 0.0), receivers="self")
+    _use(heal, 1, [], team, hp, cr, state, rng)
+    assert hp[1] == 5000  # healing stops at the lower maximum
+    state[1].tick()
+    state[1].tick()  # two own turns: the collapse is over
+    _use(heal, 1, [], team, hp, cr, state, rng)
+    assert hp[1] == 10000
+
+    state[1], hp[1] = _State(), 10000.0
+    _strike(team, hp, cr, state, 1, 5000.0, rng)
+    assert hp[1] == 9000  # its passive hit cap: 10% of max Health
+    state[1], hp[1] = _State(), 10000.0
+    _use(Effect("seal", True, 0.0, 2, 2.0), 0, [1], team, hp, cr, state, rng)
+    _strike(team, hp, cr, state, 1, 5000.0, rng)
+    assert hp[1] == 5000  # sealed: the cap does not work
+    state[1].remove(debuffs=True, count=1)
+    assert "seal" not in state[1].timers  # a cleanse takes the seal off
+
+    sealed = Kit(counter=0.5, hit_cap=0.1, on_use={1: [Effect("stun", True, 0.0, 1, 1.0)]}, taunt=True).sealed()
+    assert sealed.counter == 0 and sealed.hit_cap == 0 and sealed.on_use and sealed.taunt  # active skills stay
+
+    collapse = Effect("collapse", True, 0.5, 2, 2.0)
+    assert _duel(Kit(before_use={1: [collapse]})) > _duel(Kit()) + 0.1  # acts on the target chosen for that attack
+
+
+def test_genesis_ras_kit_carries_the_popup_numbers() -> None:
+    kit, cooldowns = apply_override(Kit(), {2: 3, 3: 4}, load_overrides()["c2001"])
+    assert cooldowns == {2: 3, 3: 4}
+    assert [(e.kind, e.value, e.turns) for e in kit.before_use[2]] == [("seal", 0.0, 2), ("collapse", 0.5, 2)]
+    assert [(e.kind, e.condition) for e in kit.on_use[2]] == [("extra_turn", "crit")]
+    assert {(e.kind, e.value, e.turns) for e in kit.at_start} == {("immunity", 0.0, 5), ("revive_buff", 1.0, 5)}
+    assert not kit.on_use.get(3)
+
+
+def test_penetration_resistance_ally_combat_readiness_and_resistance_buffs_work_in_battle() -> None:
+    """Empyrean Ilynav (SPEC D109): the side's Penetration Resistance lowers the penetration of an attack on it, an
+    ally's hit gives her Combat Readiness, and an Effect Resistance buff makes a debuff harder to land."""
+    import random
+
+    from e7ac.domain.codes import Stat
+    from e7ac.predict.battle import Combatant, _after_hit, _State, _use, simulate
+    from e7ac.predict.damage import SkillPower
+    from tests.test_effects import S1, unit
+
+    piercing = {1: SkillPower(1.0, 1.0, 0.0, penetration=1.0)}
+    stats = unit("x", "you").stats
+
+    def dealt(resist: float) -> float:  # what a piercing attacker does to a high-Defense target before it falls
+        tank = Combatant("t", "them", {**stats, Stat.DEF: 5000.0, Stat.HP: 10**6}, 200, S1, {}, Kit(pen_resist=resist))
+        return simulate([Combatant("a", "you", stats, 300, piercing, {}, Kit()), tank], runs=100).heroes[0].damage
+
+    assert dealt(0.5) < dealt(0.0) * 0.8
+
+    rng = random.Random(1)
+    team = [unit("a", "you"), unit("b", "them"), unit("c", "them", Kit(ally_hit_cr=0.1))]
+    cr = [0.0, 0.0, 0.0]
+    _after_hit(1, 0, 100.0, False, team, [1e4, 1e4, 1e4], cr, [_State(), _State(), _State()], {}, rng)
+    assert cr == [0.0, 0.0, pytest.approx(0.1)]  # the ally's hit moved her, not the one hit
+    sealed = [_State(), _State(), _State(timers={"seal": 2})]
+    cr = [0.0, 0.0, 0.0]
+    _after_hit(1, 0, 100.0, False, team, [1e4, 1e4, 1e4], cr, sealed, {}, rng)
+    assert cr[2] == 0.0  # sealed: a passive that does not work
+
+    stun = Effect("stun", True, 0.0, 1, 1.0)
+    target = unit("t", "them", resist=0.8)
+
+    def landed(buff: bool) -> int:
+        count = 0
+        for seed in range(200):
+            state = [_State(), _State()]
+            if buff:
+                _use(
+                    Effect("res", False, 0.3, 2, 1.0, receivers="self"),
+                    1,
+                    [],
+                    [unit("a", "you"), target],
+                    [1e4, 1e4],
+                    [0.0, 0.0],
+                    state,
+                    random.Random(seed),
+                )
+            _use(stun, 0, [1], [unit("a", "you"), target], [1e4, 1e4], [0.0, 0.0], state, random.Random(seed))
+            count += state[1].timers.get("stun", 0) > 0
+        return count
+
+    assert landed(False) > 10 and landed(True) == 0  # 1 - 0.8 - 0.3 < 0: never lands
+
+
+def test_empyrean_ilynav_kit_carries_the_popup_numbers() -> None:
+    kit, cooldowns = apply_override(Kit(), {3: 5}, load_overrides()["c2113"])
+    assert cooldowns == {3: 4} and kit.pen_resist == 0.40 and kit.ally_hit_cr == 0.10
+    third = {e.kind: e for e in kit.on_use[3]}
+    assert third["cleanse"].count == 2 and third["cleanse"].receivers == "all"
+    assert (third["def"].value, third["def"].turns, third["def"].receivers) == (0.3, 2, "all")
+    assert (third["res"].value, third["res"].turns, third["res"].receivers) == (0.3, 2, "all")
+
+
+def test_deify_and_an_extra_attack_that_defeats_an_enemy_work_in_battle() -> None:
+    """Zio (SPEC D109): Deify adds 50 points of Critical Hit Chance while attacking and halves the damage of attacks
+    on the holder; an extra attack that defeats an enemy lets the `proc_kill` effects follow."""
+    import random
+
+    from e7ac.predict.battle import Combatant, _crit_chance, _State, _strike, _use, simulate
+    from e7ac.predict.damage import SkillPower
+    from tests.test_effects import unit
+
+    team = [unit("a", "you"), unit("b", "them")]
+    state = [_State(), _State()]
+    assert _crit_chance(team, state, 0) == 0.0
+    _use(Effect("deify", False, 0.0, 3, 1.0), 0, [], team, [1e4, 1e4], [0.0, 0.0], state, random.Random(1))
+    assert _crit_chance(team, state, 0) == pytest.approx(0.5)
+    hp = [10000.0, 10000.0]
+    _strike(team, hp, [0.0, 0.0], state, 0, 1000.0, random.Random(1), by=1)  # an attack on the holder
+    assert hp[0] == pytest.approx(9500)
+    _strike(team, hp, [0.0, 0.0], state, 0, 1000.0, random.Random(1))  # damage that is no attack (not halved)
+    assert hp[0] == pytest.approx(8500)
+    state[0].remove(debuffs=False, count=1)
+    assert "deify" not in state[0].timers  # a dispel takes it off
+
+    # the extra attack with S2's data defeats a weak enemy, and only then does the Combat Readiness follow
+    stats = unit("x", "you").stats
+    skills = {1: SkillPower(0.01, 1.0, 0.0), 2: SkillPower(5.0, 1.0, 0.0)}
+
+    def dealt(boss_hp: float, with_cr: bool) -> float:
+        effects = [Effect("extra_attack", False, 2.0, 0, 1.0)]
+        if with_cr:  # a full bar: the hero acts again at once
+            effects.append(Effect("cr", False, 1.0, 0, 1.0, condition="proc_kill"))
+        hero = Combatant("z", "you", stats, 200, skills, {}, Kit(on_use={1: effects}))
+        foes = [unit("t", "them", hp=boss_hp), unit("u", "them", hp=10**6)]
+        return simulate([hero, *foes], runs=100).heroes[0].damage
+
+    assert dealt(100.0, True) > dealt(100.0, False) * 1.05
+    assert dealt(10**6, True) == pytest.approx(dealt(10**6, False))  # nobody defeated: nothing follows
+
+
+def test_zio_kit_carries_the_popup_numbers() -> None:
+    kit, cooldowns = apply_override(Kit(), {3: 5}, load_overrides()["c1133"])
+    assert cooldowns == {3: 4}
+    assert [(e.kind, e.value, e.turns) for e in kit.before_use[1]] == [("atk", 0.5, 1)]
+    assert [(e.kind, e.value) for e in kit.at_start] == [("cr", 0.40)]
+    assert [(e.kind, e.value, e.count, e.turns, e.condition) for e in kit.on_use[3]] == [
+        ("dispel", 0.0, 2, 2, ""),
+        ("silence", 0.0, 0, 1, ""),
+        ("cr", -0.5, 0, 2, ""),
+        ("deify", 0.0, 0, 3, ""),
+        ("extra_attack", 2.0, 0, 2, ""),
+        ("cr", 0.5, 0, 2, "proc_kill"),
+    ]
+
+
+def test_a_skill_effect_nullifier_and_a_one_turn_cooldown_work_in_battle() -> None:
+    """New Moon Luna (SPEC D109): the first effect of an enemy skill that lands on her is nullified, once; and a
+    cooldown of 1 turn is not read as no cooldown at all (MECH-CD-02)."""
+    import random
+
+    from e7ac.predict.battle import Combatant, _State, _use, simulate
+    from e7ac.predict.damage import SkillPower
+    from tests.test_effects import unit
+
+    team = [unit("a", "you"), unit("b", "them")]
+    state = [_State(), _State()]
+    _use(Effect("nullifier", False, 0.0, 99, 1.0), 1, [], team, [1e4, 1e4], [0.0, 0.0], state, random.Random(1))
+    assert state[1].timers["nullifier"] == 99
+    stun = Effect("stun", True, 0.0, 1, 2.0)
+    _use(stun, 0, [1], team, [1e4, 1e4], [0.0, 0.0], state, random.Random(1))
+    assert "stun" not in state[1].timers and "nullifier" not in state[1].timers  # nullified, and used up
+    _use(stun, 0, [1], team, [1e4, 1e4], [0.0, 0.0], state, random.Random(1))
+    assert state[1].timers["stun"] > 0  # the second one lands
+
+    stats = unit("x", "you").stats
+    skills = {1: SkillPower(0.05, 1.0, 0.0), 3: SkillPower(4.0, 1.0, 0.0)}
+
+    def dealt(cooldown: int) -> float:
+        hero = Combatant("l", "you", stats, 300, skills, {3: cooldown}, Kit())
+        return simulate([hero, unit("t", "them", hp=10**6)], runs=100).heroes[0].damage
+
+    assert dealt(1) == pytest.approx(dealt(2))  # a 1-turn cooldown is read as two own turns
+
+
+def test_new_moon_luna_kit_carries_the_popup_numbers() -> None:
+    kit, cooldowns = apply_override(Kit(), {2: 2, 3: 4}, load_overrides()["c2066"])
+    assert cooldowns == {2: 2, 3: 1}
+    assert [(e.kind, e.value) for e in kit.on_use[1]] == [("cr", 0.25)]
+    assert [(e.kind, e.value, e.turns) for e in kit.on_use[2]] == [("def", -0.7, 1), ("cr", 0.5, 2)]
+    third = {e.kind: (e.turns, e.receivers) for e in kit.on_use[3]}
+    assert third == {"dispel": (2, "enemies"), "seal": (2, "enemies"), "unable_buff": (2, "enemies")}
+    assert [(e.kind, e.turns) for e in kit.at_start] == [("nullifier", 99)]
+
+
+def test_random_debuffs_sleep_restrict_stealth_and_block_work_in_battle() -> None:
+    """Witch of the Mere Tenebria (SPEC D109)."""
+    import random
+
+    from e7ac.domain.codes import Stat
+    from e7ac.predict.battle import (
+        Combatant,
+        _dual_attack,
+        _hidden,
+        _raise_cr,
+        _State,
+        _strike,
+        _use,
+        simulate,
+    )
+    from tests.test_effects import S1, unit
+
+    # random: exactly one of the options for each enemy, all of them over many uses
+    options = (Effect("stun", True, 0.0, 1, 1.0), Effect("sleep", True, 0.0, 1, 1.0), Effect("spd", True, -0.3, 1, 1.0))
+    team = [unit("a", "you"), unit("b", "them"), unit("c", "them")]
+    seen = set()
+    for seed in range(60):
+        state = [_State(), _State(), _State()]
+        _use(
+            Effect("random", True, 0.0, 1, 2.0, receivers="enemies", options=options),
+            0,
+            [],
+            team,
+            [1e4] * 3,
+            [0.0] * 3,
+            state,
+            random.Random(seed),
+        )
+        for j in (1, 2):
+            held = {k for k in ("stun", "sleep") if state[j].timers.get(k, 0) > 0} | (
+                {"spd"} if "spd" in state[j].debuffs else set()
+            )
+            assert len(held) == 1  # one debuff each, never none or two
+            seen |= held
+    assert seen == {"stun", "sleep", "spd"}
+
+    # sleep: no turn, and an attack wakes it (damage that is no attack does not)
+    sleeper = _State(timers={"sleep": 2, "stealth": 2})
+    hp = [1e4, 1e4, 1e4]
+    _strike(team, hp, [0.0] * 3, [_State(), sleeper, _State()], 1, 100.0, random.Random(1))
+    assert sleeper.timers.get("sleep") == 2
+    _strike(team, hp, [0.0] * 3, [_State(), sleeper, _State()], 1, 100.0, random.Random(1), by=0)
+    assert "sleep" not in sleeper.timers and "stealth" not in sleeper.timers
+
+    # restrict: no Combat Readiness increase; stealth: hidden only while an ally lives; block: buffs without effect
+    cr = [0.0, 0.0, 0.0]
+    _raise_cr(team, [1e4] * 3, cr, [_State(), _State(timers={"restrict": 2}), _State()], 1, 0.5)
+    assert cr[1] == 0.0
+    hidden = [_State(), _State(timers={"stealth": 2}), _State()]
+    assert _hidden(team, [1e4] * 3, hidden, 1) and not _hidden(team, [1e4, 1e4, 0.0], hidden, 1)
+    blocked = _State(timers={"block": 2})
+    blocked.apply(Effect("atk", False, 0.5, 2, 1.0))
+    assert blocked.factor("atk") == 1.0
+    state = [_State(), _State(timers={"block": 2}), _State()]
+    _use(Effect("atk", False, 0.5, 2, 1.0), 1, [], team, [1e4] * 3, [0.0] * 3, state, random.Random(1))
+    assert "atk" not in state[1].buffs  # nor can it receive a buff
+
+    # the ally with the highest Attack is the one that follows with a basic attack
+    strong = Combatant("s", "you", {**unit("x", "you").stats, Stat.ATK: 9000.0}, 200, S1, {}, Kit())
+    mates = [unit("t", "you"), unit("w", "you"), strong, unit("f", "them")]
+    states = [_State() for _ in mates]
+    hits = {(m, 3, 1): float(100 * (m + 1)) for m in range(3)}
+    _dual_attack(0, [3], mates, [1e4] * 4, [0.0] * 4, states, hits, random.Random(1), strongest=True)
+    assert states[2].dealt > 0 and states[1].dealt == 0
+
+    # an unseen target in stealth lives longer: the attacker goes for the other foe first
+    def damage_of(stealthy: bool) -> float:
+        kit = Kit(at_start=[Effect("stealth", False, 0.0, 99, 1.0)]) if stealthy else Kit()
+        foes = [unit("t", "them", kit, hp=3000), unit("u", "them", hp=10**6)]
+        return simulate([unit("a", "you"), *foes], runs=100).heroes[1].damage
+
+    assert damage_of(True) > damage_of(False) * 1.2
+
+
+def test_tenebria_kit_carries_the_popup_numbers() -> None:
+    kit, cooldowns = apply_override(Kit(), {2: 3, 3: 5}, load_overrides()["c6050"])
+    assert cooldowns == {2: 3, 3: 5}
+    first = kit.on_use[1]
+    assert [(o.kind, o.value) for o in first[0].options] == [("poison", 0.0), ("spd", -0.3), ("def", -0.7)]
+    assert (first[1].kind, first[1].receivers, first[1].condition) == ("dual_attack", "highest_atk", "cd3")
+    assert [(e.kind, e.turns) for e in kit.on_use[2]] == [("restrict", 2), ("stealth", 2)]
+    third = kit.on_use[3]
+    assert [(e.kind, e.count, e.turns, e.receivers) for e in third[:2]] == [
+        ("dispel", 2, 2, "enemies"),
+        ("block", 0, 2, "enemies"),
+    ]
+    assert [o.kind for o in third[2].options] == ["stun", "sleep", "redirect_provoke"] and third[3].value == 0.5
+
+
+def test_a_random_effect_must_list_its_options() -> None:
+    text = GOOD.replace('kind = "resurrect"', 'kind = "random"')
+    with pytest.raises(KitError, match="options"):
+        parse_override(text, "c2049.toml")

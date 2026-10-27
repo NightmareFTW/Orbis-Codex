@@ -1,0 +1,44 @@
+# Empyrean Ilynav
+hero = "c2113"
+source = "in-game skill popups read by the Skill reader (the user's export, 2026-10-26, the Journal's Preview Skills): S1 and S2 at +0, S3 at +5, with their enhancement steps and effect panels; multipliers and target counts from Fribbels' skill data (community)"
+status = "verified"
+replace = [1, 2, 3]
+handles = ["Indomitable", "Penetration Resistance", "Dispel", "Injury"]
+cooldowns = { 3 = 4 }  # S3 "4 turns" on the popup read at +5 (its +3 step is -1 turn)
+unmodelled = [
+    "S1 and S3 Injury (decreases max Health in proportion to the damage suffered, up to 50%; \"up to 10%\" / \"up to 20%\": the formula is not in the text, NV-68)",
+    "S1 absorbs some of the damage dealt as Health (no number)",
+    "S1 Soulburn (10 Souls): more damage and additional damage equal to 50% of the injuries on the target (Souls and injuries are not simulated)",
+]
+
+# S2 Dragon's Pride (passive): "Increases Penetration Resistance of all allies by 30%" (+1% +2% +2% +2% +3% with the
+# enhancements: 40% at +5). "After every attack suffered by an ally, increases the Combat Readiness of the caster by 10%."
+# Whether "an ally" includes herself is `assumed` not (NV-67), and so is the way Penetration Resistance lowers penetration (a share of it).
+[passive]
+pen_resist = 0.40
+ally_hit_cr = 0.10
+
+# S3 Unyielding Blow (4 turns): attacks the enemy with a spear (injuries up to 20%), "before dispelling two debuffs from
+# all allies and granting indomitable for 2 turns" (assumed: to all allies). Indomitable: Defense and Effect Resistance +30%.
+[[effect]]
+slot = 3
+kind = "cleanse"
+count = 2
+receivers = "all"
+note = "S3: dispels two debuffs from all allies"
+
+[[effect]]
+slot = 3
+kind = "def"
+value = 0.3
+turns = 2
+receivers = "all"
+note = "S3: Indomitable, 2 turns: Defense +30%"
+
+[[effect]]
+slot = 3
+kind = "res"
+value = 0.3
+turns = 2
+receivers = "all"
+note = "S3: Indomitable, 2 turns: Effect Resistance +30%"

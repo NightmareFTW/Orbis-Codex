@@ -38,6 +38,8 @@ One file per hero, named by its code (`c2049.toml`); every number carries where 
     variant_slot = 2              # S1 uses the skill data of this slot while the hero has a buff (`when = "variant"`
                                   # effects run just before that attack)
     death_cd = 1                  # every skill cooldown goes down this many turns each time a hero dies
+    pen_resist = 0.4              # Penetration Resistance of every ally while this hero lives
+    ally_hit_cr = 0.1             # Combat Readiness gained after every attack an ally suffers
 
     [[effect]]
     slot = 3                      # 1-3
@@ -79,10 +81,20 @@ per turn, `turns`; a detonation counts it for the turns left), swap (the hero ch
 `1` only act in that form; Rhianna and Luciella), extra_attack (the caster attacks the same targets again with the
 skill of the slot in `value`, S1 when 0, with the `chance` of it happening; effects with condition "proc" follow only
 if it did: Belian's Incursion), beguile (`value` = share of max Health that every other ally of the holder suffers when
-the holder's turn ends, once);
-`when = "before"` effects happen before the attack of their slot; conditions "crit", "debuffed", "half" (a target
-with half its Health or less) and "proc" join "kill" and "stun". `of_target = true` on a heal takes its scaling from the
-target's max Health (Lady's Divine Punishment). A malformed file is an error naming the file (never skipped silently).
+the holder's turn ends, once); SPEC D109: seal (the holder's passives do not work for `turns`, `Kit.sealed`),
+collapse (`value` = share of max Health the holder loses for `turns`: the Health above the new maximum is gone and
+healing stops at it); random (SPEC D109: one of the `options`, a list of effect tables, is picked at random for each
+target: Tenebria's random debuff), sleep (cannot act until attacked, `assumed`), restrict (no Combat Readiness increase
+but the Speed stat's), stealth (enemies' single-target skills cannot pick the holder while it has an ally; ends when
+attacked), block (buffs have no effect and none can be received), nullifier (the first effect of an enemy skill that
+lands on the holder is nullified), deify (Critical Hit Chance +50 points when attacking, 50% less damage from attacks),
+res (Effect Resistance up);
+`when = "before"` effects happen before the attack of their slot, on the targets it has chosen; conditions "crit",
+"debuffed", "half" (a target with half its Health or less) and "proc" join "kill" and "stun"; "proc_kill" (SPEC D109)
+follows an `extra_attack` that defeated an enemy and "cd3" holds while the hero's S3 is on cooldown.
+`receivers = "highest_atk"` on a dual_attack picks the ally with the highest Attack. `of_target = true` on a heal takes
+its scaling from the target's max Health (Lady's Divine Punishment). A malformed file is an error naming the file
+(never skipped silently).
 """
 
 from __future__ import annotations
@@ -144,6 +156,16 @@ KINDS: Final = frozenset(
         "extra_attack",
         "erosion",
         "beguile",
+        "seal",
+        "collapse",
+        "res",
+        "deify",
+        "nullifier",
+        "random",
+        "sleep",
+        "restrict",
+        "stealth",
+        "block",
     }
 )
 _DEBUFFS: Final = frozenset(
@@ -164,11 +186,18 @@ _DEBUFFS: Final = frozenset(
         "pilfer",
         "erosion",
         "beguile",
+        "seal",
+        "collapse",
+        "random",
+        "sleep",
+        "restrict",
+        "block",
     }
 )
 WHEN: Final = frozenset(
     {"use", "start", "turn", "revive", "low_hp", "guard", "spirit", "ally_low", "offering_death", "variant", "before"}
 )
+CONDITIONS: Final = frozenset({"", "kill", "stun", "crit", "debuffed", "half", "proc", "proc_kill", "cd3"})
 PASSIVES: Final = frozenset(
     {
         "reflect",
@@ -201,6 +230,8 @@ PASSIVES: Final = frozenset(
         "eff_speed",
         "cr_immune",
         "start_wait",
+        "pen_resist",
+        "ally_hit_cr",
     }
 )
 
@@ -366,6 +397,8 @@ def apply_override(kit: Kit, cooldowns: Mapping[int, int], override: KitOverride
     out.eff_speed = float(passive.get("eff_speed", out.eff_speed))
     out.cr_immune = bool(passive.get("cr_immune", out.cr_immune))
     out.start_wait = tuple(int(slot) for slot in passive.get("start_wait", out.start_wait))
+    out.pen_resist = float(passive.get("pen_resist", out.pen_resist))
+    out.ally_hit_cr = float(passive.get("ally_hit_cr", out.ally_hit_cr))
     return out, {**cooldowns, **override.cooldowns}
 
 
@@ -373,17 +406,27 @@ def _placed(raw: Any, name: str, index: int) -> Placed:
     where = f"{name}: effect {index}"
     if not isinstance(raw, dict):
         raise KitError(f"{where}: not a table")
-    kind, when = raw.get("kind"), raw.get("when", "use")
-    if kind not in KINDS:
-        raise KitError(f"{where}: unknown kind {kind!r} (one of {sorted(KINDS)})")
+    when = raw.get("when", "use")
     if when not in WHEN:
         raise KitError(f"{where}: 'when' must be one of {sorted(WHEN)}")
     slot = _int(raw.get("slot", 2 if when != "use" else 0), where, "slot")
     if not 1 <= slot <= 3:
         raise KitError(f"{where}: 'slot' must be 1, 2 or 3")
+    return Placed(slot, str(when), _effect(raw, where), str(raw.get("note", "")))
+
+
+def _effect(raw: Any, where: str) -> Effect:
+    if not isinstance(raw, dict):
+        raise KitError(f"{where}: not a table")
+    kind = raw.get("kind")
+    if kind not in KINDS:
+        raise KitError(f"{where}: unknown kind {kind!r} (one of {sorted(KINDS)})")
     scaling = raw.get("scaling", [0.0, 0.0, 0.0])
     if not (isinstance(scaling, list) and len(scaling) == 3):
         raise KitError(f"{where}: 'scaling' must be [hp, atk, def]")
+    options = raw.get("options", [])
+    if kind == "random" and not (isinstance(options, list) and options):
+        raise KitError(f"{where}: a random effect lists its 'options'")
     try:
         effect = Effect(
             kind=str(kind),
@@ -398,16 +441,17 @@ def _placed(raw: Any, name: str, index: int) -> Placed:
             condition=str(raw.get("condition", "")),
             of_target=bool(raw.get("of_target", False)),
             form=int(raw.get("form", -1)),
+            options=tuple(_effect(o, f"{where}, option {i}") for i, o in enumerate(options, 1)),
         )
     except (TypeError, ValueError) as exc:
         raise KitError(f"{where}: {exc}") from exc
     if not 0.0 <= effect.chance <= 2.0:
         raise KitError(f"{where}: 'chance' must be between 0 and 2")
-    if effect.condition not in ("", "kill", "stun", "crit", "debuffed", "half", "proc"):
-        raise KitError(f'{where}: \'condition\' must be "kill", "stun", "crit", "debuffed", "half", "proc" or left out')
+    if effect.condition not in CONDITIONS:
+        raise KitError(f"{where}: 'condition' must be one of {sorted(CONDITIONS)} or left out")
     if effect.form not in (-1, 0, 1):
         raise KitError(f"{where}: 'form' must be 0 or 1 (or left out: any form)")
-    return Placed(slot, str(when), effect, str(raw.get("note", "")))
+    return effect
 
 
 def _int(value: Any, where: str, key: str) -> int:

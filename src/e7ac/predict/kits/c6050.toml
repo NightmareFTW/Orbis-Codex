@@ -1,0 +1,85 @@
+# Witch of the Mere Tenebria
+hero = "c6050"
+source = "in-game skill popups read by the Skill reader (the user's export, 2026-10-26, the Journal's Preview Skills): S1 at +6, S2 at +0, S3 at +3, with their enhancement steps and effect panels; multipliers and target counts from Fribbels' skill data (community)"
+status = "verified"
+replace = [1, 2, 3]
+handles = ["Random Debuff", "Dual Attack", "Restrict", "Stealth", "Block", "Rupture", "Barrier"]
+cooldowns = { 2 = 3, 3 = 5 }  # S2 "3 turns"; S3 "5 turns" on the popup read at +3, where its three -1 steps are already in
+unmodelled = [
+    "S2 Rupture (additional damage in proportion to max Health when attacked: no number in the text)",
+    "S2 barrier in proportion to her Level (no number) and stealth's damage reduction against attacks on all allies (no number)",
+    "S1 and S2 Soulburn (20 and 20 Souls): an extra turn, Souls are not simulated",
+    "S1 random debuff: the panel names Poison, Decrease Speed and Decrease Defense without amounts; 5% max Health poison, 30% Speed and 70% Defense (the usual amounts) are used",
+    "S3 Block: modelled as buffs without effect and none received; its \"some beneficial effects\" and its protection from a cleanse are not simulated",
+    "Sleep (S3's random debuff) is read as: cannot act until attacked (NV-72)",
+]
+
+# S1 Mirror Fragment: attacks the enemy "with a 100% chance to inflict a random debuff for 1 turn" (Poison, Decrease
+# Speed, Decrease Defense). "When Mirror of the Abyss is on cooldown, triggers a Dual Attack from the ally with the
+# highest Attack."
+[[effect]]
+slot = 1
+kind = "random"
+note = "S1: a random debuff for 1 turn: poison, decreased Speed or decreased Defense"
+options = [
+    { kind = "poison", turns = 1 },
+    { kind = "spd", value = -0.3, turns = 1 },
+    { kind = "def", value = -0.7, turns = 1 },
+]
+
+[[effect]]
+slot = 1
+kind = "dual_attack"
+receivers = "highest_atk"
+condition = "cd3"
+note = "S1: while S3 is on cooldown, the ally with the highest Attack attacks the same target with a basic attack"
+
+# S2 Consuming Grasp (3 turns): "After inflicting rupture on all enemies for 2 turns, attacks all enemies and has a
+# 100% chance to inflict restrict for 2 turns. Grants stealth and a barrier (proportional to the Level) to the caster
+# for 2 turns." Restrict: cannot receive Combat Readiness increases other than the Speed stat's. Stealth: while another
+# ally is present enemies cannot select her as a skill target; it ends when she suffers damage from an attack.
+[[effect]]
+slot = 2
+kind = "restrict"
+turns = 2
+note = "S2: restrict for 2 turns (100% chance)"
+
+[[effect]]
+slot = 2
+kind = "stealth"
+turns = 2
+note = "S2: stealth for 2 turns"
+
+# S3 Mirror of the Abyss (5 turns at +3): "dispelling two buffs before inflicting block for 2 turns and a random debuff
+# for 1 turn [on all enemies]. Increases Combat Readiness of the caster by 50%." Random debuff: Stun, Sleep, Redirected
+# Provoke.
+[[effect]]
+slot = 3
+kind = "dispel"
+count = 2
+receivers = "enemies"
+note = "S3: dispels two buffs from all enemies"
+
+[[effect]]
+slot = 3
+kind = "block"
+turns = 2
+receivers = "enemies"
+note = "S3: block for 2 turns"
+
+[[effect]]
+slot = 3
+kind = "random"
+receivers = "enemies"
+note = "S3: a random debuff for 1 turn on each enemy: stun, sleep or redirected provoke"
+options = [
+    { kind = "stun", turns = 1 },
+    { kind = "sleep", turns = 1 },
+    { kind = "redirect_provoke", turns = 1 },
+]
+
+[[effect]]
+slot = 3
+kind = "cr"
+value = 0.5
+note = "S3: Combat Readiness +50%"

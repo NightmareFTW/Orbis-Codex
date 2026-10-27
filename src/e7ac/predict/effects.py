@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Final
 
 from e7ac.predict.textkit import read_text
@@ -91,11 +91,14 @@ class Effect:
     condition: str = ""
     """"kill": only when the skill defeated an enemy (SPEC D76); "stun": only when it newly stunned a target; "crit":
     only when its attack was a critical hit; "debuffed": only when a target holds a debuff; "half": only when a target
-    has half its Health or less; "proc": only when the `extra_attack` before it in the list happened (SPEC D108)."""
+    has half its Health or less; "proc": only when the `extra_attack` before it in the list happened (SPEC D108);
+    "proc_kill": only when that extra attack defeated an enemy (SPEC D109)."""
     of_target: bool = False
     """heal: the amount is these shares of the *target's* max Health (Lady of the Scales S1), not the caster's."""
     form: int = -1
     """Only while the hero is in this form (0 or 1; Rhianna and Luciella swap at each S2); -1: in any form."""
+    options: tuple[Effect, ...] = ()
+    """kind "random": the effects one of which is picked, at random, for each target (Tenebria's random debuff)."""
 
 
 @dataclass(slots=True)
@@ -181,11 +184,45 @@ class Kit:
     variant_effects: list[Effect] = field(default_factory=list)
     death_cd: int = 0
     """Every skill cooldown of the hero goes down by this many turns each time a hero dies (Sixth Sense)."""
+    pen_resist: float = 0.0
+    """Penetration Resistance of every ally while this hero lives: an attack on them penetrates this much less
+    (Empyrean Ilynav's Dragon's Pride, 30% at +0, 40% at +5; the way it reduces penetration is `assumed`, NV-67)."""
+    ally_hit_cr: float = 0.0
+    """Combat Readiness the hero gains after every attack an ally suffers (Dragon's Pride: 10%)."""
     unmodelled: list[str] = field(default_factory=list)
     unread: list[int] = field(default_factory=list)
     """Skill slots whose text describes effects (inflicts, heals, dispels, ...) but of which none was read: epic7db
     shows no effect icons for them (newer heroes) and no hand kit covers them. The simulation treats such a skill as a
     plain attack, so a hero with unread slots makes every chance that involves it unreliable (SPEC D87)."""
+
+    def sealed(self) -> Kit:
+        """The kit while the hero holds Seal ("Passive skill effects do not activate", Genesis Ras S2, `verified`):
+        every passive is off, the active skills stay. Which fields are passives is `assumed` (NV-66)."""
+        return replace(
+            self,
+            on_turn=[],
+            counter=0.0,
+            reflect=0.0,
+            speed_cap=0.0,
+            lethal_immortal=0,
+            cr_lock=False,
+            no_counter=False,
+            immune=(),
+            low_hp=0.0,
+            guard=0.0,
+            spirit_full=0,
+            hit_cr=0.0,
+            fragrance=0.0,
+            cr_mirror=0.0,
+            ally_low=0.0,
+            revive=None,
+            revive_effects=[],
+            hit_cap=0.0,
+            variant_slot=0,
+            death_cd=0,
+            pen_resist=0.0,
+            ally_hit_cr=0.0,
+        )
 
 
 _EFFECT_WORDS: Final = re.compile(

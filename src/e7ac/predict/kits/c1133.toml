@@ -1,0 +1,73 @@
+# Zio
+hero = "c1133"
+source = "in-game skill popups read by the Skill reader (the user's export, 2026-10-26, the Journal's Preview Skills): S1 at +5, S2 and S3 at +0, with their enhancement steps and effect panels; multipliers, target counts and penetration from Fribbels' skill data (community; its \"S2\" entry is Disappear, the S1 proc)"
+status = "verified"
+replace = [1, 2, 3]
+handles = ["Deify", "Penetrate", "Silence", "Dispel", "Increase Attack"]
+cooldowns = { 3 = 4 }  # S3 "5 turns" on the popup read at +0; its +3 step is -1 turn
+unmodelled = [
+    "S3: damage rises with the target's current Health when it is a Hero (no number in the text, and Fribbels' S3 rate of 0.2 leaves it out: S3 damage is understated, NV-69)",
+    "S2: unaffected by effects that reduce Combat Readiness increases (no such effect is simulated)",
+    "S3 Soulburn (20 Souls): ignores Effect Resistance (Souls are not simulated)",
+]
+
+# S1 Let Me Destroy You: "Attacks the enemy with a spear, before granting increased Attack to the caster for 1 turn":
+# Attack +50% (Increase Attack panel).
+[[effect]]
+slot = 1
+when = "before"
+kind = "atk"
+value = 0.5
+turns = 1
+note = "S1: increased Attack (50%) for 1 turn before the attack"
+
+# S2 Supreme Authority (passive): "At the start of the first battle, increases Combat Readiness by 30%" (+2% x 5 with
+# the enhancements: 40% at +5).
+[[effect]]
+slot = 2
+when = "start"
+kind = "cr"
+value = 0.40
+note = "S2: Combat Readiness +40% at the start of the battle (30% at +0, 40% at +5)"
+
+# S3 Bow Down Before Me (4 turns): dispels two buffs, then silence for 1 turn and decreases Combat Readiness by 40% (+2% +2%
+# +2% +4%: 50% at +5), grants Deify to the caster for 3 turns (Critical Hit Chance +50% when attacking, 50% damage reduction
+# when attacked). 100% penetration, no critical hit. Deify triggers S1's Disappear, an extra attack that penetrates 50% of
+# the Defense and gives +50% Combat Readiness when it defeats the enemy (the reading of "when the caster is granted deify" as
+# "each time S3 grants it" is `assumed`, NV-69).
+[[effect]]
+slot = 3
+kind = "dispel"
+count = 2
+note = "S3: dispels two buffs"
+
+[[effect]]
+slot = 3
+kind = "silence"
+turns = 1
+note = "S3: silence for 1 turn"
+
+[[effect]]
+slot = 3
+kind = "cr"
+value = -0.5
+note = "S3: decreases Combat Readiness by 50% (40% at +0)"
+
+[[effect]]
+slot = 3
+kind = "deify"
+turns = 3
+note = "S3: grants Deify to the caster for 3 turns"
+
+[[effect]]
+slot = 3
+kind = "extra_attack"
+value = 2
+note = "Disappear (Fribbels' S2 entry): an extra attack when Deify is granted"
+
+[[effect]]
+slot = 3
+kind = "cr"
+value = 0.5
+condition = "proc_kill"
+note = "Disappear: +50% Combat Readiness to the caster when it defeats the enemy"
