@@ -501,3 +501,83 @@ def test_rhianna_and_luciella_kit_carries_the_popup_numbers() -> None:
     third = {e.kind: e for e in kit.on_use[3]}
     assert third["barrier"].scaling == (0.0, 1.6, 0.0) and third["barrier"].turns == 3
     assert third["fear"].receivers == "enemies" and third["dispel"].count == 2
+
+
+def test_notos_belian_and_setsuka_mechanics_work_in_battle() -> None:
+    """SPEC D108: unaffected by Combat Readiness, a skill that starts on its cooldown, an extra attack with another
+    skill's data and a chance, and beguile."""
+    import random
+
+    from e7ac.domain.codes import Stat
+    from e7ac.predict.battle import Combatant, _raise_cr, _State, _use, simulate
+    from e7ac.predict.damage import SkillPower
+    from tests.test_effects import unit
+
+    team = [unit("n", "you", Kit(cr_immune=True)), unit("b", "them")]
+    cr = [0.0, 0.0]
+    _raise_cr(team, [1.0, 1.0], cr, 0, 0.5)
+    assert cr[0] == 0.0  # increases do not move her
+    _raise_cr(team, [1.0, 1.0], cr, 1, 0.5)
+    assert cr[1] == 0.5
+    _use(Effect("cr", True, -0.4, 1, 2.0), 1, [0], team, [1.0, 1.0], [0.9, 0.0], [_State(), _State()], random.Random(1))
+    assert team[0].kit.cr_immune  # (a decrease on her is skipped: checked below on the Combat Readiness list)
+    cr = [0.9, 0.0]
+    _use(Effect("cr", True, -0.4, 1, 2.0), 1, [0], team, [1.0, 1.0], cr, [_State(), _State()], random.Random(1))
+    assert cr[0] == 0.9
+
+    # a skill that starts on its cooldown comes later: the S3 of the first battle is not there at once
+    strong = {1: SkillPower(0.05, 1.0, 0.0), 3: SkillPower(6.0, 1.0, 0.0)}
+    stats = unit("x", "you").stats
+
+    def early(start_wait: tuple[int, ...]) -> float:  # the damage done while it lives: S3 comes later when it waits
+        hero = Combatant("n", "you", stats, 300, strong, {3: 5}, Kit(start_wait=start_wait))
+        return simulate([hero, unit("t", "them", hp=10**6)], runs=100).heroes[0].damage
+
+    assert early((3,)) < early(()) * 0.9
+
+    # an extra attack with S2's data on all enemies, with a chance, and the effects that follow only when it happened
+    weak, wide = SkillPower(0.05, 1.0, 0.0), SkillPower(2.0, 1.0, 0.0, targets=3)
+
+    def dealt(chance: float) -> float:
+        extra = Effect("extra_attack", False, 2.0, 0, chance)
+        kit = Kit(on_use={1: [extra, Effect("stun", True, 0.0, 1, 2.0, condition="proc")]})
+        hero = Combatant("b", "you", stats, 300, {1: weak, 2: wide}, {}, kit)
+        foes = [unit(f"t{i}", "them", hp=10**6) for i in range(2)]
+        return simulate([hero, *foes], runs=100).heroes[0].damage
+
+    assert dealt(1.0) > 5 * dealt(0.0)
+
+    # beguile: when the bearer's turn ends its allies lose a share of their max Health, once (a share of 100% here)
+    def rounds(beguile: bool) -> float:
+        effects = [Effect("beguile", True, 1.0, 2, 2.0)] if beguile else []
+        hero = Combatant("s", "you", stats, 300, {1: weak}, {}, Kit(on_use={1: effects}))
+        foes = [unit("bearer", "them", hp=10**6), unit("ally", "them", hp=10**6)]
+        return simulate([hero, *foes], runs=100).heroes[2].damage  # what the beguiled bearer's ally went on to do
+
+    assert rounds(True) < rounds(False) * 0.8  # its ally is gone after the bearer's first turn
+    assert Stat.HP in stats
+
+
+def test_notos_belian_and_setsuka_kits_carry_the_popup_numbers() -> None:
+    kits = load_overrides()
+    notos, cooldowns = apply_override(Kit(), {2: 2, 3: 8}, kits["c2181"])
+    assert cooldowns == {2: 0, 3: 7} and notos.cr_immune and notos.start_wait == (3,)
+    assert [(e.kind, e.value, e.turns, e.chance) for e in notos.on_use[1]] == [("def", -0.7, 1, 0.75)]
+    assert {e.kind: (e.value, e.turns) for e in notos.on_use[3] if e.kind != "heal"} == {
+        "atk": (1.0, 3),
+        "def": (1.0, 3),
+        "spd": (1.0, 3),
+    }
+    belian, cooldowns = apply_override(Kit(), {3: 5}, kits["c1117"])
+    assert cooldowns[3] == 4
+    first = {e.kind: e for e in belian.on_use[1]}
+    assert first["dispel"].chance == 0.65 and first["extra_attack"].chance == 0.35 and first["extra_attack"].value == 2
+    assert first["spd"].condition == "proc" and first["spd"].value == -0.3
+    third = {e.kind: e for e in belian.on_use[3]}
+    assert third["cr"].value == -0.30 and third["provoke"].turns == 1 and third["def"].value == 0.6
+    setsuka, cooldowns = apply_override(Kit(), {3: 6}, kits["c1176"])
+    assert cooldowns[3] == 3 and setsuka.ignore_resist
+    assert {e.kind: (e.value, e.count, e.receivers) for e in setsuka.on_use[3]} == {
+        "dispel": (0.0, 0, "enemies"),
+        "beguile": (0.10, 0, "enemies"),
+    }

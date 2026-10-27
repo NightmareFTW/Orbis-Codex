@@ -23,9 +23,9 @@ only: newer ones have none) or by hand (`src/e7ac/predict/kits/<code>.toml`, fro
 | 8 | Harsetti (c1153) | done | Focus maximum and bonus, En Passant multiplier (NV-44) |
 | 8 | Arbiter Vildred (c2007) | done (D108) | what "full" Focus is; Evasion and Hit Chance |
 | 8 | Rhianna and Luciella (c2185) | done (D108) | life steal, damage sharing, Evasion, the reading of "30% of Speed" (NV-61) |
-| 7 | Notos (c2181) | not read | God of Battle, Sanctuary of Battle |
-| 6 | Belian (c1117) | partly read | Incursion (extra attack), the random buff of S2, Provoke |
-| 6 | Setsuka (c1176) | not read | Fighting Spirit, Demon Blade Unleashed, Blade Art: Bewitching Blossom, beguile |
+| 7 | Notos (c2181) | done (D108) | what God of Battle doubles besides Attack / Defense / Speed; Sanctuary of Battle (NV-63) |
+| 6 | Belian (c1117) | done (D108) | the amounts of S2's random buff (NV-64); Hit Chance |
+| 6 | Setsuka (c1176) | S3 done (D108) | Demon Blade Unleashed and Blade Art: Bewitching Blossom, Fighting Spirit's maximum (NV-65) |
 | 5 | Genesis Ras (c2001) | not read | Sacred Covenant, seal and collapse |
 | 5 | Empyrean Ilynav (c2113) | not read | Injuries, Indomitable |
 | 4 | Perfumer Byblis (c5154) | done (D89) | Soulburn; the 5% Health of Lingering Fragrance; injuries |

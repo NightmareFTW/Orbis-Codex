@@ -91,7 +91,7 @@ class Effect:
     condition: str = ""
     """"kill": only when the skill defeated an enemy (SPEC D76); "stun": only when it newly stunned a target; "crit":
     only when its attack was a critical hit; "debuffed": only when a target holds a debuff; "half": only when a target
-    has half its Health or less (SPEC D108)."""
+    has half its Health or less; "proc": only when the `extra_attack` before it in the list happened (SPEC D108)."""
     of_target: bool = False
     """heal: the amount is these shares of the *target's* max Health (Lady of the Scales S1), not the caster's."""
     form: int = -1
@@ -162,6 +162,11 @@ class Kit:
     revive: float | None = None
     """HP fraction restored once on lethal damage."""
     revive_effects: list[Effect] = field(default_factory=list)
+    cr_immune: bool = False
+    """Unaffected by Combat Readiness increase and decrease effects (Notos Blaze of Battle)."""
+    start_wait: tuple[int, ...] = ()
+    """Skill slots that begin the battle with their full cooldown count (Notos S3: "Begins the first battle with a
+    full skill cooldown count")."""
     before_use: dict[int, list[Effect]] = field(default_factory=dict)
     """Effects of a slot that happen before its attack ("after granting increased Attack ... attacks")."""
     eff_speed: float = 0.0

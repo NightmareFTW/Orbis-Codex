@@ -239,6 +239,10 @@ def _passives(kit: Kit) -> list[str]:
         found.append(
             "when the ally granted offering dies: " + ", ".join(_describe(e) for e in kit.offering_death_effects)
         )
+    if kit.cr_immune:
+        found.append("unaffected by Combat Readiness increases and decreases")
+    if kit.start_wait:
+        found.append("begins the battle with the full cooldown of " + ", ".join(f"S{slot}" for slot in kit.start_wait))
     if kit.eff_speed:
         found.append(f"Effectiveness +{kit.eff_speed:.0%} of Speed for the whole battle")
     if kit.hit_cap:
@@ -256,6 +260,9 @@ def _passives(kit: Kit) -> list[str]:
 def _describe(effect: Effect) -> str:
     if effect.kind == "shorten":
         return f"buff durations -{effect.turns} turns {effect.receivers}".strip()
+    if effect.kind == "extra_attack":
+        chance = f"{effect.chance:.0%} chance of " if effect.chance != 1 else ""
+        return f"{chance}an extra attack with S{int(effect.value) or 1}"
     if effect.kind == "reset_cd":
         return f"reset the cooldown of S{effect.value:.0f}" + (f" if {effect.condition}" if effect.condition else "")
     form = f" [form {effect.form}]" if effect.form >= 0 else ""

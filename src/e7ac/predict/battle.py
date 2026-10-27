@@ -169,6 +169,8 @@ def _play(
     for i, unit in enumerate(units):
         for effect in unit.kit.at_start:
             _use(effect, i, [], units, hp, cr, state, rng)
+        for slot in unit.kit.start_wait:  # a skill that begins the battle with its full cooldown (Notos S3)
+            waiting[i][slot] = unit.cooldowns.get(slot, 0)
         if unit.kit.eff_speed:  # Effectiveness from Speed ("30% of Speed", Rhianna and Luciella)
             state[i].eff_extra = unit.kit.eff_speed * speeds[i] / 100  # stays all battle: no dispel takes it
         if unit.kit.spirit_full:  # Fighting Spirit at the start of the battle (Young Senya S2)
@@ -280,6 +282,7 @@ def _play(
                     killed = killed or hp[j] <= 0
         stunned = {j: state[j].timers.get("stun", 0) for j in targets}
         form = me.form  # the effects of a skill act in the form it was used in, even if the skill swaps
+        proc = False
         for effect in unit.kit.on_use.get(slot, []):
             if effect.form >= 0 and effect.form != form:
                 continue
@@ -291,13 +294,17 @@ def _play(
                 continue
             if effect.condition == "debuffed" and not any(state[j].debuffed for j in targets if hp[j] > 0):
                 continue
+            if effect.condition == "proc" and not proc:
+                continue
             if effect.condition == "half" and not any(0 < hp[j] <= 0.5 * units[j].stats[Stat.HP] for j in targets):
                 continue
             if effect.kind == "swap":  # Rhianna <-> Luciella
                 me.form = 1 - me.form
                 continue
-            if effect.kind == "extra_attack":
-                _extra_attack(actor, targets, units, hp, cr, state, hits, rng)
+            if effect.kind == "extra_attack":  # an attack again, with S1 or the skill of `value` (Belian's Incursion)
+                proc = rng.random() < effect.chance
+                if proc:
+                    _extra_attack(actor, targets, units, hp, cr, state, hits, rng, int(effect.value) or 1)
                 continue
             if effect.kind == "dual_attack":
                 _dual_attack(actor, targets, units, hp, cr, state, hits, rng)
@@ -309,6 +316,11 @@ def _play(
         if frozen is not None:
             for i in range(n):
                 cr[i] = min(cr[i], frozen[i])
+        if me.beguiled and hp[actor] > 0:  # Beguile: the holder's allies suffer when its turn ends (Setsuka's S3)
+            for m in _allies(units, hp, actor):
+                if m != actor:
+                    _strike(units, hp, cr, state, m, me.beguiled * units[m].stats[Stat.HP], rng)
+            me.beguiled = 0.0
         me.tick()
         standing = {units[i].side for i in range(n) if hp[i] > 0}
         if len(standing) == 1:
@@ -379,6 +391,8 @@ class _State:
     shielded: float = 0.0
     cd_cut: int = 0
     """Turns every cooldown of this hero still has to lose for the deaths it saw (`Kit.death_cd`)."""
+    beguiled: float = 0.0
+    """Beguile: share of max Health that each other ally of the holder suffers when the holder's turn ends."""
     eff_extra: float = 0.0
     """Effectiveness that lasts the whole battle (`Kit.eff_speed`)."""
     form: int = 0
@@ -405,6 +419,7 @@ class _State:
             or self.dots
             or self.venoms
             or self.erosions
+            or self.beguiled > 0
             or self.pilfer
             or any(self.timers.get(kind, 0) > 0 for kind in _DEBUFF_TIMERS)
         )
@@ -441,6 +456,7 @@ class _State:
             + [("dot", "")] * len(self.dots)
             + [("venom", "")] * len(self.venoms)
             + [("erosion", "")] * len(self.erosions)
+            + [("beguile", "")] * int(self.beguiled > 0)
             + [("pilfer", "")] * int(self.pilfer)
             + [("debuff", k) for k in self.debuffs]
             if debuffs
@@ -469,6 +485,9 @@ class _State:
             return bool(self.hots) and self.hots.pop(0) is not None
         if table == "venom":
             return bool(self.venoms) and self.venoms.pop(0) is not None
+        if table == "beguile":
+            had, self.beguiled = self.beguiled > 0, 0.0
+            return had
         if table == "erosion":
             return bool(self.erosions) and self.erosions.pop(0) is not None
         if table == "pilfer":
@@ -646,6 +665,8 @@ def _lethal(
 def _raise_cr(units: Sequence[Combatant], hp: Sequence[float], cr: list[float], i: int, amount: float) -> None:
     """Combat Readiness of `i` goes up by `amount` (never above 100%); every living enemy with a CR mirror gains its
     share of what was added (MECH-CRMIRROR-01, `verified`: Lady of the Scales S2)."""
+    if units[i].kit.cr_immune:  # unaffected by Combat Readiness increases (Notos)
+        return
     gained = max(0.0, min(1.0, cr[i] + amount) - cr[i])
     cr[i] += gained
     if gained <= 0:
@@ -773,7 +794,8 @@ def _use(
             if rng.random() >= land:
                 continue
             if effect.kind == "cr":
-                cr[j] = max(0.0, cr[j] + effect.value)
+                if not units[j].kit.cr_immune:
+                    cr[j] = max(0.0, cr[j] + effect.value)
             elif effect.kind == "dispel":
                 spoils = state[j].spoils
                 state[j].remove(debuffs=False, count=effect.count)
@@ -790,6 +812,8 @@ def _use(
                 state[j].venoms.append((effect.value, effect.turns))
             elif effect.kind == "erosion":
                 state[j].erosions.append((effect.value, effect.turns))
+            elif effect.kind == "beguile":
+                state[j].beguiled = effect.value
             elif effect.kind == "pilfer":
                 if not state[j].pilfer:  # a new Pilfer gives the caster a Spoils stack (`assumed`: not a repeated one)
                     state[j].pilfer, state[j].pilfer_by = True, actor
@@ -907,16 +931,21 @@ def _extra_attack(
     state: list[_State],
     hits: Mapping[tuple[int, int, int], float],
     rng: random.Random,
+    slot: int = 1,
 ) -> None:
-    """The caster attacks the first living target again with its S1 (Rhianna's Waning Moon Slash, Luciella's Half Moon
-    Slash as an extra attack); it triggers nothing else."""
-    target = next((j for j in targets if hp[j] > 0), None)
+    """The caster attacks again with the skill of `slot` (S1: Rhianna's Waning Moon Slash; Belian's Incursion is her
+    "S2" data): the first living target, or every target when that skill hits all enemies. It triggers nothing else."""
     unit = units[actor]
-    if target is None or 1 not in unit.skills:
+    skill = unit.skills.get(slot)
+    living = [j for j in targets if hp[j] > 0]
+    if skill is None or not living:
         return
-    crit = unit.skills[1].can_crit and rng.random() < min(unit.stats[Stat.CRIT_CHANCE], 1.0)
+    crit = skill.can_crit and rng.random() < min(unit.stats[Stat.CRIT_CHANCE], 1.0)
     factor = min(unit.stats[Stat.CRIT_DAMAGE], CD_CAP) if crit else 1.0
-    _strike(units, hp, cr, state, target, hits[(actor, target, 1)] * state[actor].factor("atk") * factor, rng, actor)
+    for target in living if skill.targets > 1 else living[:1]:
+        _strike(
+            units, hp, cr, state, target, hits[(actor, target, slot)] * state[actor].factor("atk") * factor, rng, actor
+        )
 
 
 def _counters(

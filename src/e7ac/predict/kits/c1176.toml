@@ -1,0 +1,34 @@
+# Setsuka
+hero = "c1176"
+source = "in-game skill popups read by the Skill reader (the user's export, 2026-10-26): S1 at +6, S2 at +0, S3 at +3, with their enhancement steps; multipliers from Fribbels' skill data (community)"
+status = "verified"
+replace = [3]
+handles = ["Beguile", "Decrease Hit Chance", "Demon Blade Unleashed"]
+cooldowns = { 3 = 3 }  # "6 turns" at +0, "-1 turn cooldown" at +1, +2 and +3 (this reading was at +3)
+unmodelled = [
+    "S1 absorbs \"some of the damage dealt as Health\" (+15% healing at +2 and +5: no number)",
+    "S2 Suppressed Desire: Evasion +30% for all allies, counterattacks when another ally evades, and Fighting Spirit (S1 gives 10, S3 gives 30): when it is full she gets Demon Blade Unleashed (Attack +200%, cannot die) and Blade Art: Bewitching Blossom, which consumes all her Health to hit all enemies (the popup gives no number for either): not simulated",
+    "S3's Decrease Hit Chance (50% for 2 turns): hit chance is not simulated",
+]
+
+# S3 Rouge Aroma (3 turns at +3): dispels all buffs from all enemies, then inflicts beguile and decreased Hit Chance for
+# 2 turns; ignores the Effect Resistance of targets with less max Health than the caster.
+# Beguile: at the end of the turn, deals additional damage to all allies except the bearer equal to 10% of their max
+# Health (Heroes only); it is dispelled once activated.
+[passive]
+ignore_resist = true
+
+[[effect]]
+slot = 3
+kind = "dispel"
+count = 0
+receivers = "enemies"
+note = "S3: dispels all buffs from all enemies"
+
+[[effect]]
+slot = 3
+kind = "beguile"
+value = 0.10
+turns = 2
+receivers = "enemies"
+note = "S3: beguile on all enemies for 2 turns: when the bearer's turn ends its allies lose 10% of their max Health, once"

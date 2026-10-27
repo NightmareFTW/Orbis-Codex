@@ -32,6 +32,8 @@ One file per hero, named by its code (`c2049.toml`); every number carries where 
     ally_low = 0.5                # an ally left at this Health share or less after a hit triggers `when = "ally_low"`
     ally_low_cooldown = 3         # ... at most once every N own turns
     eff_speed = 0.3               # Effectiveness gained at the start of the battle, per 100 of Speed
+    cr_immune = true              # unaffected by Combat Readiness increase and decrease effects
+    start_wait = [3]              # skill slots that begin the battle with their full cooldown count
     hit_cap = 0.51                # damage suffered in one attack never exceeds this share of max Health
     variant_slot = 2              # S1 uses the skill data of this slot while the hero has a buff (`when = "variant"`
                                   # effects run just before that attack)
@@ -74,9 +76,12 @@ target's Attack and Defense down 20% and the caster gains a Spoils stack, 20% At
 dispel of the caster's Spoils lifts the pilfers). SPEC D108: reset_cd (the cooldown of the skill in `value` is over
 at once: Arbiter Vildred's Dark Blade when it defeats an enemy), erosion (`value` = share of the holder's lost Health
 per turn, `turns`; a detonation counts it for the turns left), swap (the hero changes form: effects with `form = 0` or
-`1` only act in that form; Rhianna and Luciella), extra_attack (the caster attacks the same target with its S1 again);
-`when = "before"` effects happen before the attack of their slot; conditions "crit", "debuffed" and "half" (a target
-with half its Health or less) join "kill" and "stun". `of_target = true` on a heal takes its scaling from the
+`1` only act in that form; Rhianna and Luciella), extra_attack (the caster attacks the same targets again with the
+skill of the slot in `value`, S1 when 0, with the `chance` of it happening; effects with condition "proc" follow only
+if it did: Belian's Incursion), beguile (`value` = share of max Health that every other ally of the holder suffers when
+the holder's turn ends, once);
+`when = "before"` effects happen before the attack of their slot; conditions "crit", "debuffed", "half" (a target
+with half its Health or less) and "proc" join "kill" and "stun". `of_target = true` on a heal takes its scaling from the
 target's max Health (Lady's Divine Punishment). A malformed file is an error naming the file (never skipped silently).
 """
 
@@ -138,6 +143,7 @@ KINDS: Final = frozenset(
         "swap",
         "extra_attack",
         "erosion",
+        "beguile",
     }
 )
 _DEBUFFS: Final = frozenset(
@@ -157,6 +163,7 @@ _DEBUFFS: Final = frozenset(
         "venom",
         "pilfer",
         "erosion",
+        "beguile",
     }
 )
 WHEN: Final = frozenset(
@@ -192,6 +199,8 @@ PASSIVES: Final = frozenset(
         "variant_slot",
         "death_cd",
         "eff_speed",
+        "cr_immune",
+        "start_wait",
     }
 )
 
@@ -355,6 +364,8 @@ def apply_override(kit: Kit, cooldowns: Mapping[int, int], override: KitOverride
     out.variant_slot = int(passive.get("variant_slot", out.variant_slot))
     out.death_cd = int(passive.get("death_cd", out.death_cd))
     out.eff_speed = float(passive.get("eff_speed", out.eff_speed))
+    out.cr_immune = bool(passive.get("cr_immune", out.cr_immune))
+    out.start_wait = tuple(int(slot) for slot in passive.get("start_wait", out.start_wait))
     return out, {**cooldowns, **override.cooldowns}
 
 
@@ -392,8 +403,8 @@ def _placed(raw: Any, name: str, index: int) -> Placed:
         raise KitError(f"{where}: {exc}") from exc
     if not 0.0 <= effect.chance <= 2.0:
         raise KitError(f"{where}: 'chance' must be between 0 and 2")
-    if effect.condition not in ("", "kill", "stun", "crit", "debuffed", "half"):
-        raise KitError(f'{where}: \'condition\' must be "kill", "stun", "crit", "debuffed", "half" or left out')
+    if effect.condition not in ("", "kill", "stun", "crit", "debuffed", "half", "proc"):
+        raise KitError(f'{where}: \'condition\' must be "kill", "stun", "crit", "debuffed", "half", "proc" or left out')
     if effect.form not in (-1, 0, 1):
         raise KitError(f"{where}: 'form' must be 0 or 1 (or left out: any form)")
     return Placed(slot, str(when), effect, str(raw.get("note", "")))

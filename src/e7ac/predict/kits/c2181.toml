@@ -1,0 +1,58 @@
+# Notos
+hero = "c2181"
+source = "in-game skill popups read by the Skill reader (the user's export, 2026-10-26): S1, S2 and S3 at +0 with their enhancement steps; multipliers and the 50% penetration from Fribbels' skill data (community)"
+status = "verified"
+replace = [1, 2, 3]
+handles = ["Decrease Defense", "Penetrate", "God of Battle", "Sanctuary of Battle"]
+cooldowns = { 2 = 0, 3 = 7 }  # S3 "8 turns", "-1 turn cooldown" at +1; S2 can only be used as God of Battle: not chosen (0 = passive)
+unmodelled = [
+    "God of Battle doubles all stats for 3 turns: only Attack, Defense and Speed are doubled here (not max Health, critical hit, Effectiveness and the other stats)",
+    "Sanctuary of Battle (while God of Battle lasts every Hero is immune to new buffs and debuffs)",
+    "S2 Blaze of Battle (50% penetration, 2-turn cooldown) is only usable as God of Battle: it is never used here, and S1's additional damage as God of Battle is not simulated",
+    "Soulburn (S2: more damage for 10 Souls): Souls are not simulated",
+]
+
+# S1 Divinity Release: attacks with a 75% chance to inflict decreased Defense (70%) for 1 turn; the damage grows with the
+# caster's max Health (Fribbels: selfHpScaling 0.1). As God of Battle it adds damage proportional to max Health.
+[[effect]]
+slot = 1
+kind = "def"
+value = -0.7
+turns = 1
+chance = 0.75
+note = "S1: 75% chance to inflict decreased Defense (70%) for 1 turn"
+
+# S2 Blaze of Battle: as Notos "unaffected by Combat Readiness increase and decrease effects"; as God of Battle an attack
+# that penetrates 50% of the Defense.
+# S3 God's Might (7 turns at +1): grants God of Battle for 3 turns and fully recovers Health; begins the first battle with
+# its full cooldown count (the first S3 comes after 7 of her own turns). God of Battle: all stats are doubled.
+[passive]
+cr_immune = true
+start_wait = [3]
+
+[[effect]]
+slot = 3
+kind = "heal"
+scaling = [1.0, 0.0, 0.0]
+note = "S3: fully recovers Health"
+
+[[effect]]
+slot = 3
+kind = "atk"
+value = 1.0
+turns = 3
+note = "S3: God of Battle: Attack doubled for 3 turns"
+
+[[effect]]
+slot = 3
+kind = "def"
+value = 1.0
+turns = 3
+note = "S3: God of Battle: Defense doubled for 3 turns"
+
+[[effect]]
+slot = 3
+kind = "spd"
+value = 1.0
+turns = 3
+note = "S3: God of Battle: Speed doubled for 3 turns"
