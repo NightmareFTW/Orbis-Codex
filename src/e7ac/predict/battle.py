@@ -169,6 +169,8 @@ def _play(
     for i, unit in enumerate(units):
         for effect in unit.kit.at_start:
             _use(effect, i, [], units, hp, cr, state, rng)
+        if unit.kit.eff_speed:  # Effectiveness from Speed ("30% of Speed", Rhianna and Luciella)
+            state[i].eff_extra = unit.kit.eff_speed * speeds[i] / 100  # stays all battle: no dispel takes it
         if unit.kit.spirit_full:  # Fighting Spirit at the start of the battle (Young Senya S2)
             front = _foremost(units, hp, i)
             earth = front is not None and units[front].element == "wind"
@@ -193,6 +195,17 @@ def _play(
             for share, _ in me.hots:
                 hp[actor] = min(maximum, hp[actor] + share * maximum)
             me.hots = [(share, turns - 1) for share, turns in me.hots if turns > 1]
+        if me.erosions:  # erosion: a share of the Health lost so far, at the start of the turn (`verified`, popup text)
+            lost = unit.stats[Stat.HP] - hp[actor]
+            for share, _ in me.erosions:
+                me.hurt(hp, actor, share * max(0.0, lost))
+            me.erosions = [(share, turns - 1) for share, turns in me.erosions if turns > 1]
+            if hp[actor] <= 0:
+                _lethal(units, hp, cr, state, actor, rng)
+                standing = {units[i].side for i in range(n) if hp[i] > 0}
+                if len(standing) == 1:
+                    return standing.pop(), actions
+                continue
         if me.dots or me.venoms:  # damage over time at the start of the turn (MECH-DOT-01; venom: 10% of max Health)
             for damage, _ in me.dots:
                 me.hurt(hp, actor, damage)
@@ -213,7 +226,8 @@ def _play(
             me.tick()
             continue
         for ready in waiting[actor]:
-            waiting[actor][ready] = max(0, waiting[actor][ready] - 1)
+            waiting[actor][ready] = max(0, waiting[actor][ready] - 1 - me.cd_cut)
+        me.cd_cut = 0
         me.low_wait = max(0, me.low_wait - 1)
         me.guard_wait = max(0, me.guard_wait - 1)
         me.ally_wait = max(0, me.ally_wait - 1)
@@ -225,10 +239,20 @@ def _play(
         acted[actor] = True
         enemies = [j for j in alive if units[j].side != unit.side]
         skill = unit.skills.get(slot)
+        if slot == 1 and unit.kit.variant_slot in unit.skills and me.buffed:  # Nimble Sword: S1 with a buff
+            skill = unit.skills[unit.kit.variant_slot]
+            for effect in unit.kit.variant_effects:
+                _use(effect, actor, [], units, hp, cr, state, rng)
+        for effect in unit.kit.before_use.get(slot, []):  # "after granting increased Attack ..., attacks"
+            if effect.form < 0 or effect.form == me.form:
+                _use(effect, actor, [], units, hp, cr, state, rng)
         targets: list[int] = []
         killed = False
+        crit = False
         if skill is not None and enemies:
-            if skill.targets > 1:
+            if skill.targets == 2 and len(enemies) > 2:  # "attacks two enemies": two of them, at random (`assumed`)
+                targets = rng.sample(enemies, 2)
+            elif skill.targets > 1:
                 targets = enemies
             else:  # a hero in front with Ferocious Stand is the only one a single-target skill can pick
                 taunting = [j for j in enemies if units[j].kit.taunt and j == _front(units, hp, units[j].side)]
@@ -255,13 +279,31 @@ def _play(
                     _strike(units, hp, cr, state, j, me.abundance, rng, actor)
                     killed = killed or hp[j] <= 0
         stunned = {j: state[j].timers.get("stun", 0) for j in targets}
+        form = me.form  # the effects of a skill act in the form it was used in, even if the skill swaps
         for effect in unit.kit.on_use.get(slot, []):
+            if effect.form >= 0 and effect.form != form:
+                continue
             if effect.condition == "kill" and not killed:
                 continue
             if effect.condition == "stun" and not any(state[j].timers.get("stun", 0) > stunned[j] for j in targets):
                 continue
+            if effect.condition == "crit" and not crit:
+                continue
+            if effect.condition == "debuffed" and not any(state[j].debuffed for j in targets if hp[j] > 0):
+                continue
+            if effect.condition == "half" and not any(0 < hp[j] <= 0.5 * units[j].stats[Stat.HP] for j in targets):
+                continue
+            if effect.kind == "swap":  # Rhianna <-> Luciella
+                me.form = 1 - me.form
+                continue
+            if effect.kind == "extra_attack":
+                _extra_attack(actor, targets, units, hp, cr, state, hits, rng)
+                continue
             if effect.kind == "dual_attack":
                 _dual_attack(actor, targets, units, hp, cr, state, hits, rng)
+                continue
+            if effect.kind == "reset_cd":  # the cooldown of a skill is over at once (Arbiter Vildred's Dark Blade)
+                waiting[actor][int(effect.value)] = 0
                 continue
             _use(effect, actor, targets, units, hp, cr, state, rng)
         if frozen is not None:
@@ -335,6 +377,37 @@ class _State:
     """Totals of this battle (HeroTotals): damage inflicted, Health restored to allies, barrier strength granted."""
     healed: float = 0.0
     shielded: float = 0.0
+    cd_cut: int = 0
+    """Turns every cooldown of this hero still has to lose for the deaths it saw (`Kit.death_cd`)."""
+    eff_extra: float = 0.0
+    """Effectiveness that lasts the whole battle (`Kit.eff_speed`)."""
+    form: int = 0
+    """Which of its two forms the hero is in (Rhianna and Luciella swap at each S2)."""
+    erosions: list[tuple[float, int]] = field(default_factory=list)
+    """Erosion: (share of the holder's lost Health per turn, turns left); it ticks at the start of the holder's turn."""
+
+    @property
+    def buffed(self) -> bool:
+        """Whether the hero holds any buff (a stat buff, a status buff, a barrier, continuous healing, Spoils)."""
+        return bool(
+            self.buffs
+            or self.hots
+            or self.barrier > 0
+            or self.spoils > 0
+            or any(self.timers.get(kind, 0) > 0 for kind in _BUFF_TIMERS)
+        )
+
+    @property
+    def debuffed(self) -> bool:
+        """Whether the hero holds any debuff."""
+        return bool(
+            self.debuffs
+            or self.dots
+            or self.venoms
+            or self.erosions
+            or self.pilfer
+            or any(self.timers.get(kind, 0) > 0 for kind in _DEBUFF_TIMERS)
+        )
 
     def factor(self, kind: str) -> float:
         extra = (SPOILS_STEP * self.spoils - PILFER_STEP * self.pilfer) if kind in ("atk", "def") else 0.0
@@ -367,6 +440,7 @@ class _State:
             [("timer", k) for k in _DEBUFF_TIMERS]
             + [("dot", "")] * len(self.dots)
             + [("venom", "")] * len(self.venoms)
+            + [("erosion", "")] * len(self.erosions)
             + [("pilfer", "")] * int(self.pilfer)
             + [("debuff", k) for k in self.debuffs]
             if debuffs
@@ -395,6 +469,8 @@ class _State:
             return bool(self.hots) and self.hots.pop(0) is not None
         if table == "venom":
             return bool(self.venoms) and self.venoms.pop(0) is not None
+        if table == "erosion":
+            return bool(self.erosions) and self.erosions.pop(0) is not None
         if table == "pilfer":
             had, self.pilfer = self.pilfer, False
             return had
@@ -509,6 +585,9 @@ def _strike(
     """Direct damage to `j` (a hit, a counter, a reflect, fixed damage): the ally holding its side's offering takes its
     share instead (MECH-OFFER-01, `verified` in the in-game text), then barrier and Health, then the lethal rules.
     Returns the Health `j` itself lost and whether the damage was lethal to it (before immortality or a revive)."""
+    cap = units[j].kit.hit_cap
+    if cap:  # damage suffered in one attack never exceeds a share of max Health (Sixth Sense, `verified`)
+        damage = min(damage, cap * units[j].stats[Stat.HP])
     before = hp[j]
     if by >= 0:
         state[by].dealt += damage
@@ -552,6 +631,10 @@ def _lethal(
                 cr[j] = min(1.0, cr[j] + effect.value)
             else:
                 state[j].apply(effect)
+    if hp[j] <= 0:  # a hero died: the heroes with Sixth Sense lose a turn of cooldown
+        for m in range(len(units)):
+            if hp[m] > 0 and units[m].kit.death_cd:
+                state[m].cd_cut += units[m].kit.death_cd
     if hp[j] <= 0 and state[j].offering:  # the ally granted offering died: the granter's heal
         state[j].offering = False
         owner = state[j].offering_by
@@ -638,6 +721,9 @@ def _use(
             if effect.kind == "detonate":  # every venom at once: share x turns left, for each stack (MECH-VENOM-01)
                 damage = sum(share * units[j].stats[Stat.HP] * left for share, left in state[j].venoms)
                 state[j].venoms = []
+                lost = max(0.0, units[j].stats[Stat.HP] - hp[j])  # and every erosion: its share of the lost Health
+                damage += sum(share * lost * left for share, left in state[j].erosions)
+                state[j].erosions = []
             if damage > 0:
                 _strike(units, hp, cr, state, j, damage, rng, actor)
         return
@@ -671,7 +757,9 @@ def _use(
             else:
                 state[r].apply(effect)
         return
-    effectiveness = caster.get(Stat.EFFECTIVENESS, 0.0) + state[actor].buffs.get("eff", (0.0, 0))[0]
+    effectiveness = (
+        caster.get(Stat.EFFECTIVENESS, 0.0) + state[actor].buffs.get("eff", (0.0, 0))[0] + state[actor].eff_extra
+    )
     own = effect.receivers == "self"  # inflicted on the caster itself (a mistake of its own skill): always lands
     hit = enemies if effect.receivers == "enemies" else [actor] if own else list(targets)
     for j in hit:
@@ -700,6 +788,8 @@ def _use(
                 state[j].dots.append((per_turn, effect.turns))
             elif effect.kind == "venom":
                 state[j].venoms.append((effect.value, effect.turns))
+            elif effect.kind == "erosion":
+                state[j].erosions.append((effect.value, effect.turns))
             elif effect.kind == "pilfer":
                 if not state[j].pilfer:  # a new Pilfer gives the caster a Spoils stack (`assumed`: not a repeated one)
                     state[j].pilfer, state[j].pilfer_by = True, actor
@@ -806,6 +896,27 @@ def _dual_attack(
     crit = units[m].skills[1].can_crit and rng.random() < min(units[m].stats[Stat.CRIT_CHANCE], 1.0)
     factor = min(units[m].stats[Stat.CRIT_DAMAGE], CD_CAP) if crit else 1.0
     _strike(units, hp, cr, state, target, hits[(m, target, 1)] * state[m].factor("atk") * factor, rng, m)
+
+
+def _extra_attack(
+    actor: int,
+    targets: Sequence[int],
+    units: Sequence[Combatant],
+    hp: list[float],
+    cr: list[float],
+    state: list[_State],
+    hits: Mapping[tuple[int, int, int], float],
+    rng: random.Random,
+) -> None:
+    """The caster attacks the first living target again with its S1 (Rhianna's Waning Moon Slash, Luciella's Half Moon
+    Slash as an extra attack); it triggers nothing else."""
+    target = next((j for j in targets if hp[j] > 0), None)
+    unit = units[actor]
+    if target is None or 1 not in unit.skills:
+        return
+    crit = unit.skills[1].can_crit and rng.random() < min(unit.stats[Stat.CRIT_CHANCE], 1.0)
+    factor = min(unit.stats[Stat.CRIT_DAMAGE], CD_CAP) if crit else 1.0
+    _strike(units, hp, cr, state, target, hits[(actor, target, 1)] * state[actor].factor("atk") * factor, rng, actor)
 
 
 def _counters(

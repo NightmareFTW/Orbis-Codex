@@ -52,6 +52,8 @@ def show(
         label = "passive" if slot == 2 and not cooldown else f"cooldown {cooldown}" if cooldown else "no cooldown"
         effects = kit.on_use.get(slot, [])
         typer.echo(f"  S{slot} ({label}): " + (", ".join(_describe(e) for e in effects) or "-"))
+    for slot, effects in sorted(kit.before_use.items()):
+        typer.echo(f"  before the S{slot} attack: " + ", ".join(_describe(e) for e in effects))
     for title, effects in (("battle start", kit.at_start), ("each own turn", kit.on_turn)):
         if effects:
             typer.echo(f"  {title}: " + ", ".join(_describe(e) for e in effects))
@@ -237,12 +239,30 @@ def _passives(kit: Kit) -> list[str]:
         found.append(
             "when the ally granted offering dies: " + ", ".join(_describe(e) for e in kit.offering_death_effects)
         )
+    if kit.eff_speed:
+        found.append(f"Effectiveness +{kit.eff_speed:.0%} of Speed for the whole battle")
+    if kit.hit_cap:
+        found.append(f"damage suffered in one attack never exceeds {kit.hit_cap:.0%} of max Health")
+    if kit.variant_slot:
+        found.append(
+            f"S1 uses the data of S{kit.variant_slot} while it has a buff, after: "
+            + (", ".join(_describe(e) for e in kit.variant_effects) or "nothing")
+        )
+    if kit.death_cd:
+        found.append(f"every cooldown -{kit.death_cd} turn each time a hero dies")
     return found
 
 
 def _describe(effect: Effect) -> str:
     if effect.kind == "shorten":
         return f"buff durations -{effect.turns} turns {effect.receivers}".strip()
+    if effect.kind == "reset_cd":
+        return f"reset the cooldown of S{effect.value:.0f}" + (f" if {effect.condition}" if effect.condition else "")
+    form = f" [form {effect.form}]" if effect.form >= 0 else ""
+    return _describe_plain(effect) + form
+
+
+def _describe_plain(effect: Effect) -> str:
     parts = [effect.kind]
     if effect.kind == "spirit":
         parts.append(f"+{effect.value:g} Fighting Spirit")

@@ -31,6 +31,11 @@ One file per hero, named by its code (`c2049.toml`); every number carries where 
     cr_mirror = 0.5               # share of an enemy's Combat Readiness increase this hero gains too
     ally_low = 0.5                # an ally left at this Health share or less after a hit triggers `when = "ally_low"`
     ally_low_cooldown = 3         # ... at most once every N own turns
+    eff_speed = 0.3               # Effectiveness gained at the start of the battle, per 100 of Speed
+    hit_cap = 0.51                # damage suffered in one attack never exceeds this share of max Health
+    variant_slot = 2              # S1 uses the skill data of this slot while the hero has a buff (`when = "variant"`
+                                  # effects run just before that attack)
+    death_cd = 1                  # every skill cooldown goes down this many turns each time a hero dies
 
     [[effect]]
     slot = 3                      # 1-3
@@ -66,8 +71,13 @@ on lethal damage; given to the foremost ally; `when = "offering_death"` effects 
 offering_cost (`value` = share of the holder's current Health paid, never to death), abundance (`value` additional
 damage after each attack of the holder, `turns`; `receivers = "not_offering"` skips the offering holder), pilfer (the
 target's Attack and Defense down 20% and the caster gains a Spoils stack, 20% Attack and Defense each, up to 4; a
-dispel of the caster's Spoils lifts the pilfers). `of_target = true` on a heal takes its scaling from the target's max
-Health (Lady's Divine Punishment). A malformed file is an error naming the file (never skipped silently).
+dispel of the caster's Spoils lifts the pilfers). SPEC D108: reset_cd (the cooldown of the skill in `value` is over
+at once: Arbiter Vildred's Dark Blade when it defeats an enemy), erosion (`value` = share of the holder's lost Health
+per turn, `turns`; a detonation counts it for the turns left), swap (the hero changes form: effects with `form = 0` or
+`1` only act in that form; Rhianna and Luciella), extra_attack (the caster attacks the same target with its S1 again);
+`when = "before"` effects happen before the attack of their slot; conditions "crit", "debuffed" and "half" (a target
+with half its Health or less) join "kill" and "stun". `of_target = true` on a heal takes its scaling from the
+target's max Health (Lady's Divine Punishment). A malformed file is an error naming the file (never skipped silently).
 """
 
 from __future__ import annotations
@@ -124,6 +134,10 @@ KINDS: Final = frozenset(
         "offering_cost",
         "abundance",
         "pilfer",
+        "reset_cd",
+        "swap",
+        "extra_attack",
+        "erosion",
     }
 )
 _DEBUFFS: Final = frozenset(
@@ -142,9 +156,12 @@ _DEBUFFS: Final = frozenset(
         "shorten",
         "venom",
         "pilfer",
+        "erosion",
     }
 )
-WHEN: Final = frozenset({"use", "start", "turn", "revive", "low_hp", "guard", "spirit", "ally_low", "offering_death"})
+WHEN: Final = frozenset(
+    {"use", "start", "turn", "revive", "low_hp", "guard", "spirit", "ally_low", "offering_death", "variant", "before"}
+)
 PASSIVES: Final = frozenset(
     {
         "reflect",
@@ -171,6 +188,10 @@ PASSIVES: Final = frozenset(
         "cr_mirror",
         "ally_low",
         "ally_low_cooldown",
+        "hit_cap",
+        "variant_slot",
+        "death_cd",
+        "eff_speed",
     }
 )
 
@@ -274,6 +295,8 @@ def apply_override(kit: Kit, cooldowns: Mapping[int, int], override: KitOverride
         spirit_effects=[],
         ally_low_effects=[],
         offering_death_effects=[],
+        variant_effects=[],
+        before_use={},
     )
     revive_effects: list[Effect] = []
     for placed in override.effects:
@@ -293,6 +316,10 @@ def apply_override(kit: Kit, cooldowns: Mapping[int, int], override: KitOverride
             out.ally_low_effects.append(placed.effect)
         elif placed.when == "offering_death":
             out.offering_death_effects.append(placed.effect)
+        elif placed.when == "variant":
+            out.variant_effects.append(placed.effect)
+        elif placed.when == "before":
+            out.before_use.setdefault(placed.slot, []).append(placed.effect)
         elif placed.effect.kind in ("heal", "resurrect"):  # revive: `value` = Health fraction regained
             out.revive = placed.effect.value
         else:
@@ -324,6 +351,10 @@ def apply_override(kit: Kit, cooldowns: Mapping[int, int], override: KitOverride
     out.cr_mirror = float(passive.get("cr_mirror", out.cr_mirror))
     out.ally_low = float(passive.get("ally_low", out.ally_low))
     out.ally_low_cooldown = int(passive.get("ally_low_cooldown", out.ally_low_cooldown))
+    out.hit_cap = float(passive.get("hit_cap", out.hit_cap))
+    out.variant_slot = int(passive.get("variant_slot", out.variant_slot))
+    out.death_cd = int(passive.get("death_cd", out.death_cd))
+    out.eff_speed = float(passive.get("eff_speed", out.eff_speed))
     return out, {**cooldowns, **override.cooldowns}
 
 
@@ -355,13 +386,16 @@ def _placed(raw: Any, name: str, index: int) -> Placed:
             count=int(raw.get("count", 0)),
             condition=str(raw.get("condition", "")),
             of_target=bool(raw.get("of_target", False)),
+            form=int(raw.get("form", -1)),
         )
     except (TypeError, ValueError) as exc:
         raise KitError(f"{where}: {exc}") from exc
     if not 0.0 <= effect.chance <= 2.0:
         raise KitError(f"{where}: 'chance' must be between 0 and 2")
-    if effect.condition not in ("", "kill", "stun"):
-        raise KitError(f'{where}: \'condition\' must be "kill", "stun" or left out')
+    if effect.condition not in ("", "kill", "stun", "crit", "debuffed", "half"):
+        raise KitError(f'{where}: \'condition\' must be "kill", "stun", "crit", "debuffed", "half" or left out')
+    if effect.form not in (-1, 0, 1):
+        raise KitError(f"{where}: 'form' must be 0 or 1 (or left out: any form)")
     return Placed(slot, str(when), effect, str(raw.get("note", "")))
 
 

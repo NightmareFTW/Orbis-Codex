@@ -19,10 +19,10 @@ only: newer ones have none) or by hand (`src/e7ac/predict/kits/<code>.toml`, fro
 | 16 | Lady of the Scales (c6005) | done (D89) | Soulburn only |
 | 15 | Boss Arunka (c2124) | done (D89) | Soulburn only |
 | 10 | Rinak (c1168) | done (D89) | Soulburn only; the Health part of Pilfer / Spoils |
-| 9 | Spirit Eye Celine (c2103) | not read | Possession; Nimble Sword life steal amount; Souls |
+| 9 | Spirit Eye Celine (c2103) | done (D108) | the Health share of her S3 revive; Nimble Sword life steal amount; Souls |
 | 8 | Harsetti (c1153) | done | Focus maximum and bonus, En Passant multiplier (NV-44) |
-| 8 | Arbiter Vildred (c2007) | not read | Focus, Dark Blade, the regeneration on lethal damage |
-| 8 | Rhianna and Luciella (c2185) | not read | Erosion, Waning/Half Moon Slash, Butterfly's Afterdream, damage sharing, the swap |
+| 8 | Arbiter Vildred (c2007) | done (D108) | what "full" Focus is; Evasion and Hit Chance |
+| 8 | Rhianna and Luciella (c2185) | done (D108) | life steal, damage sharing, Evasion, the reading of "30% of Speed" (NV-61) |
 | 7 | Notos (c2181) | not read | God of Battle, Sanctuary of Battle |
 | 6 | Belian (c1117) | partly read | Incursion (extra attack), the random buff of S2, Provoke |
 | 6 | Setsuka (c1176) | not read | Fighting Spirit, Demon Blade Unleashed, Blade Art: Bewitching Blossom, beguile |

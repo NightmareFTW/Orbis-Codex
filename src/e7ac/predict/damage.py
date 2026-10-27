@@ -41,7 +41,7 @@ class SkillPower:
     can_crit: bool = True
     """False when the skill's hit types (Fribbels `hit_types`) leave out "crit" (e.g. a fixed-damage skill)."""
     targets: int = 1
-    """Enemies hit (Fribbels `targets`; above 1: all enemies, `assumed`)."""
+    """Enemies hit (Fribbels `targets`: 2 = two enemies at random, above 2 = all enemies; `assumed`)."""
 
 
 def skill_power(entity: ResolvedEntity) -> SkillPower | None:

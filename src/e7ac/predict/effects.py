@@ -89,9 +89,13 @@ class Effect:
     count: int = 0
     """cleanse / dispel: how many debuffs / buffs (0 = all)."""
     condition: str = ""
-    """"kill": only when the skill defeated an enemy (SPEC D76); "stun": only when it newly stunned a target."""
+    """"kill": only when the skill defeated an enemy (SPEC D76); "stun": only when it newly stunned a target; "crit":
+    only when its attack was a critical hit; "debuffed": only when a target holds a debuff; "half": only when a target
+    has half its Health or less (SPEC D108)."""
     of_target: bool = False
     """heal: the amount is these shares of the *target's* max Health (Lady of the Scales S1), not the caster's."""
+    form: int = -1
+    """Only while the hero is in this form (0 or 1; Rhianna and Luciella swap at each S2); -1: in any form."""
 
 
 @dataclass(slots=True)
@@ -158,6 +162,20 @@ class Kit:
     revive: float | None = None
     """HP fraction restored once on lethal damage."""
     revive_effects: list[Effect] = field(default_factory=list)
+    before_use: dict[int, list[Effect]] = field(default_factory=dict)
+    """Effects of a slot that happen before its attack ("after granting increased Attack ... attacks")."""
+    eff_speed: float = 0.0
+    """Effectiveness gained at the start of the battle: this many points per 100 of Speed (Rhianna and Luciella:
+    "30% of Speed")."""
+    hit_cap: float = 0.0
+    """Damage this hero suffers in one attack never exceeds this share of its max Health (Spirit Eye Celine's Sixth
+    Sense: 70% at +0, 51% at +7); 0 = no limit."""
+    variant_slot: int = 0
+    """While the hero has a buff its S1 is the skill of this slot instead, after `variant_effects` (Celine's Nimble
+    Sword, which Fribbels lists as her "S2: S1 proc"); 0 = none."""
+    variant_effects: list[Effect] = field(default_factory=list)
+    death_cd: int = 0
+    """Every skill cooldown of the hero goes down by this many turns each time a hero dies (Sixth Sense)."""
     unmodelled: list[str] = field(default_factory=list)
     unread: list[int] = field(default_factory=list)
     """Skill slots whose text describes effects (inflicts, heals, dispels, ...) but of which none was read: epic7db

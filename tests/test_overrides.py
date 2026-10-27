@@ -352,3 +352,152 @@ def test_effects_that_need_a_landed_stun_reach_every_ally_but_the_caster() -> No
 
     assert win(only_on_stun, boss=30000) == win(boss=30000)  # no stun landed: the condition keeps the effect away
     assert win(stun, only_on_stun) > win(stun) + 0.03  # the allies get their turn once the stun landed
+
+
+def test_a_hit_cap_a_variant_s1_and_a_cooldown_cut_work_in_battle() -> None:
+    """Spirit Eye Celine (SPEC D108): Sixth Sense limits the damage of one attack, Nimble Sword is her S1 when she has a
+    buff, and every death takes a turn off her cooldowns."""
+    import random
+
+    from e7ac.domain.codes import Stat
+    from e7ac.predict.battle import Combatant, _lethal, _State, _strike, simulate
+    from e7ac.predict.damage import SkillPower
+    from tests.test_effects import unit
+
+    # the cap: one huge hit takes at most 51% of the max Health, a hit under the cap is whole
+    capped = [unit("a", "you"), unit("b", "them", Kit(hit_cap=0.51), hp=10000)]
+    hp, cr, state = [10000.0, 10000.0], [0.0, 0.0], [_State(), _State()]
+    lost, lethal = _strike(capped, hp, cr, state, 1, 90000.0, random.Random(1), 0)
+    assert lost == pytest.approx(5100.0) and not lethal and state[0].dealt == pytest.approx(5100.0)
+    assert _strike(capped, hp, cr, state, 1, 1000.0, random.Random(1), 0)[0] == pytest.approx(1000.0)
+
+    # the variant: S1 is the strong "S2" data while she holds a buff, the plain S1 without one
+    weak, strong = SkillPower(0.1, 1.0, 0.0), SkillPower(3.0, 1.0, 0.0, penetration=0.5)
+    stats = unit("x", "you").stats
+
+    def celine(buff: bool) -> Combatant:
+        at_start = [Effect("atk", False, 0.1, 99, 1.0)] if buff else []
+        kit = Kit(variant_slot=2, at_start=at_start)
+        return Combatant("c", "you", stats, 300, {1: weak, 2: strong}, {}, kit)
+
+    boss = unit("b", "them", hp=120000)
+
+    def dealt(buff: bool) -> float:
+        return simulate([celine(buff), boss], runs=100).heroes[0].damage
+
+    assert dealt(True) > 3 * dealt(False)  # the variant's multiplier is thirty times the plain S1's
+
+    # the cooldown cut: each death adds a turn to the cut of every living hero that has it
+    team = [
+        Combatant("c", "you", stats, 300, {1: weak}, {}, Kit(death_cd=1)),
+        unit("ally", "you"),
+        unit("b", "them"),
+    ]
+    hp, cr, state = [10000.0, 0.0, 10000.0], [0.0] * 3, [_State(), _State(), _State()]
+    _lethal(team, hp, cr, state, 1, random.Random(1))
+    assert [s.cd_cut for s in state] == [1, 0, 0] and hp[1] <= 0
+    assert Stat.HP in stats
+
+
+def test_spirit_eye_celine_kit_carries_the_popup_numbers() -> None:
+    celine, cooldowns = apply_override(Kit(), {3: 6}, load_overrides()["c2103"])
+    assert cooldowns[3] == 5  # "6 turns" and "-1 turn cooldown" at +1
+    assert celine.hit_cap == 0.51 and celine.variant_slot == 2 and celine.death_cd == 1
+    assert celine.hit_cap == pytest.approx(0.70 - (0.02 * 3 + 0.03 * 3 + 0.04))  # the steps of Sixth Sense
+    assert [(e.kind, e.value, e.turns) for e in celine.variant_effects] == [("atk", 0.5, 1)]
+    assert {e.kind: (e.value, e.turns, e.receivers) for e in celine.on_use[3]} == {
+        "immortal": (0.0, 1, "all"),
+        "atk": (0.25, 3, ""),
+    }
+
+
+def test_a_reset_cooldown_and_a_two_target_skill_work_in_battle() -> None:
+    """Arbiter Vildred (SPEC D108): Dark Blade is ready again when it defeats an enemy, Sweep hits two enemies."""
+    from e7ac.domain.codes import Stat
+    from e7ac.predict.battle import Combatant, simulate
+    from e7ac.predict.damage import SkillPower
+    from tests.test_effects import unit
+
+    weak, blade = SkillPower(0.05, 1.0, 0.0), SkillPower(4.0, 1.0, 0.0, targets=3)
+    stats = unit("x", "you").stats
+
+    def vildred(reset: bool) -> Combatant:
+        effects = [Effect("reset_cd", False, 3.0, 2, 1.0, condition="kill")] if reset else []
+        return Combatant("v", "you", stats, 300, {1: weak, 3: blade}, {3: 4}, Kit(on_use={3: effects}))
+
+    foes = [unit(f"b{i}", "them", hp=3000) for i in range(3)]
+    quick, slow = simulate([vildred(True), *foes], runs=200), simulate([vildred(False), *foes], runs=200)
+    assert quick.heroes[0].damage >= slow.heroes[0].damage  # a defeated enemy gives the next Dark Blade at once
+
+    # "attacks two enemies": with four enemies the skill touches two of them, never all
+    pair = SkillPower(1.0, 1.0, 0.0, targets=2)
+    striker = Combatant("s", "you", stats, 400, {1: pair}, {}, Kit())
+    four = [unit(f"t{i}", "them", hp=10**7) for i in range(4)]
+    one = simulate([striker, *four], runs=1).heroes[0].damage
+    allfour = simulate(
+        [Combatant("s", "you", stats, 400, {1: SkillPower(1.0, 1.0, 0.0, targets=3)}, {}, Kit()), *four], runs=1
+    )
+    assert 0 < one < allfour.heroes[0].damage
+    assert Stat.HP in stats
+
+
+def test_arbiter_vildred_kit_carries_the_popup_numbers() -> None:
+    vildred, cooldowns = apply_override(Kit(), {3: 5}, load_overrides()["c2007"])
+    assert cooldowns[3] == 5 and vildred.revive == 1.0
+    assert [(e.kind, e.value) for e in vildred.revive_effects] == [("cr", 1.0)]
+    assert [(e.kind, e.value, e.turns, e.condition) for e in vildred.on_use[3]] == [
+        ("atk", 0.5, 2, ""),
+        ("reset_cd", 3.0, 2, "kill"),
+    ]
+
+
+def test_forms_erosion_extra_attacks_and_effectiveness_from_speed_work_in_battle() -> None:
+    """Rhianna and Luciella (SPEC D108): two forms that swap, erosion and its detonation, extra attacks with a
+    condition, and Effectiveness from Speed."""
+    import random
+
+    from e7ac.predict.battle import _State, _use, simulate
+    from tests.test_effects import unit
+
+    team = [unit("a", "you"), unit("b", "them")]
+    hp, cr, state = [10000.0, 6000.0], [0.0, 0.0], [_State(), _State()]
+    rng = random.Random(1)
+    _use(Effect("erosion", True, 0.10, 2, 2.0), 0, [1], team, hp, cr, state, rng)  # chance 200%: always lands
+    assert state[1].erosions == [(0.10, 2)] and state[1].debuffed
+    _use(Effect("detonate", True, 0.0, 0, 1.0), 0, [1], team, hp, cr, state, rng)
+    assert hp[1] == pytest.approx(6000 - 0.10 * 4000 * 2) and not state[1].erosions  # share x lost Health x turns
+    state[1].erosions = [(0.10, 1)]
+    _use(Effect("cleanse", False, 0.0, 0, 1.0, receivers="all"), 1, [], team, hp, cr, state, rng)
+    assert not state[1].erosions  # a cleanse removes erosion
+
+    stun = Effect("stun", True, 0.0, 2, 1.0, form=1)  # only in the second form
+    swap = Effect("swap", False, 0.0, 0, 1.0)
+
+    def length(kit: Kit) -> float:  # a stunned boss needs more actions to defeat the hero
+        boss = unit("b", "them", hp=10**6)
+        return simulate([unit("a", "you", kit), boss], runs=100).mean_actions
+
+    plain = length(Kit(on_use={1: [stun]}))  # never in the second form: the stun never happens
+    swapping = length(Kit(on_use={1: [stun, swap]}))  # the first S1 swaps, the next ones stun
+    assert swapping > plain * 1.2
+
+    resistant = unit("t", "them", hp=10**6, resist=0.8)
+    stun_all = Effect("stun", True, 0.0, 2, 1.0)
+
+    def stuns(kit: Kit) -> float:
+        return simulate([unit("a", "you", kit), resistant], runs=200).mean_actions
+
+    assert stuns(Kit(on_use={1: [stun_all]}, eff_speed=0.3)) > stuns(Kit(on_use={1: [stun_all]})) * 1.1
+
+
+def test_rhianna_and_luciella_kit_carries_the_popup_numbers() -> None:
+    kit, cooldowns = apply_override(Kit(), {2: 3, 3: 5}, load_overrides()["c2185"])
+    assert cooldowns == {2: 3, 3: 4} and kit.eff_speed == 0.3
+    first = {(e.kind, e.form): (e.value, e.turns) for e in kit.on_use[1]}
+    assert first == {("erosion", 0): (0.10, 2), ("detonate", 0): (0.0, 2)}
+    assert [(e.kind, e.value, e.turns, e.form) for e in kit.before_use[1]] == [("atk", 0.5, 1, 1)]
+    assert [(e.kind, e.value, e.turns, e.form) for e in kit.before_use[2]] == [("atk", 0.5, 3, 1)]
+    assert [e.kind for e in kit.on_use[2]][-2:] == ["extra_turn", "swap"]  # the swap comes last
+    third = {e.kind: e for e in kit.on_use[3]}
+    assert third["barrier"].scaling == (0.0, 1.6, 0.0) and third["barrier"].turns == 3
+    assert third["fear"].receivers == "enemies" and third["dispel"].count == 2

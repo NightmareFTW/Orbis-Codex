@@ -1,0 +1,56 @@
+# Arbiter Vildred
+hero = "c2007"
+source = "in-game skill popups read by the Skill reader (the user's export, 2026-10-26): S1 at +6, S2 and S3 at +0, with their enhancement steps; multipliers and target counts from Fribbels' skill data (community); epic7db's text is another version (S1 decreases Combat Readiness there, not in the game) and was not used"
+status = "verified"
+replace = [1, 2, 3]
+handles = [
+    "Decrease Combat Readiness",
+    "Increase Combat Readiness",
+    "Decrease Skill Cooldown",
+    "Transfer",
+    "Archdemon's Might",
+    "Decrease Hit Chance",
+]
+cooldowns = { 3 = 5 }  # "5 turns" on the popup; no cooldown step
+unmodelled = [
+    "S1 Sweep transfers two debuffs from the caster to the targets, and ignores Effect Resistance on a critical hit",
+    "Focus (S1 gives 1, S3 gives 3; full Focus resets Dark Blade at the start of her turn and makes Dark Blade hit harder): the popup does not say how much is full",
+    "S3 Dark Blade's Decrease Hit Chance (50% for 2 turns): hit chance and evasion are not simulated",
+    "Dark Contract's Archdemon's Might (Evasion +70% for 2 turns at the start of the battle and after the revive, more damage against Light enemies) and the maximum Focus after the revive",
+    "Dark Contract works once every 5 turns (the game's \"Effect(s) upon death\" note); here once per battle",
+    "Soulburn (S3: more damage for 10 Souls): Souls are not simulated",
+]
+
+# S1 Sweep: attacks two enemies (Fribbels: pow 0.95, rate 0.975, targets 2).
+
+# S2 Dark Contract (passive): "Upon dying, revives to 100% Health, before increasing Combat Readiness of the caster by
+# 100%, granting Archdemon's Might for 2 turns and gaining maximum Focus" (epic7db's older text agrees on 100%).
+[[effect]]
+slot = 2
+when = "revive"
+kind = "heal"
+value = 1.0
+note = "S2: revives to 100% Health upon dying"
+
+[[effect]]
+slot = 2
+when = "revive"
+kind = "cr"
+value = 1.0
+note = "S2: increases the caster's Combat Readiness by 100% after the revive"
+
+# S3 Dark Blade (5 turns): after increasing Attack (50%) of the caster for 2 turns, attacks all enemies before inflicting
+# decreased Hit Chance for 2 turns; when an enemy is defeated, resets its cooldown.
+[[effect]]
+slot = 3
+kind = "atk"
+value = 0.5
+turns = 2
+note = "S3: increased Attack (50%) to the caster for 2 turns"
+
+[[effect]]
+slot = 3
+kind = "reset_cd"
+value = 3
+condition = "kill"
+note = "S3: when an enemy is defeated, resets the cooldown of Dark Blade"

@@ -1,0 +1,130 @@
+# Rhianna and Luciella
+hero = "c2185"
+source = "in-game skill popups read by the Skill reader (the user's export, 2026-10-26, the Journal's Preview Skills): S1, S2 and S3 at +0 with their enhancement steps; multipliers, target counts and the 160% Attack barrier from Fribbels' skill data (community)"
+status = "verified"
+replace = [1, 2, 3]
+handles = ["Erosion", "Detonate", "Bind", "Damage Sharing", "One Butterfly's Afterdream", "Increase Attack", "Decrease Defense", "Extra Turn", "Fear", "Barrier"]
+cooldowns = { 2 = 3, 3 = 4 }  # S2 "3 turns" on the popup; S3 "5 turns", "-1 turn cooldown" at +3 (maximum)
+unmodelled = [
+    "S1 Luciella's life steal (\"absorbs some of the damage dealt as Health\": no number)",
+    "Bind (S2, Heroes only): modelled as unable to counterattack; it also blocks additional skills and Dual Attacks, which are not modelled",
+    "S3 ignores damage sharing for Luciella's hits on Heroes (damage sharing is not simulated)",
+    "One Butterfly's Afterdream: Evasion +70% (not simulated) and Luciella's Critical Hit Damage +30% of Speed (only Rhianna's Effectiveness is modelled; her form is not told apart for it)",
+    "Soulburn (S2: Rhianna ignores Effect Resistance, Luciella hits harder; 20 Souls): Souls are not simulated",
+    "The first form is assumed to be Rhianna",
+]
+
+# Two forms that swap at each S2 (form 0 = Rhianna, form 1 = Luciella).
+# S1 Half Moon Slash: (Rhianna) inflicts erosion for 2 turns, a critical hit detonates the erosion on the target;
+# (Luciella) after increased Attack (50%) for 1 turn attacks and absorbs some of the damage as Health.
+# Erosion: at the start of the turn the holder suffers 5% of its lost Health, doubled on Heroes: 10% (verified text).
+[[effect]]
+slot = 1
+form = 0
+kind = "erosion"
+value = 0.10
+turns = 2
+note = "S1 (Rhianna): erosion for 2 turns: 5% of the lost Health per turn, doubled on Heroes"
+
+[[effect]]
+slot = 1
+form = 0
+kind = "detonate"
+condition = "crit"
+note = "S1 (Rhianna): a critical hit detonates the erosion on the target"
+
+[[effect]]
+slot = 1
+when = "before"
+form = 1
+kind = "atk"
+value = 0.5
+turns = 1
+note = "S1 (Luciella): increased Attack (50%) for 1 turn before the attack"
+
+# S2 Hunter's Mark (3 turns): (Rhianna) dispels two buffs, then bind and decreased Defense (70%) for 2 turns, swaps with
+# Luciella and grants an extra turn; when the target has a debuff, Luciella follows with Waning Moon Slash (an extra attack).
+# (Luciella) after increased Attack (50%) for 3 turns attacks, swaps with Rhianna and grants an extra turn; when the
+# target's Health is 50% or less, Rhianna follows with Half Moon Slash.
+[[effect]]
+slot = 2
+form = 0
+kind = "dispel"
+count = 2
+note = "S2 (Rhianna): dispels two buffs"
+
+[[effect]]
+slot = 2
+form = 0
+kind = "def"
+value = -0.7
+turns = 2
+note = "S2 (Rhianna): decreased Defense (70%) for 2 turns"
+
+[[effect]]
+slot = 2
+form = 0
+kind = "unable_counter"
+turns = 2
+note = "S2 (Rhianna): bind for 2 turns, modelled as unable to counterattack"
+
+[[effect]]
+slot = 2
+form = 0
+kind = "extra_attack"
+condition = "debuffed"
+note = "S2 (Rhianna): when the target has a debuff, Luciella follows with an extra attack"
+
+[[effect]]
+slot = 2
+form = 1
+kind = "extra_attack"
+condition = "half"
+note = "S2 (Luciella): when the target's Health is 50% or less, Rhianna follows with an extra attack"
+
+[[effect]]
+slot = 2
+when = "before"
+form = 1
+kind = "atk"
+value = 0.5
+turns = 3
+note = "S2 (Luciella): increased Attack (50%) for 3 turns before the attack"
+
+[[effect]]
+slot = 2
+kind = "extra_turn"
+note = "S2: swaps and grants an extra turn (both forms)"
+
+[[effect]]
+slot = 2
+kind = "swap"
+note = "S2: swaps with the other form"
+
+# S3 Pursuit of Death (4 turns at +3): a coordinated attack: Luciella attacks all enemies; Rhianna dispels two buffs from
+# all enemies, then fear for 1 turn; a barrier proportional to Attack (160% of her Attack, Fribbels) to the caster for 3
+# turns.
+[[effect]]
+slot = 3
+kind = "dispel"
+count = 2
+receivers = "enemies"
+note = "S3: Rhianna dispels two buffs from all enemies"
+
+[[effect]]
+slot = 3
+kind = "fear"
+turns = 1
+receivers = "enemies"
+note = "S3: fear for 1 turn on all enemies"
+
+[[effect]]
+slot = 3
+kind = "barrier"
+scaling = [0.0, 1.6, 0.0]
+turns = 3
+note = "S3: a barrier of 160% of her Attack to the caster for 3 turns"
+
+# One Butterfly's Afterdream (the whole battle): Rhianna's Effectiveness +30% of Speed (as points: Speed 250 gives +75%).
+[passive]
+eff_speed = 0.3
