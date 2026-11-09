@@ -37,3 +37,6 @@ build/
 .DS_Store
 Thumbs.db
 fixtures/epic7db/
+
+# Graphify knowledge graph: rebuilt at each session start (see .claude/hooks/ensure-graphify.sh), never committed
+/graphify-out/
