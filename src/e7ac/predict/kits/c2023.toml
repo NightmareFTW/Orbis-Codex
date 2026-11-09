@@ -1,0 +1,71 @@
+# Twisted Eidolon Kayron
+hero = "c2023"
+source = "in-game skill popups read by the Skill reader (the user's skills folder, 2026-11-09, the Journal's Preview Skills): S1, S2 and S3 at +0 with their enhancement steps and effect panels; multipliers, target counts and the 12% max Health barrier from Fribbels' skill data (community)"
+status = "verified"
+replace = [1, 2, 3]
+handles = ["Barrier", "Counterattack", "Damage Reduction"]
+cooldowns = { 3 = 4 }  # S3 "5 turns" on the popup read at +0; its +3 step is -1 turn
+unmodelled = [
+    "S1 and S3 area: Injury (decreases max Health in proportion to the damage suffered, up to 50%: the formula is not in the text, NV-68)",
+    "S1 as a counterattack becomes an attack on all enemies (every counterattack hits the attacker only here)",
+    "S3: the additional damage grows with the Fighting Spirit consumed (5,000 to 15,000, a linear rise is assumed, NV-79) and Fighting Spirit full at 100 is assumed",
+    "S1 and S3 Soulburn (10 Souls): more damage (Souls are not simulated)",
+]
+
+# S1 Sundering Slash: attacks the enemy (injuries up to 10%), "before granting a barrier (proportional to the caster's max
+# Health) to the caster for 1 turn" (Fribbels: 12% of max Health).
+[[effect]]
+slot = 1
+kind = "barrier"
+scaling = [0.12, 0.0, 0.0]
+receivers = "self"
+turns = 1
+note = "S1: a barrier of 12% of her max Health for 1 turn"
+
+# S2 Wandering Eidolon (passive): "At the start of battle and at the end of the turn, grants counterattack for 1 turn": she
+# counterattacks all the time (the buff is kept through the enemies' turns). "At the end of an enemy's turn, gains 10
+# Fighting Spirit, and when Fighting Spirit is full, dispels all debuffs from the caster before increasing Combat
+# Readiness by 70%" (+5% x 4 +10%: 100% at +5).
+[passive]
+fs_full = 100
+fs_enemy_turn = 10
+ready_reduction = 0.3
+
+[[effect]]
+slot = 2
+when = "start"
+kind = "counter"
+turns = 2
+note = "S2: counterattack at the start of the battle"
+
+[[effect]]
+slot = 2
+when = "turn"
+kind = "counter"
+turns = 2
+note = "S2: counterattack for the enemies' turns (the game: granted at the end of her turn)"
+
+[[effect]]
+slot = 2
+when = "fs_full"
+kind = "cleanse"
+receivers = "self"
+note = "S2: Fighting Spirit full: dispels all her debuffs"
+
+[[effect]]
+slot = 2
+when = "fs_full"
+kind = "cr"
+value = 1.0
+receivers = "self"
+note = "S2: ... and Combat Readiness +100% (70% at +0)"
+
+# S3 Sword of Requiem (5 turns at +0, 4 at +3): attacks all enemies, "before consuming all Fighting Spirit. Inflicts 5,000
+# additional damage regardless of whether the attack hits, and additional damage increases proportional to the amount of
+# consumed Fighting Spirit, up to 15,000. If this skill is not on cooldown, when attacked, grants 30% damage reduction."
+[[effect]]
+slot = 3
+kind = "fs_damage"
+value = 5000
+count = 10000
+note = "S3: 5,000 additional damage to all enemies, up to 15,000 with the Fighting Spirit consumed"

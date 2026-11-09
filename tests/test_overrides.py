@@ -1137,3 +1137,102 @@ def test_cecilia_yulha_coli_and_flan_kits_carry_the_popup_numbers() -> None:
     assert [(e.kind, e.value) for e in flan.ally_attack_effects] == [("self_dual", 0.0), ("cr", 0.35)]
     assert (flan.on_use[1][0].kind, flan.on_use[1][0].chance) == ("stun", 0.4)
     assert [(e.kind, e.value, e.receivers) for e in flan.on_use[3]] == [("def", -0.7, ""), ("cr", 0.2, "all")]
+
+
+def test_cooldown_cuts_fighting_spirit_and_ready_reduction_work_in_battle() -> None:
+    """Kayron, Krau, Bellona and Diene (SPEC D113)."""
+    import random
+
+    from e7ac.predict.battle import Combatant, _after_hit, _fs_add, _State, _strike, _use, simulate
+    from e7ac.predict.damage import SkillPower
+    from tests.test_effects import unit
+
+    rng = random.Random(1)
+    team = [
+        unit("k", "you", Kit(hit_cd_cut=1, area_hit_cd_cut=1, area_hit_effects=[])),
+        unit("a", "you"),
+        unit("e", "them"),
+    ]
+    hp, cr = [1e4, 1e4, 1e4], [0.0, 0.0, 0.0]
+    state = [_State(), _State(), _State()]
+    _after_hit(0, 2, 100.0, False, team, hp, cr, state, {}, rng)
+    assert state[0].cd_cut == 1  # attacked: cooldowns -1
+    _after_hit(0, 2, 100.0, False, team, hp, cr, state, {}, rng, area=True)
+    assert state[0].cd_cut == 3  # and 1 more after an attack on all allies
+    state = [_State(), _State(), _State()]
+    _use(Effect("cd_cut", False, 1.0, 0, 1.0), 0, [], team, hp, cr, state, rng)
+    assert state[0].cd_cut == 1
+
+    # Fighting Spirit: at full it is consumed and its effects happen at once
+    fs_team = [
+        unit("b", "you", Kit(fs_full=100, fs_effects=[Effect("cr", False, 0.3, 0, 1.0, receivers="self")])),
+        unit("e", "them"),
+    ]
+    state, cr = [_State(), _State()], [0.0, 0.0]
+    _fs_add(0, 60, fs_team, [1e4, 1e4], cr, state, {}, rng)
+    assert state[0].fs == 60 and cr[0] == 0.0
+    _fs_add(0, 50, fs_team, [1e4, 1e4], cr, state, {}, rng)
+    assert state[0].fs == 10 and cr[0] == pytest.approx(0.3)
+    _fs_add(1, 100, fs_team, [1e4, 1e4], cr, state, {}, rng)  # no Fighting Spirit kit: nothing
+    assert state[1].fs == 0
+
+    # additional damage that grows with the Spirit held, consuming it
+    state, hp = [_State(fs=50), _State()], [1e4, 1e4]
+    solo = [unit("k", "you", Kit(fs_full=100)), unit("e", "them")]
+    _use(Effect("fs_damage", False, 5000.0, 2, 1.0, count=10000), 0, [], solo, hp, [0.0, 0.0], state, rng)
+    assert hp[1] == pytest.approx(1e4 - 10000) and state[0].fs == 0  # 5,000 + half of 10,000
+
+    # damage reduction while the S3 is off cooldown (and a sealed hero loses the passive, not this skill's own)
+    guard = [unit("k", "you", Kit(ready_reduction=0.3)), unit("e", "them")]
+    hp, state = [1e4, 1e4], [_State(s3_ready=True), _State()]
+    _strike(guard, hp, [0.0, 0.0], state, 0, 1000.0, rng, by=1)
+    assert hp[0] == pytest.approx(9300)
+    state[0].s3_ready = False
+    _strike(guard, hp, [0.0, 0.0], state, 0, 1000.0, rng, by=1)
+    assert hp[0] == pytest.approx(8300)
+
+    skills = {1: SkillPower(1.0, 1.0, 0.0), 3: SkillPower(2.0, 1.0, 0.0)}
+
+    def foe_damage(reduction: float) -> float:  # an S3 that is never used keeps the reduction on all battle long
+        kit = Kit(ready_reduction=reduction)
+        hero = Combatant("k", "you", unit("x", "you").stats, 100, skills, {3: 9}, kit)
+        return simulate([hero, unit("e", "them", hp=10**6)], runs=50).heroes[1].damage
+
+    assert foe_damage(0.3) < foe_damage(0.0)
+
+
+def test_kayron_krau_bellona_and_diene_kits_carry_the_popup_numbers() -> None:
+    kits = load_overrides()
+    kayron, cooldowns = apply_override(Kit(), {3: 5}, kits["c2023"])
+    assert (
+        cooldowns == {3: 4} and kayron.fs_full == 100 and kayron.fs_enemy_turn == 10 and kayron.ready_reduction == 0.3
+    )
+    assert [(e.kind, e.value) for e in kayron.fs_effects] == [("cleanse", 0.0), ("cr", 1.0)]
+    assert [(e.kind, e.turns) for e in kayron.at_start] == [("counter", 2)] and kayron.on_turn[0].kind == "counter"
+    assert (kayron.on_use[1][0].kind, kayron.on_use[1][0].scaling) == ("barrier", (0.12, 0.0, 0.0))
+    assert (kayron.on_use[3][0].kind, kayron.on_use[3][0].value, kayron.on_use[3][0].count) == (
+        "fs_damage",
+        5000,
+        10000,
+    )
+    krau, cooldowns = apply_override(Kit(), {2: 0, 3: 9}, kits["c2070"])
+    assert cooldowns == {2: 0, 3: 8} and krau.hit_cd_cut == 1 and krau.area_hit_cd_cut == 1
+    assert [(e.kind, e.scaling, e.receivers, e.turns) for e in krau.area_hit_effects] == [
+        ("barrier", (0.14, 0.0, 0.0), "all", 2)
+    ]
+    assert [(e.kind, e.value) for e in krau.on_use[3]] == [("immunity", 0.0), ("cd_cut", 1.0)]
+    assert (krau.on_use[1][0].kind, krau.on_use[1][0].value) == ("spd", 0.3)
+    bellona, cooldowns = apply_override(Kit(), {3: 3}, kits["c2071"])
+    assert cooldowns == {2: 0, 3: 3} and bellona.always_crit == (1, 2, 3)
+    assert bellona.fs_gain == {1: 20, 3: 20} and bellona.fs_ally_hit == 20
+    assert [(e.kind, e.value) for e in bellona.fs_effects] == [("extra_attack", 2.0), ("cr", 0.3)]
+    assert [(e.kind, e.value, e.turns) for e in bellona.before_use[3]] == [("atk", 0.3, 3), ("def", 0.3, 3)]
+    diene, cooldowns = apply_override(Kit(), {2: 4, 3: 5}, kits["c2076"])
+    assert cooldowns == {2: 0, 3: 4} and diene.always_crit == (1, 3)
+    assert [(e.kind, e.value, e.turns) for e in diene.at_start] == [("immortal", 0.0, 1), ("res", 2.0, 1)]
+    assert (diene.on_use[1][0].kind, diene.on_use[1][0].receivers, diene.on_use[1][0].condition) == (
+        "dual_attack",
+        "highest_atk",
+        "immortal",
+    )
+    assert [(e.kind, e.turns) for e in diene.before_use[3]] == [("seal", 2)] and diene.on_use[3][0].value == -0.3

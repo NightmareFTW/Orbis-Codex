@@ -1,0 +1,65 @@
+# Lone Crescent Bellona
+hero = "c2071"
+source = "in-game skill popups read by the Skill reader (the user's skills folder, 2026-11-09, the Journal's Preview Skills): S1, S2 and S3 at +0 with their enhancement steps and effect panels; multipliers from Fribbels' skill data (community; its \"S2\" entry is All Eyes on Me)"
+status = "verified"
+replace = [1, 2, 3]
+handles = ["Vigor", "Immunity", "Injury"]
+cooldowns = { 2 = 0, 3 = 3 }  # S3 "3 turns" on the popup (no cooldown step)
+unmodelled = [
+    "S1 absorbs some of the damage dealt as Health (life steal: no number)",
+    "Injury on S1 (up to 10%), S3-less All Eyes on Me (up to 15%): the formula is not in the text (NV-68)",
+    "S2: Evasion +15% for every surviving ally: Evasion is not simulated",
+    "All Eyes on Me attacks all enemies, Fribbels' data for it hits one (so it is understated, NV-79)",
+    "S1 and S3 Soulburn (10 Souls): more damage and injuries up to 20% (Souls are not simulated)",
+]
+
+# S1 Delicate Crescent: attacks the enemy (Fighting Spirit +20); a successful attack is always critical.
+# S2 Waxing Crescent (passive): "When an ally is attacked, gains 20 Fighting Spirit, and when Fighting Spirit is full,
+# activates All Eyes on Me": consumes 100 Fighting Spirit, attacks all enemies and increases Combat Readiness by 30%.
+# S3 Quixotic Crescent (3 turns): "After granting vigor to the caster for 3 turns, attacks the enemy ... and grants immunity
+# to the caster for 2 turns" (Fighting Spirit +20). Vigor: Attack and Defense +30%.
+[passive]
+always_crit = [1, 2, 3]
+fs_full = 100
+fs_gain = { 1 = 20, 3 = 20 }
+fs_ally_hit = 20
+
+[[effect]]
+slot = 2
+when = "fs_full"
+kind = "extra_attack"
+value = 2
+note = "S2: All Eyes on Me: an attack (Fribbels' S2 data)"
+
+[[effect]]
+slot = 2
+when = "fs_full"
+kind = "cr"
+value = 0.3
+receivers = "self"
+note = "All Eyes on Me: Combat Readiness +30%"
+
+[[effect]]
+slot = 3
+when = "before"
+kind = "atk"
+value = 0.3
+turns = 3
+receivers = "self"
+note = "S3: vigor (Attack +30%) for 3 turns before the attack"
+
+[[effect]]
+slot = 3
+when = "before"
+kind = "def"
+value = 0.3
+turns = 3
+receivers = "self"
+note = "S3: vigor (Defense +30%) for 3 turns before the attack"
+
+[[effect]]
+slot = 3
+kind = "immunity"
+turns = 2
+receivers = "self"
+note = "S3: immunity for 2 turns"

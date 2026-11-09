@@ -217,6 +217,21 @@ class Kit:
     focus_start: int = 0
     focus_gain: dict[int, int] = field(default_factory=dict)
     """Focus held at the start of the battle and gained by using the skill of each slot."""
+    hit_cd_cut: int = 0
+    """Turns every skill cooldown of the hero goes down each time it is attacked (Last Rider Krau's Code Number 00)."""
+    area_hit_cd_cut: int = 0
+    area_hit_effects: list[Effect] = field(default_factory=list)
+    """After an attack that targets all allies: an extra cooldown cut and these effects (Krau: a barrier for all)."""
+    fs_full: int = 0
+    """Fighting Spirit that triggers `fs_effects` (and is consumed); 0 = none. Gained per skill used (`fs_gain`), per
+    attack an ally suffers (`fs_ally_hit`) and at the end of each enemy's turn (`fs_enemy_turn`): Twisted Eidolon
+    Kayron, Lone Crescent Bellona."""
+    fs_gain: dict[int, int] = field(default_factory=dict)
+    fs_ally_hit: int = 0
+    fs_enemy_turn: int = 0
+    fs_effects: list[Effect] = field(default_factory=list)
+    ready_reduction: float = 0.0
+    """Damage reduction against attacks while the hero's S3 is not on cooldown (Kayron's Sword of Requiem: 30%)."""
     unmodelled: list[str] = field(default_factory=list)
     unread: list[int] = field(default_factory=list)
     """Skill slots whose text describes effects (inflicts, heals, dispels, ...) but of which none was read: epic7db
@@ -255,6 +270,11 @@ class Kit:
             enemy_support_effects=[],
             ally_turn_effects=[],
             ally_attack_effects=[],
+            hit_cd_cut=0,
+            area_hit_cd_cut=0,
+            area_hit_effects=[],
+            fs_full=0,
+            fs_effects=[],
         )
 
 

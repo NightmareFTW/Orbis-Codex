@@ -50,6 +50,13 @@ One file per hero, named by its code (`c2049.toml`); every number carries where 
     ally_attack_focus = true      # ... each time consuming (and needing) 1 Focus
     focus_start = 3               # Focus at the start of the battle
     focus_gain = { 1 = 1 }        # Focus gained by using the skill of a slot
+    hit_cd_cut = 1                # skill cooldowns go down this many turns each time the hero is attacked
+    area_hit_cd_cut = 1           # ... and this many more after an attack that targets all allies
+    fs_full = 100                 # Fighting Spirit that triggers `when = "fs_full"` effects (and is consumed)
+    fs_gain = { 1 = 20 }          # Fighting Spirit gained by using the skill of a slot
+    fs_ally_hit = 20              # ... by every attack an ally suffers
+    fs_enemy_turn = 10            # ... at the end of every enemy's turn
+    ready_reduction = 0.3         # damage reduction against attacks while the S3 is off cooldown
 
     [[effect]]
     slot = 3                      # 1-3
@@ -106,7 +113,10 @@ attack on the enemy it hit (`swift`, `self_dual`, `extra_attack`, any debuff on 
 `focus_*`),
 kinds skill_nullifier (the next damage from a skill is nullified), transfer (the caster's debuffs go to the targets),
 rescue (School Nurse Yulha's S3), overload (Attack and Speed +50%, then Energy Depletion), detonate_dots (every bleed,
-burn and poison at once), conditions "overload" / "no_overload", passive `always_crit`;
+burn and poison at once), conditions "overload" / "no_overload", passive `always_crit`; SPEC D113: `when = "area_hit"`
+effects follow an attack that targeted all enemies (passives `hit_cd_cut`, `area_hit_cd_cut`), the generic Fighting
+Spirit (`fs_*` passives, `when = "fs_full"` effects, kind `fs_damage`: `value` + `count` x the share of Spirit held),
+kind cd_cut (the caster's cooldowns go down `value` turns), condition "immortal", passive `ready_reduction`;
 `when = "before"` effects happen before the attack of their slot, on the targets it has chosen; conditions "crit",
 "debuffed", "half" (a target with half its Health or less) and "proc" join "kill" and "stun"; "proc_kill" (SPEC D109)
 follows an `extra_attack` that defeated an enemy and "cd3" holds while the hero's S3 is on cooldown.
@@ -191,6 +201,8 @@ KINDS: Final = frozenset(
         "self_dual",
         "overload",
         "detonate_dots",
+        "cd_cut",
+        "fs_damage",
     }
 )
 _DEBUFFS: Final = frozenset(
@@ -235,10 +247,12 @@ WHEN: Final = frozenset(
         "enemy_support",
         "ally_turn",
         "ally_attack",
+        "area_hit",
+        "fs_full",
     }
 )
 CONDITIONS: Final = frozenset(
-    {"", "kill", "stun", "crit", "debuffed", "half", "proc", "proc_kill", "cd3", "overload", "no_overload"}
+    {"", "kill", "stun", "crit", "debuffed", "half", "proc", "proc_kill", "cd3", "overload", "no_overload", "immortal"}
 )
 PASSIVES: Final = frozenset(
     {
@@ -284,6 +298,13 @@ PASSIVES: Final = frozenset(
         "ally_attack_focus",
         "focus_start",
         "focus_gain",
+        "hit_cd_cut",
+        "area_hit_cd_cut",
+        "fs_full",
+        "fs_gain",
+        "fs_ally_hit",
+        "fs_enemy_turn",
+        "ready_reduction",
     }
 )
 
@@ -392,6 +413,8 @@ def apply_override(kit: Kit, cooldowns: Mapping[int, int], override: KitOverride
         enemy_support_effects=[],
         ally_turn_effects=[],
         ally_attack_effects=[],
+        area_hit_effects=[],
+        fs_effects=[],
     )
     revive_effects: list[Effect] = []
     for placed in override.effects:
@@ -421,6 +444,10 @@ def apply_override(kit: Kit, cooldowns: Mapping[int, int], override: KitOverride
             out.ally_turn_effects.append(placed.effect)
         elif placed.when == "ally_attack":
             out.ally_attack_effects.append(placed.effect)
+        elif placed.when == "area_hit":
+            out.area_hit_effects.append(placed.effect)
+        elif placed.when == "fs_full":
+            out.fs_effects.append(placed.effect)
         elif placed.effect.kind in ("heal", "resurrect"):  # revive: `value` = Health fraction regained
             out.revive = placed.effect.value
         else:
@@ -470,6 +497,13 @@ def apply_override(kit: Kit, cooldowns: Mapping[int, int], override: KitOverride
     out.ally_attack_focus = bool(passive.get("ally_attack_focus", out.ally_attack_focus))
     out.focus_start = int(passive.get("focus_start", out.focus_start))
     out.focus_gain = {int(k): int(v) for k, v in dict(passive.get("focus_gain", out.focus_gain)).items()}
+    out.hit_cd_cut = int(passive.get("hit_cd_cut", out.hit_cd_cut))
+    out.area_hit_cd_cut = int(passive.get("area_hit_cd_cut", out.area_hit_cd_cut))
+    out.fs_full = int(passive.get("fs_full", out.fs_full))
+    out.fs_gain = {int(k): int(v) for k, v in dict(passive.get("fs_gain", out.fs_gain)).items()}
+    out.fs_ally_hit = int(passive.get("fs_ally_hit", out.fs_ally_hit))
+    out.fs_enemy_turn = int(passive.get("fs_enemy_turn", out.fs_enemy_turn))
+    out.ready_reduction = float(passive.get("ready_reduction", out.ready_reduction))
     return out, {**cooldowns, **override.cooldowns}
 
 

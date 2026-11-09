@@ -184,6 +184,7 @@ def _play(
             _use(effect, i, [], units, hp, cr, state, rng)
         for slot in unit.kit.start_wait:  # a skill that begins the battle with its full cooldown (Notos S3)
             waiting[i][slot] = unit.cooldowns.get(slot, 0)
+            state[i].s3_ready = state[i].s3_ready and slot != 3
         state[i].focus = unit.kit.focus_start
         if unit.kit.eff_speed:  # Effectiveness from Speed ("30% of Speed", Rhianna and Luciella)
             state[i].eff_extra = unit.kit.eff_speed * speeds[i] / 100  # stays all battle: no dispel takes it
@@ -259,9 +260,11 @@ def _play(
         if slot != 1 and unit.cooldowns.get(slot):
             # counts down at the start of each own turn (MECH-CD-01, MECH-CD-02)
             waiting[actor][slot] = max(unit.cooldowns[slot], MIN_COOLDOWN)
+        me.s3_ready = waiting[actor].get(3, 0) <= 0
         acted[actor] = True
         me.soul += kit.soul_gain.get(slot, 0)
         me.focus += kit.focus_gain.get(slot, 0)
+        _fs_add(actor, kit.fs_gain.get(slot, 0), units, hp, cr, state, hits, rng)
         enemies = [j for j in alive if units[j].side != unit.side]
         skill = unit.skills.get(slot)
         if slot == 1 and kit.variant_slot in unit.skills and me.buffed:  # Nimble Sword: S1 with a buff
@@ -304,7 +307,10 @@ def _play(
                 if lethal:
                     killed = killed or hp[j] <= 0
                 else:
-                    _after_hit(j, actor, lost, slot not in unit.kit.uncounterable, units, hp, cr, state, hits, rng)
+                    _after_hit(
+                        j, actor, lost, slot not in unit.kit.uncounterable, units, hp, cr, state, hits, rng,
+                        area=skill.targets > 1,
+                    )  # fmt: skip
                 if me.timers.get("abundance", 0) > 0 and hp[j] > 0:  # Abundance, MECH-ABUND-01
                     _strike(units, hp, cr, state, j, me.abundance, rng, actor)
                     killed = killed or hp[j] <= 0
@@ -328,6 +334,8 @@ def _play(
             if effect.condition == "proc_kill" and not proc_kill:
                 continue
             if effect.condition == "cd3" and waiting[actor].get(3, 0) <= 0:  # while its S3 is on cooldown
+                continue
+            if effect.condition == "immortal" and me.timers.get("immortal", 0) <= 0:
                 continue
             if effect.condition in ("overload", "no_overload") and (me.timers.get("overload", 0) > 0) != (
                 effect.condition == "overload"
@@ -375,6 +383,9 @@ def _play(
             me.beguiled = 0.0
         me.tick()
         hp[actor] = min(hp[actor], _max_hp(units, state, actor))  # an ended superhumanization takes its Health along
+        for m in range(n):  # the end of an enemy's turn: Fighting Spirit for the heroes that gather it so (Kayron)
+            if units[m].side != unit.side and hp[m] > 0:
+                _fs_add(m, _kit(units, state, m).fs_enemy_turn, units, hp, cr, state, hits, rng)
         standing = {units[i].side for i in range(n) if hp[i] > 0}
         if len(standing) == 1:
             return standing.pop(), actions
@@ -460,6 +471,10 @@ class _State:
     """Focus held (`Kit.focus_start`, `Kit.focus_gain`); each ally attack that Flan follows costs 1."""
     attack_wait: int = 0
     """Own turns until `Kit.ally_attack_effects` can trigger again."""
+    fs: int = 0
+    """Fighting Spirit gathered (`Kit.fs_*`)."""
+    s3_ready: bool = True
+    """Whether the S3 is off cooldown (`Kit.ready_reduction`)."""
 
     @property
     def buffed(self) -> bool:
@@ -741,6 +756,8 @@ def _strike(
     if by >= 0 and shield and state[j].soul >= shield and damage > 0:  # Defensive Magic: Soul nullifies the attack
         state[j].soul -= shield
         damage = 0.0
+    if by >= 0 and state[j].s3_ready and (cut := _kit(units, state, j).ready_reduction):  # Kayron's S3 is ready
+        damage *= 1 - cut
     if by >= 0 and damage > 0 and state[j].timers.pop("skill_nullifier", 0) > 0:  # damage from a skill nullified, once
         damage = 0.0
     if by >= 0 and state[j].timers.get("deify", 0) > 0:  # an attack on a hero holding Deify: 50% less (MECH-DEIFY-01)
@@ -900,6 +917,16 @@ def _use(
             picked = rng.choice(effect.options)
             _use(replace(picked, chance=picked.chance * effect.chance), actor, [j], units, hp, cr, state, rng)
         return
+    if effect.kind == "cd_cut":  # skill cooldowns of the caster go down (Krau's Mobile Weapon Ziegfried)
+        state[actor].cd_cut += int(effect.value)
+        return
+    if effect.kind == "fs_damage":  # additional damage that grows with the Fighting Spirit consumed (Kayron's S3)
+        full = _kit(units, state, actor).fs_full or 100
+        damage = effect.value + effect.count * min(state[actor].fs, full) / full
+        state[actor].fs = 0
+        for j in enemies:
+            _strike(units, hp, cr, state, j, damage, rng, actor)
+        return
     if effect.kind == "sacrifice":  # health paid by the caster, never to death
         hp[actor] = max(1.0, hp[actor] * (1 - effect.value))
         return
@@ -1044,10 +1071,19 @@ def _after_hit(
     state: list[_State],
     hits: Mapping[tuple[int, int, int], float],
     rng: random.Random,
+    area: bool = False,
 ) -> None:
     """What a hero does after a hit it survives (SPEC D76): reflect part of the Health lost, trigger its low-Health
-    effects, counterattack."""
+    effects, counterattack. `area`: the attack targeted all enemies."""
     kit = _kit(units, state, j)
+    if kit.hit_cd_cut or (area and kit.area_hit_cd_cut):  # Krau: cooldowns go down when she is attacked
+        state[j].cd_cut += kit.hit_cd_cut + (kit.area_hit_cd_cut if area else 0)
+    if area:
+        for effect in kit.area_hit_effects:
+            _use(effect, j, [], units, hp, cr, state, rng)
+    for m in _allies(units, hp, j):  # an ally was attacked: Fighting Spirit (Bellona)
+        if m != j:
+            _fs_add(m, _kit(units, state, m).fs_ally_hit, units, hp, cr, state, hits, rng)
     if kit.hit_cr:  # Combat Readiness gained after being attacked (Boss Arunka S2)
         _raise_cr(units, hp, cr, state, j, kit.hit_cr)
     if kit.hit_team_cr:  # every ally gains Combat Readiness after this hero is attacked (Frieren S2)
@@ -1100,6 +1136,34 @@ def _after_hit(
                     _use(effect, m, [], units, hp, cr, state, rng)
     if hp[attacker] > 0 and _counters(units, hp, j, state, rng):
         _counterattack(j, attacker, units, hp, cr, state, hits, rng)
+
+
+def _fs_add(
+    m: int,
+    amount: int,
+    units: Sequence[Combatant],
+    hp: list[float],
+    cr: list[float],
+    state: list[_State],
+    hits: Mapping[tuple[int, int, int], float],
+    rng: random.Random,
+) -> None:
+    """Fighting Spirit for `m`; at `Kit.fs_full` it is consumed and `Kit.fs_effects` happen at once (Kayron: dispel
+    her debuffs and Combat Readiness; Bellona's All Eyes on Me: an attack, Combat Readiness)."""
+    kit = _kit(units, state, m)
+    if not kit.fs_full or amount <= 0 or hp[m] <= 0:
+        return
+    state[m].fs += amount
+    if state[m].fs < kit.fs_full:
+        return
+    state[m].fs -= kit.fs_full
+    foes = [j for j in range(len(units)) if units[j].side != units[m].side and hp[j] > 0]
+    for effect in kit.fs_effects:
+        if effect.kind == "extra_attack":
+            if foes:
+                _extra_attack(m, foes, units, hp, cr, state, hits, rng, int(effect.value) or 1)
+        else:
+            _use(effect, m, [], units, hp, cr, state, rng)
 
 
 def _follow(

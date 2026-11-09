@@ -1,0 +1,52 @@
+# Last Rider Krau
+hero = "c2070"
+source = "in-game skill popups read by the Skill reader (the user's skills folder, 2026-11-09, the Journal's Preview Skills): S1, S2 and S3 at +0 with their enhancement steps and effect panels; multipliers, target counts, penetration and the 14% max Health barrier from Fribbels' skill data (community)"
+status = "verified"
+replace = [1, 2, 3]
+handles = ["Barrier", "Penetrate", "Immunity", "Increase Speed"]
+cooldowns = { 2 = 0, 3 = 8 }  # S3 "9 turns" on the popup read at +0; its +3 step is -1 turn
+unmodelled = [
+    "S3: damage rises every time it is used, up to 3 stacks (no number in the text)",
+    "S2: the barrier's own limit of one per turn (\"Barrier 1 turn\" on the popup) and the +50% of the barrier strength steps (NV-80)",
+    "S3 Soulburn (10 Souls): the cooldown goes down 2 turns instead of 1",
+]
+
+# S1 Punishment: attacks the enemy "before increasing Speed of the caster for 1 turn" (+30%).
+[[effect]]
+slot = 1
+kind = "spd"
+value = 0.3
+turns = 1
+receivers = "self"
+note = "S1: Speed +30% for 1 turn"
+
+# S2 Code Number 00 (passive): "After being attacked, decreases skill cooldowns by 1 turn. After suffering an attack that
+# targets all allies, decreases skill cooldowns by an additional 1 turn, and grants a barrier (proportional to the caster's
+# max Health) to all allies for 2 turns."
+[passive]
+hit_cd_cut = 1
+area_hit_cd_cut = 1
+
+[[effect]]
+slot = 2
+when = "area_hit"
+kind = "barrier"
+scaling = [0.14, 0.0, 0.0]
+receivers = "all"
+turns = 2
+note = "S2: after an attack on all allies a barrier of 14% of her max Health to all allies for 2 turns"
+
+# S3 Mobile Weapon Ziegfried (9 turns at +0, 8 at +3): attacks all enemies (penetrates Defense, no critical hit), "before
+# granting immunity to all allies for 2 turns and decreasing skill cooldowns by 1 turn."
+[[effect]]
+slot = 3
+kind = "immunity"
+receivers = "all"
+turns = 2
+note = "S3: immunity to all allies for 2 turns"
+
+[[effect]]
+slot = 3
+kind = "cd_cut"
+value = 1
+note = "S3: her skill cooldowns go down 1 turn"

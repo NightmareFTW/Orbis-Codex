@@ -63,6 +63,10 @@ def show(
             + "): "
             + ", ".join(_describe(e) for e in kit.ally_attack_effects)
         )
+    if kit.area_hit_effects:
+        typer.echo("  after an attack on all allies: " + ", ".join(_describe(e) for e in kit.area_hit_effects))
+    if kit.fs_effects:
+        typer.echo(f"  at {kit.fs_full} Fighting Spirit: " + ", ".join(_describe(e) for e in kit.fs_effects))
     if kit.ally_turn_effects:
         typer.echo("  at the start of an ally's turn: " + ", ".join(_describe(e) for e in kit.ally_turn_effects))
     if kit.enemy_support_effects:
@@ -273,6 +277,22 @@ def _passives(kit: Kit) -> list[str]:
         found.append(f"Penetration Resistance {kit.pen_resist:.0%} for every ally")
     if kit.ally_hit_cr:
         found.append(f"+{kit.ally_hit_cr:.0%} Combat Readiness after every attack an ally suffers")
+    if kit.hit_cd_cut or kit.area_hit_cd_cut:
+        found.append(
+            f"every cooldown -{kit.hit_cd_cut} turn when attacked, -{kit.area_hit_cd_cut} more after an attack on "
+            "all allies"
+        )
+    if kit.fs_full:
+        found.append(
+            f"Fighting Spirit {kit.fs_full}: "
+            + ", ".join(
+                [f"S{s} +{n}" for s, n in sorted(kit.fs_gain.items())]
+                + ([f"+{kit.fs_ally_hit} per attack on an ally"] if kit.fs_ally_hit else [])
+                + ([f"+{kit.fs_enemy_turn} per enemy turn"] if kit.fs_enemy_turn else [])
+            )
+        )
+    if kit.ready_reduction:
+        found.append(f"{kit.ready_reduction:.0%} damage reduction while S3 is off cooldown")
     if kit.always_crit:
         found.append("a successful attack of S" + "/S".join(str(s) for s in kit.always_crit) + " is always critical")
     if kit.focus_start or kit.focus_gain:
@@ -298,6 +318,10 @@ def _describe(effect: Effect) -> str:
     if effect.kind == "random":
         where = f" {effect.receivers}" if effect.receivers else ""
         return "one of " + " / ".join(_describe(option) for option in effect.options) + where
+    if effect.kind == "fs_damage":
+        return f"{effect.value:,.0f} additional damage to all enemies (up to {effect.value + effect.count:,.0f})"
+    if effect.kind == "cd_cut":
+        return f"own cooldowns -{effect.value:.0f} turn"
     if effect.kind == "reset_cd":
         return f"reset the cooldown of S{effect.value:.0f}" + (f" if {effect.condition}" if effect.condition else "")
     form = f" [form {effect.form}]" if effect.form >= 0 else ""
