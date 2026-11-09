@@ -884,3 +884,113 @@ def test_a_random_effect_must_list_its_options() -> None:
     text = GOOD.replace('kind = "resurrect"', 'kind = "random"')
     with pytest.raises(KitError, match="options"):
         parse_override(text, "c2049.toml")
+
+
+def test_soul_shield_team_combat_readiness_and_reactions_work_in_battle() -> None:
+    """Frieren, Celine and Kizuna AI (SPEC D110): Soul nullifies an attack, a hit on the hero gives its allies Combat
+    Readiness, a non-attack skill of an enemy sets off Blink, and a cleanse can pick one debuffed ally."""
+    import random
+
+    from e7ac.domain.codes import Stat
+    from e7ac.predict.battle import Combatant, _after_hit, _react, _State, _strike, _use, simulate
+    from tests.test_effects import S1, unit
+
+    rng = random.Random(1)
+    team = [unit("f", "you", Kit(soul_shield=4, hit_team_cr=0.13)), unit("a", "you"), unit("e", "them")]
+    hp, cr = [1e4, 1e4, 1e4], [0.0, 0.0, 0.0]
+    state = [_State(soul=3), _State(), _State()]
+    _strike(team, hp, cr, state, 0, 1000.0, rng, by=2)
+    assert hp[0] == 9000 and state[0].soul == 3  # not enough Soul
+    state[0].soul = 4
+    _strike(team, hp, cr, state, 0, 1000.0, rng, by=2)
+    assert hp[0] == 9000 and state[0].soul == 0  # nullified, 4 Soul spent
+    state[0].soul = 4
+    _strike(team, hp, cr, state, 0, 1000.0, rng)  # damage that is no attack is not nullified
+    assert hp[0] == 8000
+    state[0].timers["seal"] = 2
+    _strike(team, hp, cr, state, 0, 1000.0, rng, by=2)
+    assert hp[0] == 7000  # sealed: Defensive Magic does not work
+
+    state = [_State(), _State(), _State()]
+    _after_hit(0, 2, 100.0, False, team, [1e4] * 3, cr, state, {}, rng)
+    assert cr[0] == pytest.approx(0.13) and cr[1] == pytest.approx(0.13) and cr[2] == 0.0
+
+    def foe_damage(shielded: bool) -> float:  # the Soul she gathers with S1 shields her from every second attack
+        kit = Kit(soul_shield=4, soul_gain={1: 2}) if shielded else Kit()
+        return simulate([unit("f", "you", kit, hp=10**6), unit("e", "them", hp=10**6)], runs=50).heroes[1].damage
+
+    assert foe_damage(True) < foe_damage(False) * 0.8
+
+    # Blink: after an enemy's non-attack skill she cleanses, attacks a random enemy and gains Combat Readiness
+    reaction = [
+        Effect("cleanse", False, 0.0, 0, 1.0, receivers="self"),
+        Effect("extra_attack", False, 2.0, 0, 1.0),
+        Effect("cr", False, 0.3, 0, 1.0),
+    ]
+    celine = Combatant(
+        "c", "you", unit("x", "you").stats, 200, {1: S1[1], 2: S1[1]}, {}, Kit(enemy_support_effects=reaction)
+    )
+    pair = [celine, unit("e", "them")]
+    hp, cr, state = [1e4, 1e4], [0.0, 0.0], [_State(dots=[(100.0, 2)]), _State()]
+    _react(0, pair, hp, cr, state, {(0, 1, 2): 500.0}, rng)
+    assert not state[0].dots and cr[0] == pytest.approx(0.3) and hp[1] == 9500
+
+    def dealt(reacts: bool) -> float:  # the foe spends turns on a skill with no attack, which sets Blink off
+        foe = unit("e", "them", Kit(on_use={3: [Effect("atk", False, 0.1, 1, 1.0)]}), hp=10**7)
+        foe = dataclasses.replace(foe, cooldowns={3: 2})
+        hero = dataclasses.replace(celine, kit=Kit(enemy_support_effects=reaction) if reacts else Kit())
+        return (
+            simulate([dataclasses.replace(hero, stats={**hero.stats, Stat.HP: 10**7}), foe], runs=50).heroes[0].damage
+        )
+
+    assert dealt(True) > dealt(False) * 1.05
+
+    # a cleanse that picks one debuffed ally takes one debuff from that ally only
+    allies = [unit("k", "you"), unit("a", "you"), unit("b", "you")]
+    state = [_State(), _State(dots=[(1.0, 2), (2.0, 2)]), _State(dots=[(1.0, 2)])]
+    _use(
+        Effect("cleanse", False, 0.0, 0, 1.0, count=1, receivers="debuffed"),
+        0,
+        [],
+        allies,
+        [1e4] * 3,
+        [0.0] * 3,
+        state,
+        rng,
+    )
+    assert len(state[1].dots) == 1 and len(state[2].dots) == 1
+
+
+def test_celine_kizuna_ai_and_frieren_kits_carry_the_popup_numbers() -> None:
+    kits = load_overrides()
+    celine, cooldowns = apply_override(Kit(), {3: 3}, kits["c1103"])
+    assert cooldowns == {3: 2}
+    assert [(e.kind, e.turns) for e in celine.on_use[1]] == [("stealth", 1)]
+    assert [(e.kind, e.turns) for e in celine.at_start] == [("stealth", 2)]
+    assert [(e.kind, e.value) for e in celine.enemy_support_effects] == [
+        ("cleanse", 0.0),
+        ("extra_attack", 2.0),
+        ("cr", 0.3),
+    ]
+    assert (celine.on_use[3][0].kind, celine.on_use[3][0].scaling, celine.on_use[3][0].turns) == (
+        "barrier",
+        (0.0, 0.5, 0.0),
+        2,
+    )
+    kizuna, cooldowns = apply_override(Kit(), {3: 4}, kits["c1107"])
+    assert (
+        cooldowns == {3: 4}
+        and kizuna.on_turn[0].scaling == (0.1, 0.0, 0.0)
+        and kizuna.on_turn[0].receivers == "lowest:1"
+    )
+    third = {e.kind: e for e in kizuna.on_use[3]}
+    assert (third["atk"].value, third["atk"].turns, third["atk"].receivers) == (0.5, 3, "all")
+    assert (third["barrier"].scaling, third["barrier"].turns) == ((0.14, 0.0, 0.0), 3)
+    assert (third["spd"].value, third["spd"].turns, third["spd"].receivers) == (0.3, 2, "self")
+    assert (kizuna.on_use[1][0].kind, kizuna.on_use[1][0].receivers) == ("cleanse", "debuffed")
+    frieren, cooldowns = apply_override(Kit(), {3: 4}, kits["c1172"])
+    assert cooldowns == {3: 3} and frieren.hit_team_cr == 0.13 and frieren.soul_shield == 4
+    assert frieren.soul_gain == {1: 2, 3: 3}
+    assert [(e.kind, e.turns) for e in frieren.on_use[1]] == [("immunity", 1)]
+    assert [(e.kind, e.value, e.turns) for e in frieren.before_use[3]] == [("atk", 0.5, 3)]
+    assert [e.kind for e in frieren.on_use[3]] == ["dispel", "cr"]

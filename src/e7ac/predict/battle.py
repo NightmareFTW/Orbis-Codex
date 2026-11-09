@@ -249,6 +249,7 @@ def _play(
             # counts down at the start of each own turn (MECH-CD-01, MECH-CD-02)
             waiting[actor][slot] = max(unit.cooldowns[slot], MIN_COOLDOWN)
         acted[actor] = True
+        me.soul += kit.soul_gain.get(slot, 0)
         enemies = [j for j in alive if units[j].side != unit.side]
         skill = unit.skills.get(slot)
         if slot == 1 and kit.variant_slot in unit.skills and me.buffed:  # Nimble Sword: S1 with a buff
@@ -333,6 +334,9 @@ def _play(
                 waiting[actor][int(effect.value)] = 0
                 continue
             _use(effect, actor, targets, units, hp, cr, state, rng)
+        if skill is None:  # a non-attack skill: the enemies that react to it (Celine's Blink)
+            for e in enemies:
+                _react(e, units, hp, cr, state, hits, rng)
         if frozen is not None:
             for i in range(n):
                 cr[i] = min(cr[i], frozen[i])
@@ -421,6 +425,8 @@ class _State:
     """Erosion: (share of the holder's lost Health per turn, turns left); it ticks at the start of the holder's turn."""
     collapse: float = 0.0
     """Collapse: share of max Health the holder cannot have while the "collapse" timer runs."""
+    soul: int = 0
+    """Soul gathered by using skills (`Kit.soul_gain`); `Kit.soul_shield` of it nullifies an attack."""
 
     @property
     def buffed(self) -> bool:
@@ -681,6 +687,10 @@ def _strike(
     """Direct damage to `j` (a hit, a counter, a reflect, fixed damage): the ally holding its side's offering takes its
     share instead (MECH-OFFER-01, `verified` in the in-game text), then barrier and Health, then the lethal rules.
     Returns the Health `j` itself lost and whether the damage was lethal to it (before immortality or a revive)."""
+    shield = _kit(units, state, j).soul_shield
+    if by >= 0 and shield and state[j].soul >= shield and damage > 0:  # Defensive Magic: Soul nullifies the attack
+        state[j].soul -= shield
+        damage = 0.0
     if by >= 0 and state[j].timers.get("deify", 0) > 0:  # an attack on a hero holding Deify: 50% less (MECH-DEIFY-01)
         damage *= 1 - DEIFY_REDUCTION
     cap = _kit(units, state, j).hit_cap
@@ -777,6 +787,8 @@ def _receivers(
         return [j for j in allies if j != actor]
     if effect.receivers == "not_offering":  # "all other allies" of the one granted offering (Abundance)
         return [j for j in allies if not state[j].offering]
+    if effect.receivers == "debuffed":  # one ally that holds a debuff (Kizuna AI's S1)
+        return [j for j in allies if state[j].debuffed][:1]
     if effect.receivers.startswith("lowest:"):
         count = int(effect.receivers.split(":")[1])
         return sorted(allies, key=lambda j: hp[j] / units[j].stats[Stat.HP])[:count]
@@ -941,6 +953,9 @@ def _after_hit(
     kit = _kit(units, state, j)
     if kit.hit_cr:  # Combat Readiness gained after being attacked (Boss Arunka S2)
         _raise_cr(units, hp, cr, state, j, kit.hit_cr)
+    if kit.hit_team_cr:  # every ally gains Combat Readiness after this hero is attacked (Frieren S2)
+        for m in _allies(units, hp, j):
+            _raise_cr(units, hp, cr, state, m, kit.hit_team_cr)
     if kit.spirit_full:  # Fighting Spirit: Help! Help! when full (Young Senya S2)
         state[j].spirit += kit.spirit_hit
         if state[j].spirit >= kit.spirit_full:
@@ -988,6 +1003,29 @@ def _after_hit(
                     _use(effect, m, [], units, hp, cr, state, rng)
     if hp[attacker] > 0 and _counters(units, hp, j, state, rng):
         _counterattack(j, attacker, units, hp, cr, state, hits, rng)
+
+
+def _react(
+    m: int,
+    units: Sequence[Combatant],
+    hp: list[float],
+    cr: list[float],
+    state: list[_State],
+    hits: Mapping[tuple[int, int, int], float],
+    rng: random.Random,
+) -> None:
+    """An enemy used a non-attack skill: `m` reacts with its `enemy_support_effects` (Celine's Intuition: dispels her
+    debuffs, Blink attacks a random enemy, Combat Readiness)."""
+    effects = _kit(units, state, m).enemy_support_effects
+    if hp[m] <= 0 or not effects or _cannot_act(state[m]):
+        return
+    foes = [j for j in range(len(units)) if units[j].side != units[m].side and hp[j] > 0]
+    for effect in effects:
+        if effect.kind == "extra_attack":
+            if foes:
+                _extra_attack(m, [rng.choice(foes)], units, hp, cr, state, hits, rng, int(effect.value) or 1)
+        else:
+            _use(effect, m, [], units, hp, cr, state, rng)
 
 
 def _foremost(units: Sequence[Combatant], hp: Sequence[float], i: int) -> int | None:

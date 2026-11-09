@@ -189,6 +189,16 @@ class Kit:
     (Empyrean Ilynav's Dragon's Pride, 30% at +0, 40% at +5; the way it reduces penetration is `assumed`, NV-67)."""
     ally_hit_cr: float = 0.0
     """Combat Readiness the hero gains after every attack an ally suffers (Dragon's Pride: 10%)."""
+    hit_team_cr: float = 0.0
+    """Combat Readiness every ally of the hero gains after the hero itself is attacked (Frieren's The Highest Form of
+    Magic: 10%, 13% at +3)."""
+    soul_gain: dict[int, int] = field(default_factory=dict)
+    """Soul gained by using the skill of each slot (the popup's "Soul N"; Frieren's S1 adds Vollzanbel's Soul)."""
+    soul_shield: int = 0
+    """Soul consumed to nullify the damage of an attack on the hero, when it holds that much (Frieren's Defensive Magic:
+    4); 0 = none."""
+    enemy_support_effects: list[Effect] = field(default_factory=list)
+    """Effects after an enemy uses a non-attack skill (Celine's Intuition: cleanse, Blink, Combat Readiness)."""
     unmodelled: list[str] = field(default_factory=list)
     unread: list[int] = field(default_factory=list)
     """Skill slots whose text describes effects (inflicts, heals, dispels, ...) but of which none was read: epic7db
@@ -222,6 +232,9 @@ class Kit:
             death_cd=0,
             pen_resist=0.0,
             ally_hit_cr=0.0,
+            hit_team_cr=0.0,
+            soul_shield=0,
+            enemy_support_effects=[],
         )
 
 

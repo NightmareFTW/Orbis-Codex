@@ -1,0 +1,48 @@
+# Frieren
+hero = "c1172"
+source = "in-game skill popups read by the Skill reader (the user's export, 2026-11-09, the Journal's Preview Skills): S1, S2 and S3 at +0, with their enhancement steps and effect panels; multipliers, target counts and penetration from Fribbels' skill data (community)"
+status = "verified"
+replace = [1, 2, 3]
+handles = ["Immunity", "Penetrate", "Defensive Magic", "Increase Attack", "Resource Increase"]
+cooldowns = { 3 = 3 }  # S3 "4 turns" on the popup read at +0; its +3 step is -1 turn
+unmodelled = [
+    "S1 Vollzanbel (the extra attack on all enemies, in proportion to the enemy's lost Health): Fribbels has no data for it, so her damage is understated (NV-74)",
+    "S2 Resource Increase (40% to all allies at the start): Fighting Spirit and Focus are not simulated",
+    "S1 Soulburn (10 Souls): more damage (Souls are not simulated)",
+    "Soul: she starts the battle with none, and each S1 gives 2 (1 and Vollzanbel's 1), each S3 3 (assumed, NV-74)",
+]
+
+# S1 Ordinary Offensive Magic: attacks the enemy and grants immunity to the caster for 1 turn.
+[[effect]]
+slot = 1
+kind = "immunity"
+turns = 1
+note = "S1: immunity for 1 turn"
+
+# S2 The Highest Form of Magic (passive): "when Soul is 4 or higher, grants Defensive Magic" (when attacked, consumes 4 Soul,
+# nullifying damage from skills). "After being attacked, increases Combat Readiness of all allies by 10%" (+1% x 3: 13%).
+[passive]
+hit_team_cr = 0.13
+soul_gain = { 1 = 2, 3 = 3 }
+soul_shield = 4
+
+# S3 Judradjim (4 turns at +0, 3 at +3): "After granting increased Attack to the caster for 3 turns, attacks all enemies with
+# lightning magic, dispelling all buffs. Increases Combat Readiness of the caster by 50%. Penetrates the target's Defense by 50%."
+[[effect]]
+slot = 3
+when = "before"
+kind = "atk"
+value = 0.5
+turns = 3
+note = "S3: increased Attack (50%) for 3 turns before the attack"
+
+[[effect]]
+slot = 3
+kind = "dispel"
+note = "S3: dispels all buffs from the enemies it attacked"
+
+[[effect]]
+slot = 3
+kind = "cr"
+value = 0.5
+note = "S3: Combat Readiness +50%"

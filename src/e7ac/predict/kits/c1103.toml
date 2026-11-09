@@ -1,0 +1,61 @@
+# Celine
+hero = "c1103"
+source = "in-game skill popups read by the Skill reader (the user's export, 2026-11-09, the Journal's Preview Skills): S1 and S3 at +0, S2 at +5, with their enhancement steps and effect panels; multipliers and the 50% Attack barrier from Fribbels' skill data (community; its \"S2\" entry is Blink)"
+status = "verified"
+replace = [1, 2, 3]
+handles = ["Stealth", "Increase Evasion", "Barrier", "Damage Sharing"]
+cooldowns = { 3 = 2 }  # S3 "3 turns" on the popup read at +0; its +3 step is -1 turn
+unmodelled = [
+    "S3 absorbs some of the damage dealt as Health (life steal: no number)",
+    "S3 Increase Evasion (50%): Evasion is not simulated",
+    "S3 Soulburn (10 Souls): more damage (Souls are not simulated)",
+    "Blink's \"unaffected by elemental disadvantage\" (elements are not simulated at all)",
+]
+
+# S1 Uppercut: attacks the enemy and grants stealth to the caster for 1 turn.
+[[effect]]
+slot = 1
+kind = "stealth"
+turns = 1
+note = "S1: stealth for 1 turn"
+
+# S2 Intuition (passive, read at +5): "At the start of the first battle, grants stealth for 2 turns. After an enemy uses a
+# non-attack skill, dispels all debuffs from the caster and activates Blink against a random enemy." Blink: attacks the
+# enemy and increases the caster's Combat Readiness by 30% (Fribbels' "S2" entry is its damage).
+[[effect]]
+slot = 2
+when = "start"
+kind = "stealth"
+turns = 2
+note = "S2: stealth for 2 turns at the start of the battle"
+
+[[effect]]
+slot = 2
+when = "enemy_support"
+kind = "cleanse"
+receivers = "self"
+note = "S2: after an enemy uses a non-attack skill: dispels all debuffs from the caster"
+
+[[effect]]
+slot = 2
+when = "enemy_support"
+kind = "extra_attack"
+value = 2
+note = "S2: ... and activates Blink against a random enemy"
+
+[[effect]]
+slot = 2
+when = "enemy_support"
+kind = "cr"
+value = 0.3
+note = "Blink: Combat Readiness +30%"
+
+# S3 Thunderclap (3 turns at +0, 2 at +3): attacks the enemy repeatedly, absorbs some of the damage dealt as Health,
+# grants increased Evasion and a barrier (proportional to Attack) to the caster for 2 turns.
+[[effect]]
+slot = 3
+kind = "barrier"
+scaling = [0.0, 0.5, 0.0]
+receivers = "self"
+turns = 2
+note = "S3: barrier of 50% of her Attack for 2 turns (Fribbels' S3 barrier)"

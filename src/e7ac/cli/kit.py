@@ -54,6 +54,10 @@ def show(
         typer.echo(f"  S{slot} ({label}): " + (", ".join(_describe(e) for e in effects) or "-"))
     for slot, effects in sorted(kit.before_use.items()):
         typer.echo(f"  before the S{slot} attack: " + ", ".join(_describe(e) for e in effects))
+    if kit.enemy_support_effects:
+        typer.echo(
+            "  after an enemy uses a non-attack skill: " + ", ".join(_describe(e) for e in kit.enemy_support_effects)
+        )
     for title, effects in (("battle start", kit.at_start), ("each own turn", kit.on_turn)):
         if effects:
             typer.echo(f"  {title}: " + ", ".join(_describe(e) for e in effects))
@@ -258,6 +262,13 @@ def _passives(kit: Kit) -> list[str]:
         found.append(f"Penetration Resistance {kit.pen_resist:.0%} for every ally")
     if kit.ally_hit_cr:
         found.append(f"+{kit.ally_hit_cr:.0%} Combat Readiness after every attack an ally suffers")
+    if kit.hit_team_cr:
+        found.append(f"every ally gains {kit.hit_team_cr:.0%} Combat Readiness after this hero is attacked")
+    if kit.soul_shield:
+        found.append(
+            f"{kit.soul_shield} Soul nullifies an attack; Soul gained per skill: "
+            + ", ".join(f"S{slot} +{n}" for slot, n in sorted(kit.soul_gain.items()))
+        )
     return found
 
 

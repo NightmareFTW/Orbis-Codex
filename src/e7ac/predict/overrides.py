@@ -40,6 +40,9 @@ One file per hero, named by its code (`c2049.toml`); every number carries where 
     death_cd = 1                  # every skill cooldown goes down this many turns each time a hero dies
     pen_resist = 0.4              # Penetration Resistance of every ally while this hero lives
     ally_hit_cr = 0.1             # Combat Readiness gained after every attack an ally suffers
+    hit_team_cr = 0.13            # Combat Readiness every ally gains after this hero is attacked
+    soul_gain = { 1 = 2, 3 = 3 }  # Soul gained by using the skill of a slot
+    soul_shield = 4               # Soul consumed to nullify the damage of an attack (Defensive Magic)
 
     [[effect]]
     slot = 3                      # 1-3
@@ -88,7 +91,9 @@ target: Tenebria's random debuff), sleep (cannot act until attacked, `assumed`),
 but the Speed stat's), stealth (enemies' single-target skills cannot pick the holder while it has an ally; ends when
 attacked), block (buffs have no effect and none can be received), nullifier (the first effect of an enemy skill that
 lands on the holder is nullified), deify (Critical Hit Chance +50 points when attacking, 50% less damage from attacks),
-res (Effect Resistance up);
+res (Effect Resistance up); SPEC D110: `receivers = "debuffed"` on a cleanse picks one ally that holds a debuff,
+`when = "enemy_support"` effects happen after an enemy uses a non-attack skill (an `extra_attack` there attacks a random
+enemy of the hero), passives `hit_team_cr`, `soul_gain` and `soul_shield`;
 `when = "before"` effects happen before the attack of their slot, on the targets it has chosen; conditions "crit",
 "debuffed", "half" (a target with half its Health or less) and "proc" join "kill" and "stun"; "proc_kill" (SPEC D109)
 follows an `extra_attack` that defeated an enemy and "cd3" holds while the hero's S3 is on cooldown.
@@ -195,7 +200,20 @@ _DEBUFFS: Final = frozenset(
     }
 )
 WHEN: Final = frozenset(
-    {"use", "start", "turn", "revive", "low_hp", "guard", "spirit", "ally_low", "offering_death", "variant", "before"}
+    {
+        "use",
+        "start",
+        "turn",
+        "revive",
+        "low_hp",
+        "guard",
+        "spirit",
+        "ally_low",
+        "offering_death",
+        "variant",
+        "before",
+        "enemy_support",
+    }
 )
 CONDITIONS: Final = frozenset({"", "kill", "stun", "crit", "debuffed", "half", "proc", "proc_kill", "cd3"})
 PASSIVES: Final = frozenset(
@@ -232,6 +250,9 @@ PASSIVES: Final = frozenset(
         "start_wait",
         "pen_resist",
         "ally_hit_cr",
+        "hit_team_cr",
+        "soul_gain",
+        "soul_shield",
     }
 )
 
@@ -337,6 +358,7 @@ def apply_override(kit: Kit, cooldowns: Mapping[int, int], override: KitOverride
         offering_death_effects=[],
         variant_effects=[],
         before_use={},
+        enemy_support_effects=[],
     )
     revive_effects: list[Effect] = []
     for placed in override.effects:
@@ -360,6 +382,8 @@ def apply_override(kit: Kit, cooldowns: Mapping[int, int], override: KitOverride
             out.variant_effects.append(placed.effect)
         elif placed.when == "before":
             out.before_use.setdefault(placed.slot, []).append(placed.effect)
+        elif placed.when == "enemy_support":
+            out.enemy_support_effects.append(placed.effect)
         elif placed.effect.kind in ("heal", "resurrect"):  # revive: `value` = Health fraction regained
             out.revive = placed.effect.value
         else:
@@ -399,6 +423,9 @@ def apply_override(kit: Kit, cooldowns: Mapping[int, int], override: KitOverride
     out.start_wait = tuple(int(slot) for slot in passive.get("start_wait", out.start_wait))
     out.pen_resist = float(passive.get("pen_resist", out.pen_resist))
     out.ally_hit_cr = float(passive.get("ally_hit_cr", out.ally_hit_cr))
+    out.hit_team_cr = float(passive.get("hit_team_cr", out.hit_team_cr))
+    out.soul_gain = {int(k): int(v) for k, v in dict(passive.get("soul_gain", out.soul_gain)).items()}
+    out.soul_shield = int(passive.get("soul_shield", out.soul_shield))
     return out, {**cooldowns, **override.cooldowns}
 
 

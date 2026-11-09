@@ -1,0 +1,56 @@
+# Kizuna AI
+hero = "c1107"
+source = "in-game skill popups read by the Skill reader (the user's export, 2026-11-09, the Journal's Preview Skills): S1, S2 and S3 at +0, with their enhancement steps and effect panels; the multipliers, the heal (10% of max Health) and the barrier (14% of max Health) from Fribbels' skill data (community)"
+status = "verified"
+replace = [1, 2, 3]
+handles = ["Barrier", "Increase Attack", "Increase Speed"]
+cooldowns = { 3 = 4 }  # S3 "4 turns" on the popup (no cooldown step in its enhancements)
+unmodelled = [
+    "the enhancement steps of the heal (+45% healing) and of the barrier (+30% barrier strength): Fribbels' amounts are used as given, at whatever level they are for (NV-73)",
+    "S1 Soulburn (10 Souls): dispels a debuff from all allies (Souls are not simulated)",
+    "S2 acts at the start of her turn here; the game does it at the end of the turn",
+]
+
+# S1 Aitan Beeeam!: attacks the enemy "before dispelling a debuff from an ally" (assumed: one ally that holds a debuff).
+[[effect]]
+slot = 1
+kind = "cleanse"
+count = 1
+receivers = "debuffed"
+note = "S1: dispels a debuff from an ally"
+
+# S2 Crisis Avoidance (passive): recovers the Health of the ally with the lowest Health, in proportion to her max Health,
+# at the end of the turn.
+[[effect]]
+slot = 2
+when = "turn"
+kind = "heal"
+scaling = [0.1, 0.0, 0.0]
+receivers = "lowest:1"
+note = "S2: heals the ally with the lowest Health by 10% of her max Health"
+
+# S3 Super Intelligent AI (4 turns): "Cheers on allies, granting increased Attack and a barrier (proportional to the
+# caster's max Health) to all allies for 3 turns, before granting increased Speed to the caster for 2 turns."
+[[effect]]
+slot = 3
+kind = "atk"
+value = 0.5
+turns = 3
+receivers = "all"
+note = "S3: Attack +50% to all allies for 3 turns"
+
+[[effect]]
+slot = 3
+kind = "barrier"
+scaling = [0.14, 0.0, 0.0]
+receivers = "all"
+turns = 3
+note = "S3: a barrier of 14% of her max Health to all allies for 3 turns"
+
+[[effect]]
+slot = 3
+kind = "spd"
+value = 0.3
+turns = 2
+receivers = "self"
+note = "S3: Speed +30% to the caster for 2 turns"
