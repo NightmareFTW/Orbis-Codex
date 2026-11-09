@@ -1,0 +1,70 @@
+# Command Model Laika
+hero = "c1099"
+source = "in-game skill popups read by the Skill reader (the user's skills folder, 2026-11-09, the Journal's Preview Skills): S1, S2 and S3 at +0 with their enhancement steps and effect panels; multipliers and target counts from Fribbels' skill data (community)"
+status = "verified"
+replace = [1, 2, 3]
+handles = ["Target", "Dual Attack", "Decrease Speed", "Sleep"]
+cooldowns = { 2 = 3, 3 = 4 }  # S2 "4 turns" and S3 "5 turns" on the popups read at +0; their steps (+2 and +3) are -1 turn
+unmodelled = [
+    "Target also decreases Evasion by 50% (Evasion is not simulated)",
+    "Sleep also decreases Critical Hit Resistance and Evasion by 100% (not simulated)",
+    "S2: \"Increase Attack (Greater)\" has no panel on the popup: 75% (the usual value of a greater Attack buff) is used (NV-84)",
+    "S3 Soulburn (10 Souls): the cooldown goes down 2 turns",
+]
+
+# S1 Supporting Fire: attacks the enemy, "increasing Combat Readiness of the caster and a random ally except for the caster by
+# 10%" (+2% +3%: 15% at +4).
+[[effect]]
+slot = 1
+kind = "cr"
+value = 0.15
+receivers = "self"
+note = "S1: Combat Readiness +15% for the caster (10% at +0)"
+
+[[effect]]
+slot = 1
+kind = "cr"
+value = 0.15
+receivers = "random_other"
+note = "S1: ... and for a random ally"
+
+# S2 Strike Order (4 turns at +0, 3 at +2): "Selects an enemy, with a 75% chance to inflict target for 2 turns (+10% +15%: 100%).
+# Grants increased Attack (Greater) to the ally with the highest Attack except for the caster for 2 turns before triggering a
+# Dual Attack." Target: damage suffered +15%.
+[[effect]]
+slot = 2
+kind = "target"
+turns = 2
+chance = 1.0
+note = "S2: Target for 2 turns on the selected enemy (75% at +0, 100% at +3)"
+
+[[effect]]
+slot = 2
+kind = "atk"
+value = 0.75
+turns = 2
+receivers = "highest_atk"
+note = "S2: increased Attack (Greater) for the ally with the highest Attack for 2 turns"
+
+[[effect]]
+slot = 2
+kind = "dual_attack"
+receivers = "highest_atk"
+note = "S2: ... then a Dual Attack from that ally"
+
+# S3 Volley Fire! (5 turns at +0, 4 at +3): attacks all enemies "with a 75% chance each to inflict decreased Speed for 2 turns and
+# sleep for 1 turn" (+10% +15%: 100% at +4).
+[[effect]]
+slot = 3
+kind = "spd"
+value = -0.3
+turns = 2
+chance = 1.0
+note = "S3: decreased Speed (30%) for 2 turns"
+
+[[effect]]
+slot = 3
+kind = "sleep"
+turns = 1
+chance = 1.0
+note = "S3: sleep for 1 turn (it ends when the sleeper is attacked)"

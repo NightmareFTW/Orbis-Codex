@@ -226,6 +226,8 @@ class Kit:
     """Fighting Spirit that triggers `fs_effects` (and is consumed); 0 = none. Gained per skill used (`fs_gain`), per
     attack an ally suffers (`fs_ally_hit`) and at the end of each enemy's turn (`fs_enemy_turn`): Twisted Eidolon
     Kayron, Lone Crescent Bellona."""
+    fs_start: int = 0
+    """Fighting Spirit held at the start of the battle (Benimaru: 50)."""
     fs_gain: dict[int, int] = field(default_factory=dict)
     fs_ally_hit: int = 0
     fs_enemy_turn: int = 0

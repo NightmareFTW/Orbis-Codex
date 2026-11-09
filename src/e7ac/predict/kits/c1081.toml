@@ -1,0 +1,77 @@
+# Cerise
+hero = "c1081"
+source = "in-game skill popups read by the Skill reader (the user's skills folder, 2026-11-09, the Journal's Preview Skills and the user's capture of Frost Storm): S1 at +0, S2 and S3 at +5 with their enhancement steps and effect panels; multipliers and target counts from Fribbels' skill data (community)"
+status = "verified"
+replace = [1, 2, 3]
+handles = ["Dual Attack", "Cannot Buff", "Decrease Speed", "Restrict", "Invincible"]
+cooldowns = { 2 = 3, 3 = 4 }  # S2 "3 turns" and S3 "4 turns" on the popups read at +5, where their -1 steps (+3) are already in
+unmodelled = [
+    "S3 \"attacks using an elemental advantage\": elements are not simulated at all",
+    "S2 Soulburn (20 Souls): ignores Effect Resistance",
+]
+
+# S1 Mystical Arrow: attacks the enemy "before increasing Combat Readiness of the caster by 15%" (+2% +3%: 20% at +5).
+# "When Frost Storm is on cooldown, triggers a Dual Attack from a random ally."
+[[effect]]
+slot = 1
+kind = "cr"
+value = 0.2
+receivers = "self"
+note = "S1: Combat Readiness +20% (15% at +0)"
+
+[[effect]]
+slot = 1
+kind = "dual_attack"
+condition = "cd3"
+note = "S1: while her S3 is on cooldown a random ally follows with a basic attack"
+
+# S2 Luminous Explosion (3 turns at +5): "inflicting stun for 1 turn and cannot buff for 2 turns. Increases Combat Readiness of
+# the caster by 50%."
+[[effect]]
+slot = 2
+kind = "stun"
+turns = 1
+note = "S2: stun for 1 turn"
+
+[[effect]]
+slot = 2
+kind = "unable_buff"
+turns = 2
+note = "S2: cannot buff for 2 turns"
+
+[[effect]]
+slot = 2
+kind = "cr"
+value = 0.5
+receivers = "self"
+note = "S2: Combat Readiness +50%"
+
+# S3 Frost Storm (4 turns at +5): "Attacks all enemies with a raging frost storm, decreasing buff durations by 1 turn before a
+# 100% chance each to inflict decreased Speed and restrict for 2 turns. Grants invincibility to the caster for 1 turn."
+[[effect]]
+slot = 3
+kind = "shorten"
+turns = 1
+note = "S3: every buff of the enemies lasts 1 turn fewer"
+
+[[effect]]
+slot = 3
+kind = "spd"
+value = -0.3
+turns = 2
+chance = 1.0
+note = "S3: decreased Speed (30%) for 2 turns"
+
+[[effect]]
+slot = 3
+kind = "restrict"
+turns = 2
+chance = 1.0
+note = "S3: restrict for 2 turns"
+
+[[effect]]
+slot = 3
+kind = "invincible"
+turns = 1
+receivers = "self"
+note = "S3: invincibility for 1 turn"

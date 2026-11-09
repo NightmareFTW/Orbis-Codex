@@ -188,6 +188,7 @@ def _play(
             waiting[i][slot] = unit.cooldowns.get(slot, 0)
             state[i].s3_ready = state[i].s3_ready and slot != 3
         state[i].focus = unit.kit.focus_start
+        state[i].fs = unit.kit.fs_start
         if unit.kit.eff_speed:  # Effectiveness from Speed ("30% of Speed", Rhianna and Luciella)
             state[i].eff_extra = unit.kit.eff_speed * speeds[i] / 100  # stays all battle: no dispel takes it
         if unit.kit.spirit_full:  # Fighting Spirit at the start of the battle (Young Senya S2)
@@ -913,6 +914,30 @@ def _lift_pilfers(state: Sequence[_State], j: int) -> None:
             other.pilfer = False
 
 
+def _chosen(
+    effect: Effect,
+    actor: int,
+    targets: Sequence[int],
+    units: Sequence[Combatant],
+    hp: Sequence[float],
+    cr: Sequence[float],
+    state: Sequence[_State],
+    rng: random.Random,
+) -> list[int]:
+    """Who a buff, heal or Combat Readiness effect reaches: the targets of the skill, one ally picked at random, the
+    ally with the highest Attack or Combat Readiness (never the caster), or what `_receivers` says."""
+    if effect.receivers == "target":
+        return [t for t in targets if hp[t] > 0]
+    others = [j for j in _allies(units, hp, actor) if j != actor]
+    if effect.receivers == "random_other":
+        return [rng.choice(others)] if others else []
+    if effect.receivers == "highest_atk":
+        return [max(others, key=lambda j: units[j].stats[Stat.ATK] * state[j].factor("atk"))] if others else []
+    if effect.receivers == "highest_cr":
+        return [max(others, key=lambda j: cr[j])] if others else []
+    return _receivers(effect, actor, units, hp, state)
+
+
 def _receivers(
     effect: Effect, actor: int, units: Sequence[Combatant], hp: Sequence[float], state: Sequence[_State]
 ) -> list[int]:
@@ -1049,11 +1074,7 @@ def _use(
             hp[j], cr[j], state[j] = units[j].stats[Stat.HP] * effect.value, 0.0, _State(revived=revived)
         return
     if not effect.debuff:
-        for r in (
-            [t for t in targets if hp[t] > 0]
-            if effect.receivers == "target"
-            else _receivers(effect, actor, units, hp, state)
-        ):
+        for r in _chosen(effect, actor, targets, units, hp, cr, state, rng):
             if effect.kind in _BUFFS and any(state[r].timers.get(k, 0) > 0 for k in ("unable_buff", "block")):
                 continue  # MECH-BUFF-01 (a blocked hero cannot be buffed either)
             if effect.kind == "cascade" and rng.random() >= effect.chance:

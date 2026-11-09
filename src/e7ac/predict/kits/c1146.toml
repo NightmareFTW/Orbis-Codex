@@ -1,0 +1,43 @@
+# Benimaru
+hero = "c1146"
+source = "in-game skill popups read by the Skill reader (the user's skills folder, 2026-11-09, the Journal's Preview Skills): S1, S2 and S3 at +0 with their enhancement steps and effect panels; multipliers from Fribbels' skill data (community; its \"S2\" entry is Hell Flare)"
+status = "verified"
+replace = [1, 2, 3]
+handles = ["Multilayer Barrier"]
+cooldowns = { 2 = 0, 3 = 3 }  # S3 "4 turns" on the popup read at +0; its +3 step is -1 turn; S2 is a passive ("2 turns")
+unmodelled = [
+    "Multilayer Barrier (Hit Chance +50% and unaffected by debuffs): only given at the start of an enemy's extra turn, which is not simulated; with it S1 does more damage, Hell Flare penetrates 30% more and S3 doubles the Fighting Spirit",
+    "Hell Flare (the attack at full Fighting Spirit) attacks all enemies and penetrates 30% of the Defense: Fribbels' data for it hits one enemy without penetration, so it is understated (NV-85)",
+    "S1 and S3 Soulburn (10 Souls): more damage",
+]
+
+# S1 Move Out of the Way: attacks the enemy; Fighting Spirit +25. S3 Show No Mercy: attacks the enemy, "decreasing Defense for 2
+# turns, before increasing Combat Readiness of the ally with the highest Combat Readiness except for the caster by 15%"; Fighting
+# Spirit +25.
+# S2 Universal Perception (passive): "At the start of the first battle, gains 50 Fighting Spirit. ... After attacking, when
+# Fighting Spirit is full, activates Hell Flare" (consumes 100 Fighting Spirit; Combat Readiness +3% x 5 for the extra-turn effect).
+[passive]
+fs_full = 100
+fs_start = 50
+fs_gain = { 1 = 25, 3 = 25 }
+
+[[effect]]
+slot = 2
+when = "fs_full"
+kind = "extra_attack"
+value = 2
+note = "S2: Hell Flare: an attack with Fribbels' S2 data"
+
+[[effect]]
+slot = 3
+kind = "def"
+value = -0.7
+turns = 2
+note = "S3: decreased Defense for 2 turns"
+
+[[effect]]
+slot = 3
+kind = "cr"
+value = 0.15
+receivers = "highest_cr"
+note = "S3: Combat Readiness +15% for the ally with the highest Combat Readiness"

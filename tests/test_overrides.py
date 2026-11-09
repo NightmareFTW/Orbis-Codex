@@ -1351,3 +1351,86 @@ def test_lilibet_laika_choux_roana_and_aube_kits_carry_the_popup_numbers() -> No
         ("restrict", 2, "enemies"),
     ]
     assert [(e.kind, e.turns) for e in aube.at_start] == [("concealment", 999)]
+
+
+def test_ally_pickers_and_starting_fighting_spirit_work_in_battle() -> None:
+    """Command Model Laika and Benimaru (SPEC D116)."""
+    import random
+
+    from e7ac.domain.codes import Stat
+    from e7ac.predict.battle import Combatant, _State, _use, simulate
+    from tests.test_effects import S1, unit
+
+    rng = random.Random(1)
+    strong = Combatant("s", "you", {**unit("x", "you").stats, Stat.ATK: 9000.0}, 200, S1, {}, Kit())
+    team = [unit("c", "you"), unit("w", "you"), strong, unit("e", "them")]
+    hp, state = [1e4] * 4, [_State() for _ in team]
+    cr = [0.0, 0.2, 0.9, 0.0]
+    _use(Effect("cr", False, 0.15, 0, 1.0, receivers="highest_atk"), 0, [], team, hp, cr, state, rng)
+    assert cr == [0.0, 0.2, pytest.approx(1.0), 0.0]  # the ally with the highest Attack (but the caster)
+    cr = [0.0, 0.2, 0.9, 0.0]
+    _use(Effect("cr", False, 0.15, 0, 1.0, receivers="highest_cr"), 0, [], team, hp, cr, state, rng)
+    assert cr[2] == pytest.approx(1.0) and cr[1] == 0.2  # the one with the highest Combat Readiness
+    seen = set()
+    for seed in range(40):
+        cr = [0.0, 0.0, 0.0, 0.0]
+        _use(
+            Effect("cr", False, 0.1, 0, 1.0, receivers="random_other"), 0, [], team, hp, cr, state, random.Random(seed)
+        )
+        assert cr[0] == 0.0 and cr[3] == 0.0 and sum(cr) == pytest.approx(0.1)  # one ally, never the caster
+        seen.add(cr.index(0.1))
+    assert seen == {1, 2}
+    alone = [unit("c", "you"), unit("e", "them")]
+    cr = [0.0, 0.0]
+    _use(
+        Effect("cr", False, 0.1, 0, 1.0, receivers="random_other"),
+        0,
+        [],
+        alone,
+        [1e4] * 2,
+        cr,
+        [_State(), _State()],
+        rng,
+    )
+    assert cr == [0.0, 0.0]  # nobody to give it to
+
+    def damage(start: int) -> float:  # Hell Flare comes sooner with Fighting Spirit at the start
+        from e7ac.predict.damage import SkillPower
+
+        skills = {1: SkillPower(0.01, 1.0, 0.0), 2: SkillPower(5.0, 1.0, 0.0)}
+        kit = Kit(fs_full=100, fs_start=start, fs_gain={1: 25}, fs_effects=[Effect("extra_attack", False, 2.0, 0, 1.0)])
+        hero = Combatant("b", "you", unit("x", "you").stats, 300, skills, {}, kit)
+        return simulate([hero, unit("e", "them", hp=10**7)], runs=50).heroes[0].damage
+
+    assert damage(50) > damage(0)
+
+
+def test_renoa_cerise_command_model_laika_and_benimaru_kits_carry_the_popup_numbers() -> None:
+    kits = load_overrides()
+    renoa, cooldowns = apply_override(Kit(), {2: 0, 3: 3}, kits["c1193"])
+    assert cooldowns == {2: 0, 3: 3} and [(e.kind, e.value, e.receivers) for e in renoa.on_use[3]] == [
+        ("cr", 0.5, "all")
+    ]
+    cerise, cooldowns = apply_override(Kit(), {2: 3, 3: 4}, kits["c1081"])
+    assert cooldowns == {2: 3, 3: 4}
+    assert [(e.kind, e.value, e.condition) for e in cerise.on_use[1]] == [("cr", 0.2, ""), ("dual_attack", 0.0, "cd3")]
+    assert [(e.kind, e.turns) for e in cerise.on_use[2]][:2] == [("stun", 1), ("unable_buff", 2)]
+    assert [(e.kind, e.value, e.turns) for e in cerise.on_use[3]] == [
+        ("shorten", 0.0, 1),
+        ("spd", -0.3, 2),
+        ("restrict", 0.0, 2),
+        ("invincible", 0.0, 1),
+    ]
+    laika, cooldowns = apply_override(Kit(), {2: 4, 3: 5}, kits["c1099"])
+    assert cooldowns == {2: 3, 3: 4}
+    assert [(e.kind, e.value, e.receivers) for e in laika.on_use[1]] == [
+        ("cr", 0.15, "self"),
+        ("cr", 0.15, "random_other"),
+    ]
+    assert [(e.kind, e.value, e.chance) for e in laika.on_use[2]][:2] == [("target", 0.0, 1.0), ("atk", 0.75, 1.0)]
+    assert (laika.on_use[2][2].kind, laika.on_use[2][2].receivers) == ("dual_attack", "highest_atk")
+    assert [(e.kind, e.turns) for e in laika.on_use[3]] == [("spd", 2), ("sleep", 1)]
+    benimaru, cooldowns = apply_override(Kit(), {2: 0, 3: 4}, kits["c1146"])
+    assert cooldowns == {2: 0, 3: 3} and benimaru.fs_full == 100 and benimaru.fs_start == 50
+    assert benimaru.fs_gain == {1: 25, 3: 25} and benimaru.fs_effects[0].kind == "extra_attack"
+    assert [(e.kind, e.receivers) for e in benimaru.on_use[3]] == [("def", ""), ("cr", "highest_cr")]

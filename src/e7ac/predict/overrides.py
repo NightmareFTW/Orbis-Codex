@@ -53,6 +53,7 @@ One file per hero, named by its code (`c2049.toml`); every number carries where 
     hit_cd_cut = 1                # skill cooldowns go down this many turns each time the hero is attacked
     area_hit_cd_cut = 1           # ... and this many more after an attack that targets all allies
     fs_full = 100                 # Fighting Spirit that triggers `when = "fs_full"` effects (and is consumed)
+    fs_start = 50                 # Fighting Spirit at the start of the battle
     fs_gain = { 1 = 20 }          # Fighting Spirit gained by using the skill of a slot
     fs_ally_hit = 20              # ... by every attack an ally suffers
     fs_enemy_turn = 10            # ... at the end of every enemy's turn
@@ -122,11 +123,13 @@ burn and poison at once), conditions "overload" / "no_overload", passive `always
 effects follow an attack that targeted all enemies (passives `hit_cd_cut`, `area_hit_cd_cut`), the generic Fighting
 Spirit (`fs_*` passives, `when = "fs_full"` effects, kind `fs_damage`: `value` + `count` x the share of Spirit held),
 kind cd_cut (the caster's cooldowns go down `value` turns), condition "immortal", passive `ready_reduction`;
-SPEC D114: kinds cd_up (the targets' cooldowns go up `value` turns), target (15% more damage suffered), bzzt (additional
-damage `value` to all enemies after each attack), cascade (additional damage `value` after the next attack, with a
-chance), immobilize (no Combat Readiness from Speed for four actions), concealment (stealth that attacks do not end),
-condition "marked" (a target holds Target), passives `fs_debuff_turn`, `crit_bonus`, `speed_mult`, `front_ally_cr`,
-`pen_marked`;
+SPEC D116: `receivers` of a buff or Combat Readiness effect also "random_other" (one ally but the caster, at
+random), "highest_atk" and "highest_cr" (the ally but the caster with the highest Attack / Combat Readiness), passive
+`fs_start`; SPEC D114: kinds cd_up (the targets' cooldowns go up `value` turns), target (15% more damage suffered),
+bzzt (additional damage `value` to all enemies after each attack), cascade (additional damage `value` after the next
+attack, with a chance), immobilize (no Combat Readiness from Speed for four actions), concealment (stealth that attacks
+do not end), condition "marked" (a target holds Target), passives `fs_debuff_turn`, `crit_bonus`, `speed_mult`,
+`front_ally_cr`, `pen_marked`;
 `when = "before"` effects happen before the attack of their slot, on the targets it has chosen; conditions "crit",
 "debuffed", "half" (a target with half its Health or less) and "proc" join "kill" and "stun"; "proc_kill" (SPEC D109)
 follows an `extra_attack` that defeated an enemy and "cd3" holds while the hero's S3 is on cooldown.
@@ -334,6 +337,7 @@ PASSIVES: Final = frozenset(
         "hit_cd_cut",
         "area_hit_cd_cut",
         "fs_full",
+        "fs_start",
         "fs_gain",
         "fs_ally_hit",
         "fs_enemy_turn",
@@ -538,6 +542,7 @@ def apply_override(kit: Kit, cooldowns: Mapping[int, int], override: KitOverride
     out.hit_cd_cut = int(passive.get("hit_cd_cut", out.hit_cd_cut))
     out.area_hit_cd_cut = int(passive.get("area_hit_cd_cut", out.area_hit_cd_cut))
     out.fs_full = int(passive.get("fs_full", out.fs_full))
+    out.fs_start = int(passive.get("fs_start", out.fs_start))
     out.fs_gain = {int(k): int(v) for k, v in dict(passive.get("fs_gain", out.fs_gain)).items()}
     out.fs_ally_hit = int(passive.get("fs_ally_hit", out.fs_ally_hit))
     out.fs_enemy_turn = int(passive.get("fs_enemy_turn", out.fs_enemy_turn))

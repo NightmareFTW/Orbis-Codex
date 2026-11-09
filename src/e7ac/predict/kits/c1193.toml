@@ -1,0 +1,22 @@
+# Renoa
+hero = "c1193"
+source = "in-game skill popups read by the Skill reader (the user's skills folder, 2026-11-09, the Journal's Preview Skills and the user's captures of S1 at +8, Black Rose and S3 at +7): S1 and S3 with their enhancement steps and effect panels; the S1 multiplier and Defense scaling from Fribbels' skill data (community)"
+status = "verified"
+replace = [1, 2, 3]
+handles = ["Dirge Bullet"]
+cooldowns = { 2 = 0, 3 = 3 }  # S3 "3 turns" on the popup read at +7, where its three -1 steps (+3 to +5) are already in; S2 is a passive
+unmodelled = [
+    "Dirge Bullets: S3 grants three; after a skill on her turn she uses a Dirge Bullet on a random enemy (damage and attack count in proportion to the bullets: no number); each bullet gives Speed and Critical Hit Damage +20% until the end of the turn. None of it is simulated, so her damage is understated (NV-86)",
+    "S1 at the start of her turn with Focus full becomes Black Thorn (consumes 5 Focus, grants the maximum number of Dirge Bullets); Focus is not simulated",
+    "S2 Black Rose: buffs and debuffs applied to her are changed into Dirge Bullets (not simulated)",
+    "S3 Soulburn (10 Souls): the number of Dirge Bullets is doubled",
+]
+
+# S3 Flower of Devoured Fate (3 turns at +7): "Increases Combat Readiness of all allies by 50%, and grants three Dirge Bullets to the
+# caster": read at +7, the last step, so the 50% already holds all four Combat Readiness steps.
+[[effect]]
+slot = 3
+kind = "cr"
+value = 0.5
+receivers = "all"
+note = "S3: Combat Readiness +50% to all allies (the popup read at +7)"
