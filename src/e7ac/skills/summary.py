@@ -46,6 +46,8 @@ def hero_summary(name: str, code: str, skills: Sequence[StoredSkill], titles: Co
         else:
             first, second = skill_line(skill, titles)
             lines += [f"S{slot}  {first}", second]
+            if skill.inferred:
+                lines.append("      (placed by what it shows: epic7db has no page for this hero)")
     for skill in loose:
         first, second = skill_line(skill, titles)
         lines += [f"?   {first}", second, "      (epic7db did not place it among the hero's skills: it stays unplaced)"]

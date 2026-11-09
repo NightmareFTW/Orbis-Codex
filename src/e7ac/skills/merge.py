@@ -11,7 +11,7 @@ the text has exactly one number they can belong to); the cooldown is the fully e
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import replace
 from typing import Final
 
@@ -46,6 +46,45 @@ def place(name: str, kit: Mapping[int, SkillInfo]) -> tuple[int | None, bool]:
         return None, False
     slot = names[found]
     return slot, slot == 2 and not kit[slot].cooldown
+
+
+def place_by_structure(unplaced: Sequence[StoredSkill], taken: Collection[int] = ()) -> dict[str, tuple[int, bool]]:
+    """Name key -> (slot, passive) for the skills that what they show places, when epic7db knows nothing of the hero (a
+    hero released after its page, Renoa 2026-11-09): an active skill always gains Soul ("Acquire N Soul"), a passive
+    never does, so the one passive is S2, the one active without cooldown is S1, and the one active with a cooldown is
+    S3 once S2 is the passive; with no passive and two timed skills the shorter cooldown is S2 and the longer S3. A
+    skill that cannot be told is left out (still unplaced, shown as a problem), never guessed. `assumed` (NV-83)."""
+    passives = [s for s in unplaced if not s.gains]
+    basics = [s for s in unplaced if s.gains and s.cooldown is None]
+    timed = [s for s in unplaced if s.gains and s.cooldown is not None]
+    found: dict[str, tuple[int, bool]] = {}
+    if len(passives) == 1 and 2 not in taken:
+        found[passives[0].key] = (2, True)
+    if len(basics) == 1 and 1 not in taken:
+        found[basics[0].key] = (1, False)
+    free = [slot for slot in (2, 3) if slot not in taken and slot not in {v[0] for v in found.values()}]
+    if len(timed) == 1 and free == [3]:
+        found[timed[0].key] = (3, False)
+    elif len(timed) == 2 and free == [2, 3] and timed[0].cooldown != timed[1].cooldown:
+        low, high = sorted(timed, key=lambda s: s.cooldown or 0)
+        found[low.key], found[high.key] = (2, False), (3, False)
+    return found
+
+
+def infer_slots(store: SkillStore, code: str) -> int:
+    """Place the unplaced skills of a hero by what they show (`place_by_structure`); returns how many were placed."""
+    skills = store.load(code)
+    unplaced = [s for s in skills if s.slot is None]
+    found = place_by_structure(unplaced, {s.slot for s in skills if s.slot is not None})
+    placed = 0
+    for index, skill in enumerate(skills):
+        if skill.slot is None and skill.key in found:
+            slot, passive = found[skill.key]
+            skills[index] = replace(skill, slot=slot, passive=passive, inferred=True)
+            placed += 1
+    if placed:
+        store.write(code, skills)
+    return placed
 
 
 def assign(store: SkillStore, code: str, kit: Mapping[int, SkillInfo]) -> int:

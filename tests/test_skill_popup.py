@@ -551,3 +551,78 @@ def test_a_panel_title_that_wraps_or_has_a_flag_line_is_put_right() -> None:
     assert (lone.title, lone.marks, lone.text) == ("Superhumanization", ("Undispellable",), "")
     right = EffectPanel("Fear", ("Undispellable",), "Cannot act for a certain number of turns.")
     assert repair_panel(right) == right  # a panel already right is not changed
+
+
+def black_rose() -> list[TextLine]:
+    """The geometry of the OCR lines on the user's capture of a passive with no badge, no cost row and no "Skill
+    Enhance", of a hero whose skill names epic7db does not have (2026-11-09; the words are stand-ins)."""
+    return [
+        line("DarkRanger Aquarius", 51, 6, 365, 44),
+        line("Renoa ", 12, 47, 351, 61),
+        line("Lv. Max/60", 13, 152, 230, 51),
+        line("Max", 172, 210, 49, 30),
+        line("Passive Title", 454, 246, 163, 44),
+        line("Mark Effect (Unique Effect)", 904, 251, 325, 38),
+        line("Effectiveness +", 119, 272, 176, 34),
+        line("15%", 121, 300, 61, 34),
+        line("The mark makes the bearer faster and", 846, 302, 366, 34),
+        line("stronger. Dispelled at the", 845, 331, 381, 33),
+        line("The first line of the passive text that", 338, 357, 450, 40),
+        line("end of the turn.", 844, 357, 178, 34),
+        line("+8", 98, 381, 35, 27),
+        line("goes on to a second line which is long", 339, 391, 456, 33),
+        line("and then a third, a little shorter, as", 340, 420, 408, 31),
+        line("a fourth line that is about as long as", 340, 449, 408, 34),
+        line("the fifth one only.", 339, 475, 304, 37),
+        line("A sixth line starts a new sentence: it", 339, 506, 455, 34),
+        line("goes on over a seventh line of text", 339, 536, 396, 33),
+        line("N", 986, 555, 69, 67, 0.84),
+        line("and an eighth, long enough to wrap", 339, 565, 430, 34),
+        line("again into a ninth line of this text", 340, 594, 464, 34),
+        line("which ends on a tenth line, and then", 340, 624, 438, 31),
+        line("the last line.", 339, 651, 250, 37),
+    ]
+
+
+def test_a_passive_with_no_marks_is_found_by_its_shape_when_the_heros_skill_names_are_not_known() -> None:
+    assert parse_skill_popup(black_rose()) is None  # nothing in it says where the title is
+    assert parse_skill_popup(black_rose(), ["Instant Judgment"]) is None  # a hero epic7db knows: names or nothing
+    found = parse_skill_popup(black_rose(), (), by_layout=True)
+    assert found is not None and found.name == "Passive Title" and found.hero == "Renoa" and found.level is None
+    assert found.text.startswith("The first line of the passive text that goes on to a second line")
+    assert found.text.endswith("and then the last line.") and "A sixth line starts a new sentence" in found.text
+    assert [e.title for e in found.effects] == ["Mark Effect"]  # the panel is the panel, not a second popup
+    assert found.title_box is not None and tuple(map(round, found.title_box)) == (454, 246, 617, 290)
+    lines = [ln for ln in black_rose() if ln.box.x0 > 800 or ln.box.y0 < 340]
+    assert parse_skill_popup(lines, (), by_layout=True) is None  # no paragraph under it: nothing to read
+
+
+class _CropReader:
+    """What the OCR gives on the enlarged corner of an icon: the badge, or nothing."""
+
+    def __init__(self, found: str | None) -> None:
+        self.found, self.crops = found, 0
+
+    def read(self, image: object) -> list[TextLine]:
+        self.crops += 1
+        return [line(self.found, 10, 10, 60, 30)] if self.found else [line("O", 5, 5, 20, 20, 0.2)]
+
+
+def test_a_badge_the_page_missed_is_read_from_the_icons_corner() -> None:
+    from dataclasses import replace
+
+    from e7ac.vision.skill_popup import rescue_level
+
+    page = np.zeros((842, 1376, 3), dtype=np.uint8)
+    steps = ((1, "+2% Combat Readiness"), (7, "+3% Combat Readiness"))
+    missed = SkillPopup(
+        "Renoa", "Flower of Devoured Fate", None, (("Focus", 2), ("Soul", 2)), 3, "", "Text.", "", None, steps, (), 1.0,
+        (565, 164, 907, 201),
+    )  # fmt: skip
+    reader = _CropReader("+7")
+    assert rescue_level(page, reader, missed) == replace(missed, level=7)
+    assert rescue_level(page, _CropReader(None), missed) == missed  # nothing there: a skill at +0 shows no badge
+    assert rescue_level(page, _CropReader("+8"), replace(missed, level=5)) == replace(missed, level=5)  # kept
+    assert rescue_level(page, _CropReader("+8"), replace(missed, enhance=())) == replace(missed, enhance=())
+    assert rescue_level(page, _CropReader("+8"), replace(missed, title_box=None)) == replace(missed, title_box=None)
+    assert rescue_level(page, _CropReader("+8"), None) is None

@@ -701,3 +701,81 @@ def test_a_whole_reading_repairs_a_panel_that_had_swallowed_the_next_one(tmp_pat
     again = store.save("c1001", popup(effects=(whole, bomb)), NOW, slot=3)
     assert {e.title: e.text for e in again.stored.effects}["Energy Depletion"] == whole.text
     assert store.effects()["energy depletion"]["text"] == whole.text
+
+
+def test_a_description_that_starts_in_the_middle_of_a_sentence_is_a_problem() -> None:
+    from e7ac.skills.completeness import cut_parts, fuller, looks_headless
+    from e7ac.skills.problems import skill_problems
+
+    lost = "Spirit. When an enemy's turn ends, gains 10 Fighting Spirit for each debuff inflicted on an ally."
+    whole = "Gains 20 Fighting Spirit. When an enemy's turn ends, gains 10 Fighting Spirit for each debuff."
+    assert looks_headless(lost) and looks_headless("and then it attacks.") and not looks_headless(whole)
+    assert not looks_headless("Attacks the enemy. Soulburn: more.") and not looks_headless("")
+    skill = StoredSkill("c2095", "Emergency Stitching", None, (), None, "", lost, "", None, (), (), 0.9, "")
+    assert cut_parts(skill) == ["start of the description"]
+    found = skill_problems(skill)
+    assert [(p.kind, p.detail) for p in found if p.kind == "cut"] == [("cut", "start of the description looks cut")]
+    assert found[0].clearable
+    assert fuller(lost, whole) == whole  # a whole reading replaces it ...
+    assert fuller(whole, lost) == whole  # ... and a headless one never replaces a whole one
+
+
+def test_a_whole_name_that_is_no_hero_of_the_catalog_is_never_given_to_the_remembered_hero() -> None:
+    from types import SimpleNamespace
+    from typing import cast
+
+    from e7ac.catalog.resolve import ResolvedEntity
+    from e7ac.skills.hero import decide
+
+    heroes = cast(
+        dict[str, ResolvedEntity],
+        {"c1103": SimpleNamespace(name="Celine"), "c2103": SimpleNamespace(name="Spirit Eye Celine")},
+    )
+    # the memory says Celine, the screen shows a whole name nobody has: a hero newer than the catalog
+    refused = decide("Renoa", heroes, None, "c1103")
+    assert refused.code is None and "press Sync catalog" in refused.problem and "'Renoa'" in refused.problem
+    assert decide("Spirit Ey", heroes, None, "c2103").code == "c2103"  # the start of the remembered name: it
+    assert decide(None, heroes, None, "c1103").code == "c1103"  # nothing legible: the remembered hero
+    assert decide("Renoa", heroes, None, None).code is None  # no memory: refused too, and it says what to do
+    assert "press Sync catalog" in decide("Renoa", heroes, None, None).problem
+
+
+def test_the_skills_of_a_hero_epic7db_does_not_know_are_placed_by_what_they_show(tmp_path: Path) -> None:
+    from e7ac.skills.merge import infer_slots, place_by_structure
+    from e7ac.skills.summary import hero_summary
+
+    def read(name: str, gains: tuple[tuple[str, int], ...], cooldown: int | None) -> SkillPopup:
+        return SkillPopup("Renoa", name, 8, gains, cooldown, "", "Text.", "", None, (), (), 0.99)
+
+    store = SkillStore(tmp_path)
+    store.save("c1193", read("Flower of Devoured Fate", (("Focus", 2), ("Soul", 2)), 3), NOW)
+    assert infer_slots(store, "c1193") == 0  # an active with a cooldown alone: S2 or S3, not told
+    store.save("c1193", read("Instant Judgment", (("Soul", 1),), None), NOW)
+    assert infer_slots(store, "c1193") == 1  # the basic one is S1; the timed one is still S2 or S3
+    store.save("c1193", read("Black Rose", (), None), NOW)  # a passive never gains Soul
+    assert infer_slots(store, "c1193") == 2
+    placed = {s.name: (s.slot, s.passive, s.inferred) for s in store.load("c1193")}
+    assert placed == {
+        "Flower of Devoured Fate": (3, False, True),
+        "Instant Judgment": (1, False, True),
+        "Black Rose": (2, True, True),
+    }
+    assert infer_slots(store, "c1193") == 0
+    assert "(placed by what it shows" in hero_summary("Renoa", "c1193", store.load("c1193"))
+    assert StoredSkill.from_json("c1193", store.load("c1193")[0].to_json()).inferred  # kept in the file
+
+    short, long_ = read("Short", (("Soul", 2),), 2), read("Long", (("Soul", 3),), 5)
+    basic = read("Basic", (("Soul", 1),), None)
+    skills = [
+        StoredSkill("c1", p.name, 8, p.gains, p.cooldown, "", "T.", "", None, (), (), 0.9, "")
+        for p in (basic, short, long_)
+    ]
+    assert place_by_structure(skills) == {
+        skills[0].key: (1, False),
+        skills[1].key: (2, False),
+        skills[2].key: (3, False),
+    }
+    twin = [skills[0], skills[1], StoredSkill("c1", "Twin", 8, short.gains, 2, "", "T.", "", None, (), (), 0.9, "")]
+    assert place_by_structure(twin) == {twin[0].key: (1, False)}  # the same cooldown: not told, never guessed
+    two_passives = [StoredSkill("c1", n, None, (), None, "", "T.", "", None, (), (), 0.9, "") for n in ("A", "B")]
+    assert place_by_structure(two_passives) == {}

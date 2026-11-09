@@ -48,6 +48,8 @@ class StoredSkill:
     """Which of the hero's three skills it is (1, 2, 3), by its name among epic7db's skills; None: not placed."""
     passive: bool = False
     """The slot-2 skill that has no cooldown: a passive (the rule the kit readers use)."""
+    inferred: bool = False
+    """The slot was worked out from what the popup shows, not from epic7db's names (a hero epic7db has no page for)."""
 
     @property
     def key(self) -> str:
@@ -69,6 +71,7 @@ class StoredSkill:
             "captured_at": self.captured_at,
             "slot": self.slot,
             "passive": self.passive,
+            "inferred": self.inferred,
         }
 
     @staticmethod
@@ -92,6 +95,7 @@ class StoredSkill:
             captured_at=str(data.get("captured_at", "")),
             slot=data.get("slot") if data.get("slot") in (1, 2, 3) else None,
             passive=bool(data.get("passive", False)),
+            inferred=bool(data.get("inferred", False)),
         )
 
 

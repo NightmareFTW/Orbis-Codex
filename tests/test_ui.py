@@ -941,3 +941,39 @@ def test_the_arena_watch_and_the_skill_reader_never_run_together(context: AppCon
     context.watch._state = "running"
     assert not context.skills.start(overlay=False)
     context.watch._state = "stopped"
+
+
+def test_a_reading_that_came_out_wrong_can_be_cleared_by_hand_from_the_skill_reader(
+    context: AppContext, synthetic_catalog: list[str], qapp: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from PySide6.QtWidgets import QMessageBox
+
+    from e7ac.skills.store import SkillStore, skills_dir
+    from e7ac.vision.skill_popup import SkillPopup
+
+    store = SkillStore(skills_dir(context.paths.home))
+    for slot, name in enumerate(("Lethal Strike", "Second", "Third"), 1):
+        store.save("c2011", SkillPopup("Karin", name, 5, (), None, "", WHOLE, "", None, (), (), 0.99), slot=slot)
+    window = MainWindow(context)
+    window.show_page("skills")
+    page: Any = window.page("skills")
+    page.show_hero("c2011")
+    options = [page._which.itemText(i) for i in range(page._which.count())]
+    assert options == ["All 3 reading(s) of Blood Blade Karin", "S1  Lethal Strike", "S2  Second", "S3  Third"]
+    assert page._forget.isEnabled() and page._sync.isEnabled()
+
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No)
+    page._which.setCurrentIndex(2)
+    page._forget.click()
+    assert len(store.load("c2011")) == 3  # asked first: "No" touches nothing
+
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    page._forget.click()  # the second reading only
+    assert [s.name for s in store.load("c2011")] == ["Lethal Strike", "Third"]
+    assert "Cleared 1 reading(s): hold that skill again." in page._status.text()
+    page.show_hero("c2011")
+    page._which.setCurrentIndex(0)
+    page._forget.click()  # every reading of the hero
+    assert store.load("c2011") == [] and "Cleared 2 reading(s)" in page._status.text()
+    assert page._which.count() == 0 and not page._forget.isEnabled()
+    window.close()

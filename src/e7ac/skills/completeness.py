@@ -37,6 +37,16 @@ def looks_cut(text: str) -> bool:
     return last in DANGLING or bool(re.fullmatch(r"[\d.,]+%?", last))
 
 
+_HEADLESS: Final = re.compile(r"^(?:[a-z]|[A-Za-z']{1,14}\.\s+[A-Z])")
+
+
+def looks_headless(text: str) -> bool:
+    """Whether the text starts where a sentence cannot: the first line was lost and it begins in the middle of one, with
+    a lower-case letter or with a single word and a full stop ("Spirit. When an enemy's turn ends, ..." for Designer
+    Lilibet's passive, whose first line was not read)."""
+    return bool(_HEADLESS.match(text.strip()))
+
+
 STRAY: Final = re.compile(r"[.!?]\+\d{1,2}$")
 
 
@@ -72,6 +82,8 @@ def fuller(old: str, new: str, titles: Collection[str] = ()) -> str:
             return old
         if looks_cut(new) and not looks_cut(old):
             return old
+        if looks_headless(new) and not looks_headless(old):
+            return old
     return new
 
 
@@ -80,12 +92,13 @@ class Cut:
     hero: str
     skill: str
     part: str
-    """"description", "soulburn" or "effect <title>"."""
+    """"description", "start of the description", "soulburn" or "effect <title>"."""
 
 
 def cut_parts(skill: StoredSkill) -> list[str]:
     """The parts of a stored skill that look cut."""
     found = ["description"] if looks_cut(skill.text) else []
+    found += ["start of the description"] if looks_headless(skill.text) else []
     found += ["soulburn"] if skill.soulburn and looks_cut(skill.soulburn) else []
     return found + [f"effect {e.title}" for e in skill.effects if _bad(e.title, e.text)]
 

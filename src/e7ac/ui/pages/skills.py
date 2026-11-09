@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QTableWidget,
@@ -36,6 +37,7 @@ from e7ac.skills.worklist import SkillRow, progress, worklist
 from e7ac.ui.context import AppContext
 from e7ac.ui.pages.base import Page, card, heading
 from e7ac.ui.skill_controller import RUNNING, STOPPED, STOPPING
+from e7ac.ui.tasks import Task
 from e7ac.ui.theme import STATUS_COLOURS, status_style
 from e7ac.ui.widgets import SteadyComboBox
 
@@ -132,13 +134,19 @@ class SkillsPage(Page):
         )
         self._wrong.setChecked(False)
         self._wrong.toggled.connect(self._fill)
+        self._sync = QPushButton("Sync catalog")
+        self._sync.setToolTip(
+            "Brings the catalog up to date: a hero released after the last sync is not known to the reader, and its "
+            'popups are refused ("no catalog hero is called ...") until it is.'
+        )
+        self._sync.clicked.connect(self._sync_catalog)
         export = QPushButton("Export file")
         export.setToolTip("Write everything read as one text file, to send.")
         export.clicked.connect(self._export)
         copy = QPushButton("Copy export")
         copy.setToolTip("Everything read as text on the clipboard, to paste in the chat.")
         copy.clicked.connect(self._copy_export)
-        for widget in (self._start, self._hero, self._overlay, self._hide, self._wrong, self._clear):
+        for widget in (self._start, self._hero, self._overlay, self._hide, self._wrong, self._clear, self._sync):
             controls.addWidget(widget)
         controls.addStretch()
         controls.addWidget(export)
@@ -179,12 +187,31 @@ class SkillsPage(Page):
         self._detail.setPlaceholderText("Select a hero: its three skills, in order, as they were read.")
         layout.addWidget(self._detail)
 
+        wrong = QHBoxLayout()
+        wrong.addWidget(QLabel("A reading that came out wrong:"))
+        self._which = SteadyComboBox()
+        self._which.setMinimumWidth(280)
+        self._which.setToolTip("Which reading of the selected hero to clear.")
+        self._forget = QPushButton("Clear this reading")
+        self._forget.setToolTip(
+            "Drops the reading you picked (or all of the hero's) so you can hold the skill again and read it anew. "
+            "Nothing else is touched."
+        )
+        self._forget.clicked.connect(self._forget_reading)
+        wrong.addWidget(self._which)
+        wrong.addWidget(self._forget)
+        wrong.addStretch()
+        layout.addLayout(wrong)
+
         self._log = QPlainTextEdit()
         self._log.setReadOnly(True)
         self._log.setMaximumBlockCount(300)
         self._log.setFixedHeight(100)
         layout.addWidget(self._log)
 
+        self._sync_task = Task()
+        self._sync_task.line.connect(self._log.appendPlainText)
+        self._sync_task.finished.connect(self._synced)
         self._tiers = _Tiers()
         self._tiers.ready.connect(self._tiers_ready)
         self._skills.state.connect(self._state)
@@ -276,7 +303,15 @@ class SkillsPage(Page):
             self._detail.clear()
             return
         name = next((r.name for r in self._rows if r.code == code), code)
-        self._detail.setPlainText(hero_summary(name, code, self._store.load(code), effect_titles(self._store)))
+        skills = self._store.load(code)
+        self._detail.setPlainText(hero_summary(name, code, skills, effect_titles(self._store)))
+        self._which.clear()
+        if skills:
+            self._which.addItem(f"All {len(skills)} reading(s) of {name}", None)
+            for skill in skills:
+                where = f"S{skill.slot}" if skill.slot is not None else "?"
+                self._which.addItem(f"{where}  {skill.name}", skill.name)
+        self._forget.setEnabled(bool(skills) and not self._skills.running)
 
     def show_hero(self, code: str) -> None:
         """Select a hero's row (the one just read) and show it, scrolled into view."""
@@ -319,6 +354,47 @@ class SkillsPage(Page):
         self._start.setEnabled(state != STOPPING)
         self._overlay.setEnabled(state == STOPPED and sys.platform == "win32")
         self._clear.setEnabled(state == STOPPED and any(r.clearable for r in self._rows))
+        self._forget.setEnabled(state == STOPPED and self._which.count() > 0)
+        self._sync.setEnabled(state == STOPPED and not self._sync_task.running)
+
+    def _sync_catalog(self) -> None:
+        """Bring the catalog up to date from here: the heroes released since the last sync are then known."""
+        from e7ac.cli import catalog as catalog_cli
+
+        self._sync.setEnabled(False)
+        self._set_status("Syncing the catalog (politely: one request per second, cached)...", "")
+        if not self._sync_task.start(lambda: catalog_cli.sync(source=None, world=None, refresh=False, offline=False)):
+            self._sync.setEnabled(True)
+
+    def _synced(self, problem: str) -> None:
+        self._sync.setEnabled(not self._skills.running)
+        self.context.heroes(reload=True)
+        self.reload()
+        self._set_status(
+            f"The catalog could not be synced: {problem}" if problem else "The catalog is up to date.",
+            "bad" if problem else "ok",
+        )
+
+    def _forget_reading(self) -> None:
+        """Clear by hand the reading picked (or every reading of the selected hero), after asking: it is read again by
+        holding the skill again."""
+        code = self._selected_code()
+        if code is None or self._skills.running or self._which.count() == 0:
+            return
+        name = self._which.currentData()
+        what = "all the readings of this hero" if name is None else f"the reading of {name}"
+        if QMessageBox.question(self, "Clear this reading", f"Clear {what}? Hold the skill again to read it anew.") != (
+            QMessageBox.StandardButton.Yes
+        ):
+            return
+        gone = self._store.forget(code, name)
+        self.reload()
+        self._set_status(
+            f"Cleared {gone} reading(s): hold {'those skills' if gone != 1 else 'that skill'} again."
+            if gone
+            else "Nothing to clear.",
+            "ok" if gone else "",
+        )
 
     def _clear_problems(self) -> None:
         """Drop the skills that have a problem, so they can be held again (the table then shows what is missing)."""

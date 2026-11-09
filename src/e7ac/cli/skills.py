@@ -33,7 +33,7 @@ from e7ac.skills.completeness import cut_effects
 from e7ac.skills.export import export_text
 from e7ac.skills.hero import HeroMemory, decide
 from e7ac.skills.importer import import_export
-from e7ac.skills.merge import assign, place
+from e7ac.skills.merge import assign, infer_slots, place
 from e7ac.skills.own_ui import shows_window, without_badge
 from e7ac.skills.problems import clear_problems, effect_titles, find_problems, skill_problems
 from e7ac.skills.store import SkillStore, skills_dir
@@ -43,7 +43,7 @@ from e7ac.sources.http import FetchError
 from e7ac.storage.db import session_scope
 from e7ac.ui.badge_probe import hide_badge
 from e7ac.ui.watch_signal import AMBER, GREEN, LIGHT, NoSignal, WatchSignal
-from e7ac.vision.skill_popup import SkillPopup, looks_like_popup, parse_skill_popup, read_hero_name
+from e7ac.vision.skill_popup import SkillPopup, looks_like_popup, parse_skill_popup, read_hero_name, rescue_level
 
 skills_app = typer.Typer(help="Skills read from the game's own skill popup: read, watch, list what is missing, export.")
 _OFFLINE = typer.Option("--offline", help="Use cached pages only.")
@@ -126,6 +126,9 @@ def store_popup(
     slot, passive = place(popup.name, kit)
     saved = store.save(code, popup, slot=slot, passive=passive)
     assign(store, code, kit)  # the skills read before this one get their slot too
+    if not kit and infer_slots(store, code):  # epic7db has no page for the hero: what the skills show places them
+        placed = next((s for s in store.load(code) if s.key == saved.stored.key), saved.stored)
+        slot, passive = placed.slot, placed.passive
     return ReadEvent(
         code,
         heroes[code].name or code,
@@ -185,10 +188,16 @@ def read(
     stored = 0
     for path in paths:
         try:
-            popup = parse_skill_popup(reader.read(load_image(path)))
+            image = load_image(path)
         except ImageError as exc:
             typer.echo(f"{path.name}: {exc}", err=True)
             continue
+        lines = reader.read(image)
+        popup = parse_skill_popup(lines)
+        if popup is None and (seen := resolve_hero_code(hero or read_hero_name(lines) or "", heroes)[0]) is not None:
+            titles = [n for info in kit_of(heroes[seen].name or "").values() for n in info.names]
+            popup = parse_skill_popup(lines, titles, by_layout=not titles)  # a passive; or a hero epic7db lacks
+        popup = rescue_level(image, reader, popup)
         if popup is None:
             typer.echo(f"{path.name}: no skill popup on this capture", err=True)
             continue
@@ -381,7 +390,9 @@ def run_skill_watch(options: SkillWatchOptions, badge: WatchSignal, stop: thread
             popup = parse_skill_popup(lines)
             if popup is None and (known := memory.recall(clock())) is not None and heroes[known].name:
                 titles = [n for info in kit_of(heroes[known].name).values() for n in info.names]
-                popup = parse_skill_popup(lines, titles)  # a passive that has no badge and no "Skill Enhance"
+                # a passive that has no badge and no "Skill Enhance"; by its shape when epic7db has no names for it
+                popup = parse_skill_popup(lines, titles, by_layout=not titles)
+            popup = rescue_level(image, reader, popup)  # the badge the page's OCR missed, read from the icon's corner
             if popup is None:
                 counts["ignored"] += 1
                 name = read_hero_name(lines)

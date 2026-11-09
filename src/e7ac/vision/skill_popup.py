@@ -26,7 +26,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from statistics import median
 from typing import Any, Final
 
@@ -100,6 +100,8 @@ class SkillPopup:
     effects: tuple[EffectPanel, ...]
     confidence: float
     """The lowest OCR score of the lines used."""
+    title_box: tuple[float, float, float, float] | None = None
+    """Where the title line is on the capture (x0, y0, x1, y1), to look for the badge the OCR missed."""
 
 
 _QUOTES: Final = {0x2019: "'", 0x2018: "'", 0x201C: '"', 0x201D: '"'}
@@ -114,13 +116,41 @@ def clean(text: str) -> str:
 
 def read_skill_popup(image: Any, reader: TextReader) -> SkillPopup | None:
     """The popup in a capture, or None when it has none."""
-    return parse_skill_popup(reader.read(image))
+    return rescue_level(image, reader, parse_skill_popup(reader.read(image)))
 
 
-def parse_skill_popup(lines: Sequence[TextLine], titles: Sequence[str] = ()) -> SkillPopup | None:
+BADGE_ONLY: Final = re.compile(r"^\+\s?(\d{1,2})$")
+
+
+def rescue_level(image: Any, reader: TextReader, popup: SkillPopup | None) -> SkillPopup | None:
+    """The popup with its level, when the OCR of the whole page missed the "+N" badge on the icon (the user's capture of
+    Renoa's Flower of Devoured Fate, +7, 2026-11-09): the corner of the icon is cut out, enlarged and read alone. Only
+    for a skill that has enhancement steps and no level read: a skill at +0 shows no badge at all and stays as it is."""
+    if popup is None or popup.level is not None or popup.title_box is None or not popup.enhance:
+        return popup
+    import cv2
+
+    x0, y0, _x1, y1 = popup.title_box
+    height = y1 - y0
+    left, top = max(0, int(x0 - 3.4 * height)), max(0, int(y0 - 0.65 * height))
+    right, bottom = int(x0 + 0.3 * height), int(y1 + 0.4 * height)
+    crop = image[top:bottom, left:right]
+    if crop.size == 0:
+        return popup
+    for line in reader.read(cv2.resize(crop, None, fx=3.0, fy=3.0, interpolation=cv2.INTER_CUBIC)):
+        found = BADGE_ONLY.match(clean(line.text))
+        if found:
+            return replace(popup, level=int(found.group(1)))
+    return popup
+
+
+def parse_skill_popup(
+    lines: Sequence[TextLine], titles: Sequence[str] = (), by_layout: bool = False
+) -> SkillPopup | None:
     """The popup on a screen. `titles`: the names of the skills of the hero the popup is known to belong to. A popup
     with none of the marks the title is found by (a passive that cannot be enhanced has no badge, no cost row and no
-    "Skill Enhance") is still read when one of its lines is one of these names."""
+    "Skill Enhance") is still read when one of its lines is one of these names. `by_layout`: the hero's names are not
+    known (epic7db has no page for a new hero): such a popup is then found by its shape alone."""
     rows = [(line, clean(line.text)) for line in lines if clean(line.text)]
     if len(rows) < MIN_LINES:
         return None
@@ -129,6 +159,8 @@ def parse_skill_popup(lines: Sequence[TextLine], titles: Sequence[str] = ()) -> 
     # and one whose text begins "+3 Fighting Spirit at the start" looks like a badge with a title.
     head = rows if label is None else [r for r in rows if r[0].box.y1 <= label[0].box.y0 + 4]
     title = _title(head) or _title_without_badge(head) or _title_above_description(rows) or _title_named(rows, titles)
+    if title is None and by_layout and not titles:
+        title = _title_by_layout(rows)
     if title is None:
         return None
     badge, title_line = title
@@ -188,6 +220,7 @@ def parse_skill_popup(lines: Sequence[TextLine], titles: Sequence[str] = ()) -> 
         enhance=steps,
         effects=panels,
         confidence=min(scores),
+        title_box=(title_line.box.x0, title_line.box.y0, title_line.box.x1, title_line.box.y1),
     )
 
 
@@ -305,6 +338,27 @@ def _title_named(rows: Sequence[tuple[TextLine, str]], titles: Sequence[str]) ->
             if line.box.x0 - 260 <= r[0].box.x0 <= line.box.x0 - 60 and 0 <= r[0].box.y0 - line.box.y1 <= 170
         ]
         if len(under) >= 2:
+            return None, line
+    return None
+
+
+def _title_by_layout(rows: Sequence[tuple[TextLine, str]]) -> tuple[None, TextLine] | None:
+    """(None, title line) for a skill with no badge, no cost row and no "Skill Enhance" of a hero whose skill names are
+    not known (Renoa's Black Rose, the user's capture 2026-11-09): a large line with a paragraph of three lines or more
+    under it, starting a whole icon to its left. The popup's icon is large (about two and a half lines of text); an
+    effect panel's is half of that, and a panel's title is never taken for the popup's."""
+    for line, text in rows:
+        height = line.box.height
+        if height < 28 or sum(c.isalpha() for c in text) < 3 or text.lower() in UI_LABELS or _labelled(line, rows):
+            continue
+        under = [
+            r
+            for r in rows
+            if line.box.x0 - 6 * height <= r[0].box.x0 <= line.box.x0 - 2 * height
+            and 0 <= r[0].box.y0 - line.box.y1 <= 4.5 * height
+            and sum(c.isalpha() for c in r[1]) >= 3
+        ]
+        if len(under) >= 3:
             return None, line
     return None
 

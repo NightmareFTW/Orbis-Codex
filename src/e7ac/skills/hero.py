@@ -13,7 +13,9 @@ hero it saw there and uses it for the popups that follow. The evidence, stronges
 4. no usable name: the hero remembered from the hero screen, if it was seen within `REMEMBER` seconds.
 
 A name that is neither whole nor a start is never turned into a hero by closeness (the margin rule is the only
-closeness there is). Pure logic, no screen and no clock of its own."""
+closeness there is). A whole name that is no hero of the catalog (a hero newer than the catalog: Renoa, 2026-11-09) is
+never given to the remembered hero either: the popup is refused and the catalog is to be synced. Pure logic, no screen
+and no clock of its own."""
 
 from __future__ import annotations
 
@@ -94,13 +96,23 @@ def decide(
                 "choose the hero you opened (or clear the choice to use the name on the screen)",
             )
         return Decision(code, "", "chosen")
+    if (
+        remembered is not None
+        and remembered in heroes
+        and named is None
+        and read
+        and sum(c.isalpha() for c in read) >= MIN_START
+        and not fits(remembered)
+        and not any(starts(read, hero.name or "") for hero in heroes.values())
+    ):  # a clear name that is nobody's start: a hero the catalog does not have yet, not the remembered one
+        return Decision(None, f"{problem} (a hero newer than your catalog? press Sync catalog)")
     if remembered is not None and remembered in heroes and (named is None or named == remembered or fits(remembered)):
         return Decision(remembered, "", "hero screen")
     if named is not None:
         return Decision(named, "", how)
     return Decision(
         None,
-        problem
+        f"{problem} (a hero newer than your catalog? press Sync catalog)"
         if read and problem
         else "the hero name was not read: open the hero's own screen first (the name is read there) or name the hero",
     )
