@@ -199,6 +199,24 @@ class Kit:
     4); 0 = none."""
     enemy_support_effects: list[Effect] = field(default_factory=list)
     """Effects after an enemy uses a non-attack skill (Celine's Intuition: cleanse, Blink, Combat Readiness)."""
+    always_crit: tuple[int, ...] = ()
+    """Skill slots whose successful attack is always a critical hit (Afternoon Soak Flan S1 and S3)."""
+    ally_turn_effects: list[Effect] = field(default_factory=list)
+    """Effects on an ally at the start of its turn (School Nurse Yulha's S2: `receivers = "target"` is that ally)."""
+    ally_attack_effects: list[Effect] = field(default_factory=list)
+    """Effects after an ally (not the hero) attacks with one of `ally_attack_slots`, on the enemy it attacked (Tactical
+    Archetype Coli's Guard: Swift Attack for the ally, Flank Strike; Flan's Dual Attack): kind "swift" gives the ally
+    Combat Readiness, "self_dual" and "extra_attack" attack the same target."""
+    ally_attack_slots: tuple[int, ...] = (1, 2, 3)
+    ally_attack_single: bool = False
+    """Only an attack on a single enemy triggers `ally_attack_effects` (Coli: "after a Single Attack")."""
+    ally_attack_cooldown: int = 0
+    """Own turns before `ally_attack_effects` can trigger again."""
+    ally_attack_focus: bool = False
+    """Each trigger consumes 1 Focus, and needs it (Flan's I'm Still On Vacation!)."""
+    focus_start: int = 0
+    focus_gain: dict[int, int] = field(default_factory=dict)
+    """Focus held at the start of the battle and gained by using the skill of each slot."""
     unmodelled: list[str] = field(default_factory=list)
     unread: list[int] = field(default_factory=list)
     """Skill slots whose text describes effects (inflicts, heals, dispels, ...) but of which none was read: epic7db
@@ -235,6 +253,8 @@ class Kit:
             hit_team_cr=0.0,
             soul_shield=0,
             enemy_support_effects=[],
+            ally_turn_effects=[],
+            ally_attack_effects=[],
         )
 
 

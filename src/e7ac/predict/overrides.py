@@ -43,6 +43,13 @@ One file per hero, named by its code (`c2049.toml`); every number carries where 
     hit_team_cr = 0.13            # Combat Readiness every ally gains after this hero is attacked
     soul_gain = { 1 = 2, 3 = 3 }  # Soul gained by using the skill of a slot
     soul_shield = 4               # Soul consumed to nullify the damage of an attack (Defensive Magic)
+    always_crit = [1, 3]          # skill slots whose successful attack is always a critical hit
+    ally_attack_slots = [1]       # an ally's attack with one of these slots triggers `when = "ally_attack"` effects
+    ally_attack_single = true     # ... only an attack on a single enemy
+    ally_attack_cooldown = 4      # ... at most once every N own turns
+    ally_attack_focus = true      # ... each time consuming (and needing) 1 Focus
+    focus_start = 3               # Focus at the start of the battle
+    focus_gain = { 1 = 1 }        # Focus gained by using the skill of a slot
 
     [[effect]]
     slot = 3                      # 1-3
@@ -93,7 +100,13 @@ attacked), block (buffs have no effect and none can be received), nullifier (the
 lands on the holder is nullified), deify (Critical Hit Chance +50 points when attacking, 50% less damage from attacks),
 res (Effect Resistance up); SPEC D110: `receivers = "debuffed"` on a cleanse picks one ally that holds a debuff,
 `when = "enemy_support"` effects happen after an enemy uses a non-attack skill (an `extra_attack` there attacks a random
-enemy of the hero), passives `hit_team_cr`, `soul_gain` and `soul_shield`;
+enemy of the hero), passives `hit_team_cr`, `soul_gain` and `soul_shield`; SPEC D111: `when = "ally_turn"` effects
+act on an ally at the start of its turn (`receivers = "target"`), `when = "ally_attack"` effects follow an ally's
+attack on the enemy it hit (`swift`, `self_dual`, `extra_attack`, any debuff on that enemy; passives `ally_attack_*`,
+`focus_*`),
+kinds skill_nullifier (the next damage from a skill is nullified), transfer (the caster's debuffs go to the targets),
+rescue (School Nurse Yulha's S3), overload (Attack and Speed +50%, then Energy Depletion), detonate_dots (every bleed,
+burn and poison at once), conditions "overload" / "no_overload", passive `always_crit`;
 `when = "before"` effects happen before the attack of their slot, on the targets it has chosen; conditions "crit",
 "debuffed", "half" (a target with half its Health or less) and "proc" join "kill" and "stun"; "proc_kill" (SPEC D109)
 follows an `extra_attack` that defeated an enemy and "cd3" holds while the hero's S3 is on cooldown.
@@ -171,6 +184,13 @@ KINDS: Final = frozenset(
         "restrict",
         "stealth",
         "block",
+        "skill_nullifier",
+        "transfer",
+        "rescue",
+        "swift",
+        "self_dual",
+        "overload",
+        "detonate_dots",
     }
 )
 _DEBUFFS: Final = frozenset(
@@ -213,9 +233,13 @@ WHEN: Final = frozenset(
         "variant",
         "before",
         "enemy_support",
+        "ally_turn",
+        "ally_attack",
     }
 )
-CONDITIONS: Final = frozenset({"", "kill", "stun", "crit", "debuffed", "half", "proc", "proc_kill", "cd3"})
+CONDITIONS: Final = frozenset(
+    {"", "kill", "stun", "crit", "debuffed", "half", "proc", "proc_kill", "cd3", "overload", "no_overload"}
+)
 PASSIVES: Final = frozenset(
     {
         "reflect",
@@ -253,6 +277,13 @@ PASSIVES: Final = frozenset(
         "hit_team_cr",
         "soul_gain",
         "soul_shield",
+        "always_crit",
+        "ally_attack_slots",
+        "ally_attack_single",
+        "ally_attack_cooldown",
+        "ally_attack_focus",
+        "focus_start",
+        "focus_gain",
     }
 )
 
@@ -359,6 +390,8 @@ def apply_override(kit: Kit, cooldowns: Mapping[int, int], override: KitOverride
         variant_effects=[],
         before_use={},
         enemy_support_effects=[],
+        ally_turn_effects=[],
+        ally_attack_effects=[],
     )
     revive_effects: list[Effect] = []
     for placed in override.effects:
@@ -384,6 +417,10 @@ def apply_override(kit: Kit, cooldowns: Mapping[int, int], override: KitOverride
             out.before_use.setdefault(placed.slot, []).append(placed.effect)
         elif placed.when == "enemy_support":
             out.enemy_support_effects.append(placed.effect)
+        elif placed.when == "ally_turn":
+            out.ally_turn_effects.append(placed.effect)
+        elif placed.when == "ally_attack":
+            out.ally_attack_effects.append(placed.effect)
         elif placed.effect.kind in ("heal", "resurrect"):  # revive: `value` = Health fraction regained
             out.revive = placed.effect.value
         else:
@@ -426,6 +463,13 @@ def apply_override(kit: Kit, cooldowns: Mapping[int, int], override: KitOverride
     out.hit_team_cr = float(passive.get("hit_team_cr", out.hit_team_cr))
     out.soul_gain = {int(k): int(v) for k, v in dict(passive.get("soul_gain", out.soul_gain)).items()}
     out.soul_shield = int(passive.get("soul_shield", out.soul_shield))
+    out.always_crit = tuple(int(s) for s in passive.get("always_crit", out.always_crit))
+    out.ally_attack_slots = tuple(int(s) for s in passive.get("ally_attack_slots", out.ally_attack_slots))
+    out.ally_attack_single = bool(passive.get("ally_attack_single", out.ally_attack_single))
+    out.ally_attack_cooldown = int(passive.get("ally_attack_cooldown", out.ally_attack_cooldown))
+    out.ally_attack_focus = bool(passive.get("ally_attack_focus", out.ally_attack_focus))
+    out.focus_start = int(passive.get("focus_start", out.focus_start))
+    out.focus_gain = {int(k): int(v) for k, v in dict(passive.get("focus_gain", out.focus_gain)).items()}
     return out, {**cooldowns, **override.cooldowns}
 
 

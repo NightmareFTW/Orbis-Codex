@@ -1,0 +1,61 @@
+# Afternoon Soak Flan
+hero = "c5110"
+source = "in-game skill popups read by the Skill reader (the user's skills folder, 2026-11-09, the Journal's Preview Skills): S1 at +5, S2 and S3 at +0, with their enhancement steps and effect panels; multipliers from Fribbels' skill data (community)"
+status = "verified"
+replace = [1, 2, 3]
+handles = ["Dual Attack", "Decrease Defense", "Stun"]
+cooldowns = { 3 = 3 }  # S3 "4 turns" on the popup read at +0; its +3 step is -1 turn
+unmodelled = [
+    "S1: on her own turn she uses It's a Whopper!, an attack on all enemies (no multiplier of its own: the single-target S1 data is used, so her area damage is understated, NV-78)",
+    "S2: Evasion +50% (+50% more with Focus): Evasion is not simulated",
+    "S3 Soulburn (10 Souls): ignores Effect Resistance",
+    "the stun chance of S1 is 40% on the popup read at +5 (its +3 step is already in)",
+]
+
+# Passive: "At the start of the first battle, gains 3 Focus. ... After an ally uses a basic skill, consumes 1 Focus, triggering a
+# Dual Attack, and increases Combat Readiness of the caster by 25%" (+1% +2% +2% +2% +3%: 35%). It's a Whopper! gains 1 Focus.
+# A successful attack of S1 and of S3 is always a critical hit.
+[passive]
+always_crit = [1, 3]
+focus_start = 3
+focus_gain = { 1 = 1 }
+ally_attack_slots = [1]
+ally_attack_focus = true
+
+[[effect]]
+slot = 2
+when = "ally_attack"
+kind = "self_dual"
+note = "S2: Dual Attack: she attacks the same target with a basic attack"
+
+[[effect]]
+slot = 2
+when = "ally_attack"
+kind = "cr"
+value = 0.35
+receivers = "self"
+note = "S2: Combat Readiness +35% (25% at +0)"
+
+# S1 Do Not Disturb: attacks the enemy "with a 40% chance to stun for 1 turn".
+[[effect]]
+slot = 1
+kind = "stun"
+turns = 1
+chance = 0.4
+note = "S1: a 40% chance to stun for 1 turn"
+
+# S3 In the Palm of My Hand (4 turns at +0, 3 at +3): "Attacks the enemy, decreasing Defense for 2 turns, and increases
+# Combat Readiness of all allies by 20%."
+[[effect]]
+slot = 3
+kind = "def"
+value = -0.7
+turns = 2
+note = "S3: decreased Defense for 2 turns"
+
+[[effect]]
+slot = 3
+kind = "cr"
+value = 0.2
+receivers = "all"
+note = "S3: Combat Readiness +20% to all allies"

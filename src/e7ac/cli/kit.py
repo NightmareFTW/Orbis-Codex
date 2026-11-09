@@ -54,6 +54,17 @@ def show(
         typer.echo(f"  S{slot} ({label}): " + (", ".join(_describe(e) for e in effects) or "-"))
     for slot, effects in sorted(kit.before_use.items()):
         typer.echo(f"  before the S{slot} attack: " + ", ".join(_describe(e) for e in effects))
+    if kit.ally_attack_effects:
+        typer.echo(
+            f"  after an ally attacks (S{'/S'.join(str(s) for s in kit.ally_attack_slots)}"
+            + (", single target" if kit.ally_attack_single else "")
+            + (f", every {kit.ally_attack_cooldown} turns" if kit.ally_attack_cooldown else "")
+            + (", costs 1 Focus" if kit.ally_attack_focus else "")
+            + "): "
+            + ", ".join(_describe(e) for e in kit.ally_attack_effects)
+        )
+    if kit.ally_turn_effects:
+        typer.echo("  at the start of an ally's turn: " + ", ".join(_describe(e) for e in kit.ally_turn_effects))
     if kit.enemy_support_effects:
         typer.echo(
             "  after an enemy uses a non-attack skill: " + ", ".join(_describe(e) for e in kit.enemy_support_effects)
@@ -262,6 +273,12 @@ def _passives(kit: Kit) -> list[str]:
         found.append(f"Penetration Resistance {kit.pen_resist:.0%} for every ally")
     if kit.ally_hit_cr:
         found.append(f"+{kit.ally_hit_cr:.0%} Combat Readiness after every attack an ally suffers")
+    if kit.always_crit:
+        found.append("a successful attack of S" + "/S".join(str(s) for s in kit.always_crit) + " is always critical")
+    if kit.focus_start or kit.focus_gain:
+        found.append(
+            f"Focus {kit.focus_start} at the start" + "".join(f", S{s} +{n}" for s, n in sorted(kit.focus_gain.items()))
+        )
     if kit.hit_team_cr:
         found.append(f"every ally gains {kit.hit_team_cr:.0%} Combat Readiness after this hero is attacked")
     if kit.soul_shield:

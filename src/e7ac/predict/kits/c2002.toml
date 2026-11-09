@@ -1,0 +1,60 @@
+# Fallen Cecilia
+hero = "c2002"
+source = "in-game skill popups read by the Skill reader (the user's skills folder, 2026-11-09, the Journal's Preview Skills): S1, S2 and S3 at +0 with their enhancement steps and effect panels; multipliers and the 10% max Health barrier from Fribbels' skill data (community)"
+status = "verified"
+replace = [1, 2, 3]
+handles = ["Provoke", "Barrier", "Transfer", "Skill Nullifier"]
+cooldowns = { 3 = 4 }  # S3 "5 turns" on the popup read at +0; its +3 step is -1 turn
+unmodelled = [
+    "S2: 50% additional damage reduction for all allies (applies to additional damage only, which the model does not tell apart: Abundance, Rupture, fixed damage...)",
+    "the barrier strength steps of S2 (+50% in all): Fribbels' 10% of max Health is used as given (NV-76)",
+    "S1 Soulburn (10 Souls): ignores Effect Resistance",
+]
+
+# S1 Mistake: attacks the enemy "and has a 85% chance to provoke for 1 turn" (+5% and +10% effect chance: 100%).
+[[effect]]
+slot = 1
+kind = "provoke"
+turns = 1
+chance = 1.0
+note = "S1: provokes for 1 turn (85% at +0, 100% at +5)"
+
+# S2 Strong Instinct (passive): "At the start of battle, grants a barrier to all allies for 2 turns, and at the end of the
+# turn, grants a barrier to the ally with the lowest Health for 2 turns. Barrier strength increases proportional to the
+# caster's max Health."
+[[effect]]
+slot = 2
+when = "start"
+kind = "barrier"
+scaling = [0.1, 0.0, 0.0]
+receivers = "all"
+turns = 2
+note = "S2: a barrier of 10% of her max Health to all allies for 2 turns at the start of the battle"
+
+[[effect]]
+slot = 2
+when = "turn"
+kind = "barrier"
+scaling = [0.1, 0.0, 0.0]
+receivers = "lowest:1"
+turns = 2
+note = "S2: each own turn (the game: end of turn) a barrier to the ally with the lowest Health for 2 turns"
+
+# S3 Spear of Resentment (5 turns at +0, 4 at +3): attacks all enemies, dispels all buffs "before transferring all
+# debuffs inflicted on the caster. Grants skill nullifier once to all allies." Skill Nullifier: nullifies damage from skills.
+[[effect]]
+slot = 3
+kind = "dispel"
+note = "S3: dispels all buffs from the enemies it attacked"
+
+[[effect]]
+slot = 3
+kind = "transfer"
+note = "S3: transfers all debuffs inflicted on the caster to the targets (all of them, assumed)"
+
+[[effect]]
+slot = 3
+kind = "skill_nullifier"
+receivers = "all"
+turns = 99
+note = "S3: Skill Nullifier once to all allies (the next damage from a skill is nullified)"

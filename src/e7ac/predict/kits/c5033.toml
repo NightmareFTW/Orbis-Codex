@@ -1,0 +1,109 @@
+# Tactical Archetype Coli
+hero = "c5033"
+source = "in-game skill popups read by the Skill reader (the user's skills folder, 2026-11-09, the Journal's Preview Skills): S1, S2 and S3 at +0 with their enhancement steps and effect panels; multipliers and target counts from Fribbels' skill data (community; its \"S2\" entry is Flank Strike)"
+status = "verified"
+replace = [1, 2, 3]
+handles = ["Bleed", "Detonate", "Overload", "Energy Depletion", "Swift Attack", "Dispel", "Decrease Defense", "Stun"]
+cooldowns = { 2 = 0, 3 = 4 }  # S3 "5 turns" on the popup read at +0, its +3 step is -1 turn; S2 is a passive (its "4 turns" is the time between two Guards)
+unmodelled = [
+    "S3 Bomb's damage (in proportion to her Attack, no number): only the stun of 1 turn it ends with is simulated",
+    "S3 attacks all enemies and dispels two buffs, the bomb having 75% (+10% +15%) chance",
+    "S1 Soulburn (10 Souls): one more bleeding effect",
+    "Bleed's damage (30% of Attack per turn, MECH-DOT-01 `assumed`) and that a detonation takes every bleed, burn and poison of the target (NV-77)",
+    "Guard's Swift Attack is given at once, not at the end of the ally's turn",
+]
+
+# S1 Sweep: "a 55% chance each to inflict two bleeding effects for 2 turns, and when the caster is granted overload,
+# increases effect chance by 20%. At the end of the turn, detonates bleeding effects inflicted on the target."
+# (+10% and +15% effect chance: 80% at +5, 100% with overload.)
+[[effect]]
+slot = 1
+kind = "bleed"
+count = 2
+turns = 2
+chance = 0.8
+condition = "no_overload"
+note = "S1: two bleeding effects, 80% each at +5"
+
+[[effect]]
+slot = 1
+kind = "bleed"
+count = 2
+turns = 2
+chance = 1.0
+condition = "overload"
+note = "S1: ... 100% each while overloaded"
+
+[[effect]]
+slot = 1
+kind = "detonate_dots"
+note = "S1: at the end of the turn detonates the bleeding effects inflicted on the target"
+
+# S2 Guard (passive, 4 turns): "After an ally except for the caster uses a Single Attack, grants swift attack to the ally
+# target, and activates Flank Strike against the enemy target." Flank Strike: attacks the enemy, dispels one buff and
+# inflicts decreased Defense for 2 turns, then increases Combat Readiness of the caster by 15% (+1% +1% +3%: 20%).
+# Swift Attack: Combat Readiness +50% at the end of the turn.
+[passive]
+ally_attack_single = true
+ally_attack_cooldown = 4
+
+[[effect]]
+slot = 2
+when = "ally_attack"
+kind = "swift"
+value = 0.5
+note = "Guard: Swift Attack for the ally that attacked (Combat Readiness +50%)"
+
+[[effect]]
+slot = 2
+when = "ally_attack"
+kind = "extra_attack"
+value = 2
+note = "Guard: Flank Strike, an attack on the enemy the ally attacked"
+
+[[effect]]
+slot = 2
+when = "ally_attack"
+kind = "dispel"
+count = 1
+note = "Flank Strike: dispels one buff"
+
+[[effect]]
+slot = 2
+when = "ally_attack"
+kind = "def"
+value = -0.7
+turns = 2
+note = "Flank Strike: decreased Defense for 2 turns"
+
+[[effect]]
+slot = 2
+when = "ally_attack"
+kind = "cr"
+value = 0.2
+receivers = "self"
+note = "Flank Strike: Combat Readiness +20% for Coli (15% at +0)"
+
+# S3 Assault (5 turns at +0, 4 at +3): "After granting overload to the caster for 2 turns, attacks all enemies with maximum
+# output, dispelling two buffs, and has a 75% chance to inflict a bomb for 2 turns. At the end of the turn, detonates bombs
+# inflicted on the target." Bomb: at the end of the duration damage in proportion to her Attack and a stun for 1 turn.
+# Overload: Attack and Speed +50%, then Energy Depletion (-50%) for 1 turn.
+[[effect]]
+slot = 3
+when = "before"
+kind = "overload"
+turns = 2
+note = "S3: overload for 2 turns before the attack"
+
+[[effect]]
+slot = 3
+kind = "dispel"
+count = 2
+note = "S3: dispels two buffs"
+
+[[effect]]
+slot = 3
+kind = "stun"
+turns = 1
+chance = 1.0
+note = "S3: the bomb (75% at +0, 100% at +5) is detonated at the end of the turn: a stun of 1 turn"

@@ -1,0 +1,58 @@
+# School Nurse Yulha
+hero = "c2131"
+source = "in-game skill popups read by the Skill reader (the user's skills folder, 2026-11-09, the Journal's Preview Skills): S1 and S2 at +0, S3 at +3, with their enhancement steps and effect panels; multipliers, the heal (8% of max Health) and the full-Health heal from Fribbels' skill data (community)"
+status = "verified"
+replace = [1, 2, 3]
+handles = ["Bleed", "Detonate", "Superhumanization"]
+cooldowns = { 3 = 4 }  # S3 "4 turns" on the popup read at +3, where its three -1 steps are already in
+unmodelled = [
+    "S2: Attack in proportion to max Health at the start of the first battle (no number in the text)",
+    "S2 heal: the +35% healing of its enhancement steps is not applied, Fribbels' 8% is used as given (NV-76)",
+    "S1 Soulburn (10 Souls): an extra attack with the same skill (Souls are not simulated)",
+    "whether S2 also heals and cleanses herself at the start of her own turn (it does here), and which ally S3 saves when none is dead (the one with the least Health)",
+    "Bleed's damage (30% of Attack per turn, MECH-DOT-01 `assumed`) and that a detonation takes every bleed, burn and poison of the target (NV-77)",
+]
+
+# S1 This'll Sting!: attacks the enemy "with a 80% chance each to inflict two bleeding effects for 2 turns. At the end of the
+# turn, detonates bleeding effects inflicted on the target." (+5% and +10% effect chance: 95% at +5).
+[[effect]]
+slot = 1
+kind = "bleed"
+count = 2
+turns = 2
+chance = 0.95
+note = "S1: two bleeding effects for 2 turns, each with its own chance (80% at +0, 95% at +5)"
+
+[[effect]]
+slot = 1
+kind = "detonate_dots"
+note = "S1: at the end of the turn detonates the bleeding effects inflicted on the target"
+
+# S2 There, It'll Feel Better (passive): "At the start of an ally's turn, dispels one debuff from the target and recovers
+# Health in proportion to the caster's max Health."
+[[effect]]
+slot = 2
+when = "ally_turn"
+kind = "cleanse"
+count = 1
+receivers = "target"
+note = "S2: at the start of an ally's turn dispels one debuff from it"
+
+[[effect]]
+slot = 2
+when = "ally_turn"
+kind = "heal"
+scaling = [0.08, 0.0, 0.0]
+receivers = "target"
+note = "S2: ... and recovers 8% of her max Health (Fribbels)"
+
+# S3 It's Time to Be Reborn! (4 turns at +3): "Dispels all debuffs from an ally except for the caster before fully
+# recovering Health. Grants superhumanization to the target for 3 turns and increases Combat Readiness by 50%. When the
+# target is already dead, revives them with 100% Health before the same effect is applied."
+# Superhumanization: max Health and Speed +100%.
+[[effect]]
+slot = 3
+kind = "rescue"
+value = 0.5
+turns = 3
+note = "S3: a dead ally comes back, else the weakest one is cleansed and fully healed; superhumanization for 3 turns, Combat Readiness +50%"

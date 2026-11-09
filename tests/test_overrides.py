@@ -994,3 +994,146 @@ def test_celine_kizuna_ai_and_frieren_kits_carry_the_popup_numbers() -> None:
     assert [(e.kind, e.turns) for e in frieren.on_use[1]] == [("immunity", 1)]
     assert [(e.kind, e.value, e.turns) for e in frieren.before_use[3]] == [("atk", 0.5, 3)]
     assert [e.kind for e in frieren.on_use[3]] == ["dispel", "cr"]
+
+
+def test_nullifier_transfer_rescue_bleed_and_overload_work_in_battle() -> None:
+    """Fallen Cecilia, School Nurse Yulha and Tactical Archetype Coli (SPEC D111)."""
+    import random
+
+    from e7ac.domain.codes import Stat
+    from e7ac.predict.battle import _max_hp, _State, _strike, _use
+    from tests.test_effects import unit
+
+    rng = random.Random(1)
+    team = [unit("a", "you"), unit("b", "you"), unit("e", "them")]
+    hp, cr = [1e4, 1e4, 1e4], [0.0, 0.0, 0.0]
+
+    # a skill nullifier takes the next damage from a skill, once
+    state = [_State(), _State(timers={"skill_nullifier": 99}), _State()]
+    _strike(team, hp, cr, state, 1, 1000.0, rng, by=2)
+    assert hp[1] == 1e4 and "skill_nullifier" not in state[1].timers
+    _strike(team, hp, cr, state, 1, 1000.0, rng, by=2)
+    assert hp[1] == 9000
+
+    # transfer: the caster's debuffs go to the target
+    mine = _State(debuffs={"def": (-0.7, 2)}, dots=[(100.0, 2)], timers={"silence": 1})
+    state = [mine, _State(), _State()]
+    _use(Effect("transfer", True, 0.0, 0, 1.0), 0, [2], team, [1e4] * 3, cr, state, rng)
+    assert not mine.debuffed and state[2].debuffs == {"def": (-0.7, 2)} and state[2].dots == [(100.0, 2)]
+    assert state[2].timers["silence"] == 1
+
+    # rescue: a dead ally comes back at full Health with superhumanization (Health and Speed +100%)
+    hp = [1e4, 0.0, 1e4]
+    state = [_State(), _State(debuffs={"atk": (-0.5, 2)}), _State()]
+    _use(Effect("rescue", False, 0.5, 3, 1.0), 0, [], team, hp, cr, state, rng)
+    assert hp[1] == pytest.approx(2e4) and _max_hp(team, state, 1) == pytest.approx(2e4)
+    assert state[1].factor("spd") == pytest.approx(2.0) and cr[1] == pytest.approx(0.5)
+    assert not state[1].debuffs
+    hp = [1e4, 3000.0, 6000.0]  # nobody dead: the weakest ally is saved
+    state = [_State(), _State(), _State()]
+    _use(Effect("rescue", False, 0.5, 3, 1.0), 0, [], team, hp, cr, state, rng)
+    assert hp[1] == pytest.approx(2e4) and hp[2] == 6000.0 and state[0].healed == pytest.approx(17000)
+
+    # two bleeding effects with their own chances, detonated at once: damage per turn x turns left
+    state = [_State(), _State(), _State()]
+    hp = [1e4] * 3
+    _use(Effect("bleed", True, 0.0, 2, 2.0, count=2), 0, [2], team, hp, cr, state, rng)
+    assert len(state[2].dots) == 2
+    _use(Effect("detonate_dots", True, 0.0, 0, 1.0), 0, [2], team, hp, cr, state, rng)
+    assert not state[2].dots and hp[2] == pytest.approx(1e4 - 2 * 2 * 0.3 * team[0].stats[Stat.ATK])
+
+    # overload: Attack and Speed +50%, then Energy Depletion (-50%) for 1 turn
+    over = _State()
+    over.apply(Effect("overload", False, 0.0, 2, 1.0))
+    assert over.factor("atk") == pytest.approx(1.5) and over.factor("spd") == pytest.approx(1.5)
+    over.tick()
+    over.tick()
+    assert over.factor("atk") == pytest.approx(0.5) and over.factor("spd") == pytest.approx(0.5)
+    over.tick()
+    assert over.factor("atk") == 1.0
+
+
+def test_ally_triggers_always_critical_hits_and_focus_work_in_battle() -> None:
+    """Yulha's S2, Coli's Guard and Flan's Dual Attack (SPEC D111)."""
+    from e7ac.predict.battle import Combatant, simulate
+    from e7ac.predict.damage import SkillPower
+    from tests.test_effects import S1, unit
+
+    stats = unit("x", "you").stats
+
+    def healed(kit: Kit) -> float:
+        yulha = unit("y", "you", kit, hp=10**6)
+        return simulate([yulha, unit("a", "you", hp=10**5), unit("e", "them", hp=10**6)], runs=50).heroes[0].healed
+
+    heal = Effect("heal", False, 0.0, 0, 1.0, scaling=(0.1, 0.0, 0.0), receivers="target")
+    assert healed(Kit(ally_turn_effects=[heal])) > 0 and healed(Kit()) == 0
+
+    skills = {1: SkillPower(0.05, 1.0, 0.0), 2: SkillPower(6.0, 1.0, 0.0)}
+
+    def coli_damage(kit: Kit) -> float:  # an ally's attack is followed by her Flank Strike
+        coli = Combatant("c", "you", stats, 150, skills, {}, kit)
+        ally = unit("a", "you", hp=10**7)
+        return simulate([coli, ally, unit("e", "them", hp=10**7)], runs=50).heroes[0].damage
+
+    follow = [Effect("extra_attack", False, 2.0, 0, 1.0)]
+    never = coli_damage(Kit())
+    assert coli_damage(Kit(ally_attack_effects=follow, ally_attack_single=True)) > never * 2
+    assert coli_damage(Kit(ally_attack_effects=follow, ally_attack_cooldown=6)) < coli_damage(
+        Kit(ally_attack_effects=follow)
+    )
+
+    def flan_damage(focus: int) -> float:  # Dual Attack costs Focus: with none she never follows
+        kit = Kit(
+            ally_attack_effects=[Effect("self_dual", False, 0.0, 0, 1.0)], ally_attack_focus=True, focus_start=focus
+        )
+        flan = Combatant("f", "you", stats, 150, S1, {}, kit)
+        return simulate([flan, unit("a", "you", hp=10**7), unit("e", "them", hp=10**7)], runs=50).heroes[0].damage
+
+    assert flan_damage(3) > flan_damage(0) * 1.1
+
+    def crit_damage(
+        always: tuple[int, ...],
+    ) -> float:  # no critical chance at all: only the guarantee gives critical hits
+        flan = Combatant("f", "you", stats, 150, {1: SkillPower(1.0, 1.0, 0.0)}, {}, Kit(always_crit=always))
+        return simulate([flan, unit("e", "them", hp=10**7)], runs=50).heroes[0].damage
+
+    assert crit_damage((1,)) > crit_damage(()) * 1.3
+
+
+def test_cecilia_yulha_coli_and_flan_kits_carry_the_popup_numbers() -> None:
+    kits = load_overrides()
+    cecilia, cooldowns = apply_override(Kit(), {3: 5}, kits["c2002"])
+    assert cooldowns == {3: 4} and (cecilia.on_use[1][0].kind, cecilia.on_use[1][0].chance) == ("provoke", 1.0)
+    assert [(e.kind, e.scaling, e.receivers, e.turns) for e in cecilia.at_start] == [
+        ("barrier", (0.1, 0.0, 0.0), "all", 2)
+    ]
+    assert [(e.kind, e.receivers) for e in cecilia.on_turn] == [("barrier", "lowest:1")]
+    assert [e.kind for e in cecilia.on_use[3]] == ["dispel", "transfer", "skill_nullifier"]
+    yulha, cooldowns = apply_override(Kit(), {3: 7}, kits["c2131"])
+    assert cooldowns == {3: 4}
+    assert [(e.kind, e.count, e.chance, e.turns) for e in yulha.on_use[1]] == [
+        ("bleed", 2, 0.95, 2),
+        ("detonate_dots", 0, 1.0, 2),
+    ]
+    assert [(e.kind, e.receivers) for e in yulha.ally_turn_effects] == [("cleanse", "target"), ("heal", "target")]
+    assert (yulha.on_use[3][0].kind, yulha.on_use[3][0].value, yulha.on_use[3][0].turns) == ("rescue", 0.5, 3)
+    coli, cooldowns = apply_override(Kit(), {2: 4, 3: 5}, kits["c5033"])
+    assert cooldowns == {2: 0, 3: 4} and coli.ally_attack_single and coli.ally_attack_cooldown == 4
+    assert [(e.kind, e.value) for e in coli.ally_attack_effects] == [
+        ("swift", 0.5),
+        ("extra_attack", 2.0),
+        ("dispel", 0.0),
+        ("def", -0.7),
+        ("cr", 0.2),
+    ]
+    assert [(e.kind, e.condition, e.chance) for e in coli.on_use[1]][:2] == [
+        ("bleed", "no_overload", 0.8),
+        ("bleed", "overload", 1.0),
+    ]
+    assert [(e.kind, e.turns) for e in coli.before_use[3]] == [("overload", 2)]
+    flan, cooldowns = apply_override(Kit(), {3: 4}, kits["c5110"])
+    assert cooldowns == {3: 3} and flan.always_crit == (1, 3) and flan.focus_start == 3 and flan.focus_gain == {1: 1}
+    assert flan.ally_attack_slots == (1,) and flan.ally_attack_focus
+    assert [(e.kind, e.value) for e in flan.ally_attack_effects] == [("self_dual", 0.0), ("cr", 0.35)]
+    assert (flan.on_use[1][0].kind, flan.on_use[1][0].chance) == ("stun", 0.4)
+    assert [(e.kind, e.value, e.receivers) for e in flan.on_use[3]] == [("def", -0.7, ""), ("cr", 0.2, "all")]
