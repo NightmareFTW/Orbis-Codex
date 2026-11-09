@@ -1,0 +1,65 @@
+# Architect Laika
+hero = "c2099"
+source = "in-game skill popups read by the Skill reader (the user's skills folder, 2026-11-09, the Journal's Preview Skills): S1, S2 and S3 at +0 with their enhancement steps and effect panels; multipliers, Speed scaling and target counts from Fribbels' skill data (community; its 80% penetration for S3 is conditional on Target in the text)"
+status = "verified"
+replace = [1, 2, 3]
+handles = ["Target", "Extinction", "Damage Sharing", "Dispel", "Increase Attack", "Immunity"]
+cooldowns = { 2 = 3, 3 = 4 }  # S2 "4 turns" and S3 "5 turns" on the popups read at +0; their steps (+2 and +4) are -1 turn
+unmodelled = [
+    "Target also decreases Evasion by 50% (Evasion is not simulated)",
+    "S3 Extinction (a target it kills cannot revive) and damage sharing ignored",
+    "S2 Soulburn (20 Souls): ignores Effect Resistance",
+]
+
+# S1 Removing Variables.: attacks the enemy and increases the caster's Combat Readiness by 20%. Damage rises with her Speed.
+[passive]
+pen_marked = { 3 = 0.8 }
+
+[[effect]]
+slot = 1
+kind = "cr"
+value = 0.2
+receivers = "self"
+note = "S1: Combat Readiness +20%"
+
+# S2 Laying the Groundwork (4 turns at +0, 3 at +2): "Confirms the target, with a 85% chance each to dispel two buffs from the
+# enemy and inflict target for 2 turns (+5% +10% effect chance: 100% at +3), before granting increased Attack and immunity to
+# the caster for 2 turns. After using this skill, when the enemy is inflicted with target, grants an extra turn to the caster."
+# Target: damage suffered +15%.
+[[effect]]
+slot = 2
+kind = "dispel"
+count = 2
+chance = 1.0
+note = "S2: dispels two buffs from the enemy (85% at +0, 100% at +3)"
+
+[[effect]]
+slot = 2
+kind = "target"
+turns = 2
+chance = 1.0
+note = "S2: inflicts Target for 2 turns (85% at +0, 100% at +3)"
+
+[[effect]]
+slot = 2
+kind = "atk"
+value = 0.5
+turns = 2
+receivers = "self"
+note = "S2: increased Attack for 2 turns"
+
+[[effect]]
+slot = 2
+kind = "immunity"
+turns = 2
+receivers = "self"
+note = "S2: immunity for 2 turns"
+
+[[effect]]
+slot = 2
+kind = "extra_turn"
+condition = "marked"
+note = "S2: when the enemy holds Target, an extra turn"
+
+# S3 Eliminating the Target. (5 turns at +0, 4 at +4): attacks all enemies; "When the enemy is inflicted with target, penetrates
+# Defense by 80%". Damage rises with her Speed.

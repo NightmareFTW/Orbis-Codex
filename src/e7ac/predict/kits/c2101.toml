@@ -1,0 +1,48 @@
+# Urban Shadow Choux
+hero = "c2101"
+source = "in-game skill popups read by the Skill reader (the user's skills folder, 2026-11-09, the Journal's Preview Skills): S1, S2 and S3 at +0 with their enhancement steps and effect panels; multipliers, penetration and target counts from Fribbels' skill data (community)"
+status = "verified"
+replace = [1, 2, 3]
+handles = ["Increase Speed", "Injury"]
+cooldowns = { 2 = 0, 3 = 4 }  # S3 "5 turns" on the popup read at +0; its +3 step is -1 turn; S2 is a passive
+unmodelled = [
+    "Injury (up to 10% from Bzzt!, up to 25% from S3): the formula is not in the text (NV-68)",
+    "Focus: it is gained but its maximum is unknown, so the reset of S3's cooldown when it is full, and S3's heal and the additional damage of 60% of the injuries when it is full, are left out (NV-82)",
+    "S1 Soulburn (10 Souls): more damage and additional damage of 40% of the injuries",
+]
+
+# S1 Zippity Zap!: attacks the enemy and increases the caster's Combat Readiness by 15%; on her turn she gains 1 Focus (and 1 more
+# at the start of each turn from S2). Focus is only counted: nothing here spends it.
+# S2 Wild Charge (passive): "Increases Critical Hit Chance by 20%" (+1% +2% +2% +2% +3%: 30% at +5). "At the start of the turn,
+# gains 1 Focus and grants Bzzt! for 1 turn": Bzzt! "After attacking, inflicts 2,500 additional damage and up to 10% injuries on
+# all enemies."
+[passive]
+crit_bonus = 0.3
+focus_start = 1
+focus_gain = { 1 = 2 }
+
+[[effect]]
+slot = 1
+kind = "cr"
+value = 0.15
+receivers = "self"
+note = "S1: Combat Readiness +15%"
+
+[[effect]]
+slot = 2
+when = "turn"
+kind = "bzzt"
+value = 2500
+turns = 1
+receivers = "self"
+note = "S2: at the start of the turn Bzzt!: 2,500 additional damage to all enemies after attacking"
+
+# S3 Operation: Cream Pastry (5 turns at +0, 4 at +3): "Attacks the enemy using adaptable tactics, inflicting up to 25% injuries, and
+# grants increased Speed to all allies for 2 turns. Penetrates the target's Defense by 50%."
+[[effect]]
+slot = 3
+kind = "spd"
+value = 0.3
+turns = 2
+receivers = "all"
+note = "S3: Speed +30% to all allies for 2 turns"

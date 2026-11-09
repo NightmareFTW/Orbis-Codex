@@ -1236,3 +1236,118 @@ def test_kayron_krau_bellona_and_diene_kits_carry_the_popup_numbers() -> None:
         "immortal",
     )
     assert [(e.kind, e.turns) for e in diene.before_use[3]] == [("seal", 2)] and diene.on_use[3][0].value == -0.3
+
+
+def test_target_bzzt_cascade_immobilize_concealment_and_turn_order_passives_work_in_battle() -> None:
+    """Lilibet, Laika, Choux, Roana and Aube (SPEC D114)."""
+    import random
+
+    from e7ac.domain.codes import Stat
+    from e7ac.predict.battle import Combatant, _crit_chance, _hidden, _State, _strike, _use, simulate
+    from e7ac.predict.damage import SkillPower
+    from tests.test_effects import unit
+
+    rng = random.Random(1)
+    team = [unit("a", "you", Kit(crit_bonus=0.3)), unit("b", "you"), unit("e", "them")]
+    hp, cr = [1e4, 1e4, 1e4], [0.0] * 3
+    state = [_State(), _State(), _State(timers={"target": 2})]
+    _strike(team, hp, cr, state, 2, 1000.0, rng, by=0)
+    assert hp[2] == pytest.approx(1e4 - 1150)  # Target: 15% more damage suffered
+    assert _crit_chance(team, state, 0) == pytest.approx(0.3) and _crit_chance(team, state, 1) == 0.0
+
+    # concealment hides the holder while it has an ally, and an attack does not end it (stealth is)
+    state = [_State(), _State(), _State(timers={"concealment": 99, "stealth": 2})]
+    assert _hidden(team, hp, state, 2) is False  # alone on its side: nothing to hide it
+    mates = [unit("a", "you"), unit("e", "them"), unit("f", "them")]
+    state = [_State(), _State(timers={"concealment": 99}), _State()]
+    assert _hidden(mates, [1e4] * 3, state, 1)
+    _strike(mates, [1e4] * 3, [0.0] * 3, state, 1, 100.0, rng, by=0)
+    assert state[1].timers.get("concealment") == 99 and _hidden(mates, [1e4] * 3, state, 1)
+
+    # cd_up: the targets' cooldowns do not count down for a turn; debuffs the mark gives are counted
+    state = [_State(), _State(dots=[(1.0, 2)], debuffs={"def": (-0.7, 1)}), _State()]
+    _use(Effect("cd_up", True, 1.0, 0, 1.0), 0, [1], team, [1e4] * 3, [0.0] * 3, state, rng)
+    assert state[1].cd_cut == -1 and state[1].debuff_count() == 2
+
+    stats = unit("x", "you").stats
+    piercing = {1: SkillPower(1.0, 1.0, 0.0), 3: SkillPower(2.0, 1.0, 0.0, penetration=0.8, targets=3)}
+
+    def dealt(
+        kit: Kit, foe_kit: Kit | None = None, skills: dict[int, SkillPower] | None = None, speed: int = 300
+    ) -> float:
+        hero = Combatant("h", "you", stats, speed, skills or piercing, {3: 2}, kit)
+        tank = Combatant(
+            "t", "them", {**stats, Stat.DEF: 4000.0, Stat.HP: 10**7}, 200, piercing, {3: 2}, foe_kit or Kit()
+        )
+        return simulate([hero, tank], runs=50).heroes[0].damage
+
+    assert dealt(Kit(pen_marked={3: 0.8})) < dealt(Kit()) * 0.9  # no Target on the foe: no penetration
+    assert dealt(Kit(at_start=[Effect("bzzt", False, 3000.0, 99, 1.0)])) > dealt(
+        Kit()
+    )  # additional damage after attacks
+    one_shot = Kit(at_start=[Effect("cascade", False, 50000.0, 9, 1.0)])
+    assert dealt(one_shot) - dealt(Kit()) == pytest.approx(50000, rel=0.02)  # dispelled after attacking: once
+    assert dealt(Kit(speed_mult=0.5)) < dealt(Kit()) * 0.7
+
+    def foe_damage(
+        immobilized: bool,
+    ) -> float:  # an immobilized foe gets no Combat Readiness from Speed for four actions
+        foe = Kit(at_start=[Effect("immobilize", True, 0.0, 4, 1.0, receivers="self")]) if immobilized else Kit()
+        hero = Combatant("h", "you", stats, 150, piercing, {3: 2}, Kit())
+        tank = Combatant("t", "them", stats, 400, piercing, {3: 2}, foe)
+        return simulate([hero, tank], runs=50).heroes[1].damage
+
+    assert foe_damage(True) < foe_damage(False)
+
+    def roana(front_cr: float) -> float:  # she follows the foremost ally's turn
+        kit = Kit(front_ally_cr=front_cr)
+        hero = Combatant("r", "you", stats, 50, piercing, {3: 2}, kit)
+        ally = Combatant("f", "you", {**stats, Stat.HP: 10**7}, 300, piercing, {3: 2}, Kit())
+        return simulate([ally, hero, unit("e", "them", hp=10**7)], runs=50).heroes[1].damage
+
+    assert roana(1.0) > roana(0.0) * 1.5
+
+
+def test_lilibet_laika_choux_roana_and_aube_kits_carry_the_popup_numbers() -> None:
+    kits = load_overrides()
+    lilibet, cooldowns = apply_override(Kit(), {2: 0, 3: 5}, kits["c2095"])
+    assert cooldowns == {2: 0, 3: 4} and lilibet.fs_full == 100 and lilibet.fs_gain == {1: 25, 3: 50}
+    assert lilibet.fs_debuff_turn == 10 and (lilibet.on_use[1][0].kind, lilibet.on_use[1][0].chance) == ("def", 0.75)
+    assert [(e.kind, e.value) for e in lilibet.fs_effects] == [
+        ("cleanse", 0.0),
+        ("def", 0.6),
+        ("immunity", 0.0),
+        ("cr", 0.4),
+    ]
+    assert [(e.kind, e.value, e.receivers) for e in lilibet.on_use[3]] == [("cd_up", 1.0, ""), ("cr", 0.15, "all")]
+    laika, cooldowns = apply_override(Kit(), {2: 4, 3: 5}, kits["c2099"])
+    assert cooldowns == {2: 3, 3: 4} and laika.pen_marked == {3: 0.8}
+    assert [(e.kind, e.condition) for e in laika.on_use[2]] == [
+        ("dispel", ""),
+        ("target", ""),
+        ("atk", ""),
+        ("immunity", ""),
+        ("extra_turn", "marked"),
+    ]
+    assert (laika.on_use[1][0].kind, laika.on_use[1][0].value) == ("cr", 0.2)
+    choux, cooldowns = apply_override(Kit(), {2: 0, 3: 5}, kits["c2101"])
+    assert cooldowns == {2: 0, 3: 4} and choux.crit_bonus == 0.3 and choux.focus_start == 1
+    assert (choux.on_turn[0].kind, choux.on_turn[0].value, choux.on_turn[0].turns) == ("bzzt", 2500, 1)
+    assert [(e.kind, e.value, e.receivers) for e in choux.on_use[3]] == [("spd", 0.3, "all")]
+    roana, cooldowns = apply_override(Kit(), {2: 0, 3: 5}, kits["c2102"])
+    assert cooldowns == {2: 0, 3: 4} and roana.speed_mult == 0.5 and roana.front_ally_cr == 1.0
+    assert (roana.on_use[1][0].kind, roana.on_use[1][0].chance) == ("def", 0.75)
+    assert [(e.kind, e.value) for e in roana.on_use[3]] == [("dispel", 0.0), ("cd_up", 1.0), ("cr", -0.3)]
+    aube, cooldowns = apply_override(Kit(), {2: 3, 3: 7}, kits["c5190"])
+    assert cooldowns == {2: 3, 3: 6} and (aube.on_use[1][0].kind, aube.on_use[1][0].value) == ("cr", -0.2)
+    assert [(e.kind, e.value, e.receivers) for e in aube.on_use[2]] == [
+        ("cascade", 4000.0, "all"),
+        ("skill_nullifier", 0.0, "self"),
+        ("extra_turn", 0.0, ""),
+    ]
+    assert [(e.kind, e.turns, e.receivers) for e in aube.on_use[3]] == [
+        ("dispel", 2, "enemies"),
+        ("immobilize", 4, "enemies"),
+        ("restrict", 2, "enemies"),
+    ]
+    assert [(e.kind, e.turns) for e in aube.at_start] == [("concealment", 999)]

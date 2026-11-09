@@ -50,6 +50,8 @@ OVERLOAD: Final = 0.5
 """Overload (`verified`): Attack and Speed +50%; "upon ending, inflicts energy depletion for 1 turn" (both -50%)."""
 SUPERHUMAN: Final = 1.0
 """Superhumanization (`verified`): max Health and Speed +100%."""
+TARGET_DAMAGE: Final = 0.15
+"""Target (`verified`): "Increases damage suffered by 15% and decreases Evasion by 50%" (Evasion is not simulated)."""
 DEIFY_CRIT: Final = 0.5
 """Deify (`verified`, in-game text): "When attacking, increases Critical Hit Chance by 50%"."""
 DEIFY_REDUCTION: Final = 0.5
@@ -195,7 +197,19 @@ def _play(
     for actions in range(1, MAX_ACTIONS + 1):
         alive = [i for i in range(n) if hp[i] > 0]
         caps = [_kit(units, state, i).speed_cap for i in range(n)]
-        speed = [speeds[i] * (1.0 if caps[i] else state[i].factor("spd")) for i in range(n)]
+        for (
+            st
+        ) in state:  # Immobilize: "dispelled at the start of someone's fourth turn": counted in actions of any hero
+            if "immobilize" in st.timers:
+                st.timers["immobilize"] -= 1
+                if st.timers["immobilize"] <= 0:
+                    del st.timers["immobilize"]
+        speed = [
+            speeds[i] * (1.0 if caps[i] else state[i].factor("spd")) * _kit(units, state, i).speed_mult
+            if "immobilize" not in state[i].timers
+            else 1e-9  # no Combat Readiness from Speed while immobilized
+            for i in range(n)
+        ]
         for c in alive:  # a speed cap (Harsetti): every other hero at most this share of the caster's speed
             if caps[c]:
                 speed = [v if i == c else min(v, caps[c] * speed[c]) for i, v in enumerate(speed)]
@@ -241,6 +255,9 @@ def _play(
                 continue
         if me.timers.get("fear", 0) > 0 and rng.random() < FEAR_DISPEL:
             del me.timers["fear"]
+        for m in _allies(units, hp, actor):  # the foremost ally's turn starts: Roana gains Combat Readiness
+            if m != actor and (gain := _kit(units, state, m).front_ally_cr) and _foremost(units, hp, m) == actor:
+                _raise_cr(units, hp, cr, state, m, gain)
         for m in _allies(units, hp, actor):  # at the start of an ally's turn (School Nurse Yulha's S2)
             for effect in _kit(units, state, m).ally_turn_effects:
                 _use(effect, m, [actor], units, hp, cr, state, rng)
@@ -300,6 +317,9 @@ def _play(
                 top = unit.kit.pierce_top.get(slot)
                 if top and j == max(enemies, key=lambda e: units[e].stats[Stat.HP]):
                     used = replace(skill, penetration=max(skill.penetration, top))
+                marked = unit.kit.pen_marked.get(slot)  # Laika's S3: penetrates only a target holding Target
+                if marked is not None:
+                    used = replace(used, penetration=marked if state[j].timers.get("target", 0) > 0 else 0.0)
                 resisted = max((_kit(units, state, m).pen_resist for m in _allies(units, hp, j)), default=0.0)
                 if resisted and used.penetration:  # Penetration Resistance of the target's side (MECH-PENRES-01)
                     used = replace(used, penetration=used.penetration * (1 - min(resisted, 1.0)))
@@ -314,6 +334,14 @@ def _play(
                 if me.timers.get("abundance", 0) > 0 and hp[j] > 0:  # Abundance, MECH-ABUND-01
                     _strike(units, hp, cr, state, j, me.abundance, rng, actor)
                     killed = killed or hp[j] <= 0
+            if me.timers.get("bzzt", 0) > 0:  # Bzzt!: additional damage to all enemies after attacking (MECH-BZZT-01)
+                for e in enemies:
+                    if hp[e] > 0:
+                        _strike(units, hp, cr, state, e, me.bzzt, rng, actor)
+            if me.timers.pop("cascade", 0) > 0:  # Cascade: additional damage on the target, dispelled after attacking
+                for j in targets:
+                    if hp[j] > 0:
+                        _strike(units, hp, cr, state, j, me.cascade, rng, actor)
         stunned = {j: state[j].timers.get("stun", 0) for j in targets}
         form = me.form  # the effects of a skill act in the form it was used in, even if the skill swaps
         proc = False
@@ -336,6 +364,8 @@ def _play(
             if effect.condition == "cd3" and waiting[actor].get(3, 0) <= 0:  # while its S3 is on cooldown
                 continue
             if effect.condition == "immortal" and me.timers.get("immortal", 0) <= 0:
+                continue
+            if effect.condition == "marked" and not any(state[j].timers.get("target", 0) > 0 for j in targets):
                 continue
             if effect.condition in ("overload", "no_overload") and (me.timers.get("overload", 0) > 0) != (
                 effect.condition == "overload"
@@ -385,7 +415,10 @@ def _play(
         hp[actor] = min(hp[actor], _max_hp(units, state, actor))  # an ended superhumanization takes its Health along
         for m in range(n):  # the end of an enemy's turn: Fighting Spirit for the heroes that gather it so (Kayron)
             if units[m].side != unit.side and hp[m] > 0:
-                _fs_add(m, _kit(units, state, m).fs_enemy_turn, units, hp, cr, state, hits, rng)
+                mate_kit = _kit(units, state, m)
+                carried = sum(state[a].debuff_count() for a in _allies(units, hp, m)) if mate_kit.fs_debuff_turn else 0
+                gain = mate_kit.fs_enemy_turn + mate_kit.fs_debuff_turn * carried
+                _fs_add(m, gain, units, hp, cr, state, hits, rng)
         standing = {units[i].side for i in range(n) if hp[i] > 0}
         if len(standing) == 1:
             return standing.pop(), actions
@@ -475,6 +508,10 @@ class _State:
     """Fighting Spirit gathered (`Kit.fs_*`)."""
     s3_ready: bool = True
     """Whether the S3 is off cooldown (`Kit.ready_reduction`)."""
+    cascade: float = 0.0
+    """Cascade: additional damage after the holder's next attack (it is dispelled after attacking)."""
+    bzzt: float = 0.0
+    """Bzzt!: additional damage to all enemies after each attack of the holder while the "bzzt" timer runs."""
 
     @property
     def buffed(self) -> bool:
@@ -500,6 +537,18 @@ class _State:
             or any(self.timers.get(kind, 0) > 0 for kind in _DEBUFF_TIMERS)
         )
 
+    def debuff_count(self) -> int:
+        """How many debuffs the hero holds (Designer Lilibet gathers Fighting Spirit from them)."""
+        return (
+            len(self.debuffs)
+            + len(self.dots)
+            + len(self.venoms)
+            + len(self.erosions)
+            + sum(self.timers.get(kind, 0) > 0 for kind in _DEBUFF_TIMERS)
+            + int(self.pilfer)
+            + int(self.beguiled > 0)
+        )
+
     def factor(self, kind: str) -> float:
         extra = (SPOILS_STEP * self.spoils - PILFER_STEP * self.pilfer) if kind in ("atk", "def") else 0.0
         buff = 0.0 if self.timers.get("block", 0) > 0 else self.buffs.get(kind, (0.0, 0))[0]  # block: no buff counts
@@ -523,6 +572,10 @@ class _State:
             self.timers[effect.kind] = max(self.timers.get(effect.kind, 0), effect.turns)
             if effect.kind == "abundance":
                 self.abundance = effect.value
+            elif effect.kind == "cascade":
+                self.cascade = effect.value
+            elif effect.kind == "bzzt":
+                self.bzzt = effect.value
 
     def hurt(self, hp: list[float], j: int, damage: float) -> None:
         """Invincibility blocks the damage; a barrier absorbs it before Health (MECH-BAR-01)."""
@@ -648,6 +701,11 @@ _TIMERS: Final = (
     "overload",
     "superhuman",
     "skill_nullifier",
+    "target",
+    "cascade",
+    "bzzt",
+    "immobilize",
+    "concealment",
 )
 _BUFF_TIMERS: Final = (
     "immortal",
@@ -662,6 +720,8 @@ _BUFF_TIMERS: Final = (
     "overload",
     "superhuman",
     "skill_nullifier",
+    "cascade",
+    "bzzt",
 )
 _DEBUFF_TIMERS: Final = (
     "stun",
@@ -676,6 +736,8 @@ _DEBUFF_TIMERS: Final = (
     "sleep",
     "restrict",
     "block",
+    "target",
+    "immobilize",
 )
 _BUFFS: Final = frozenset(
     {
@@ -690,6 +752,8 @@ _BUFFS: Final = frozenset(
         "stealth",
         "overload",
         "skill_nullifier",
+        "cascade",
+        "bzzt",
         "immortal",
         "immunity",
         "invincible",
@@ -710,7 +774,8 @@ def _kit(units: Sequence[Combatant], state: Sequence[_State], j: int) -> Kit:
 
 def _hidden(units: Sequence[Combatant], hp: Sequence[float], state: Sequence[_State], j: int) -> bool:
     """Stealth: "when another ally is present, prevents enemies from selecting the bearer as a skill target"."""
-    return state[j].timers.get("stealth", 0) > 0 and len(_allies(units, hp, j)) > 1
+    hiding = state[j].timers.get("stealth", 0) > 0 or state[j].timers.get("concealment", 0) > 0
+    return hiding and len(_allies(units, hp, j)) > 1
 
 
 def _cannot_act(state: _State) -> bool:
@@ -721,7 +786,7 @@ def _cannot_act(state: _State) -> bool:
 def _crit_chance(units: Sequence[Combatant], state: Sequence[_State], i: int) -> float:
     """Critical Hit Chance of `i` now: Deify adds 50 points while it attacks (MECH-DEIFY-01)."""
     bonus = DEIFY_CRIT if state[i].timers.get("deify", 0) > 0 else 0.0
-    return min(units[i].stats[Stat.CRIT_CHANCE] + bonus, 1.0)
+    return min(units[i].stats[Stat.CRIT_CHANCE] + _kit(units, state, i).crit_bonus + bonus, 1.0)
 
 
 def _max_hp(units: Sequence[Combatant], state: Sequence[_State], j: int) -> float:
@@ -760,6 +825,8 @@ def _strike(
         damage *= 1 - cut
     if by >= 0 and damage > 0 and state[j].timers.pop("skill_nullifier", 0) > 0:  # damage from a skill nullified, once
         damage = 0.0
+    if by >= 0 and state[j].timers.get("target", 0) > 0:  # the Target effect: 15% more damage suffered
+        damage *= 1 + TARGET_DAMAGE
     if by >= 0 and state[j].timers.get("deify", 0) > 0:  # an attack on a hero holding Deify: 50% less (MECH-DEIFY-01)
         damage *= 1 - DEIFY_REDUCTION
     cap = _kit(units, state, j).hit_cap
@@ -917,6 +984,10 @@ def _use(
             picked = rng.choice(effect.options)
             _use(replace(picked, chance=picked.chance * effect.chance), actor, [j], units, hp, cr, state, rng)
         return
+    if effect.kind == "cd_up":  # the targets' skill cooldowns go up (`assumed`: they stop counting down for a turn)
+        for j in [t for t in targets if hp[t] > 0]:
+            state[j].cd_cut -= int(effect.value)
+        return
     if effect.kind == "cd_cut":  # skill cooldowns of the caster go down (Krau's Mobile Weapon Ziegfried)
         state[actor].cd_cut += int(effect.value)
         return
@@ -985,6 +1056,8 @@ def _use(
         ):
             if effect.kind in _BUFFS and any(state[r].timers.get(k, 0) > 0 for k in ("unable_buff", "block")):
                 continue  # MECH-BUFF-01 (a blocked hero cannot be buffed either)
+            if effect.kind == "cascade" and rng.random() >= effect.chance:
+                continue  # "N% chance to grant cascade"
             if effect.kind == "extra_turn":
                 cr[r] = 1.0
             elif effect.kind == "cr":

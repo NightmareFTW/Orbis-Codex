@@ -31,7 +31,7 @@ only: newer ones have none) or by hand (`src/e7ac/predict/kits/<code>.toml`, fro
 | 4 | Perfumer Byblis (c5154) | done (D89) | Soulburn; the 5% Health of Lingering Fragrance; injuries |
 | 4 | Zio (c1133), New Moon Luna (c2066), Witch of the Mere Tenebria (c6050) | done (D109) | Zio S3's damage by the target's current Health (NV-69); Luna S2's additional damage (NV-70); Rupture, the barrier and the debuff amounts of Tenebria (NV-71) |
 | 4 | Maid Chloe (c2049) | S1, S3 done | S2 |
-| 2-3 | Mort, Young Senya, Celine, Frieren, School Nurse Yulha, Tactical Archetype Coli, Afternoon Soak Flan, ... | Mort, Young Senya, Celine, Frieren, Yulha, Coli, Flan, Fallen Cecilia done (D110, D111; Kizuna AI too) | Vollzanbel's damage (NV-74); Celine's life steal; Whopper's area damage (NV-78); Bomb's damage (NV-77); Kayron, Krau, Bellona and Diene done (D113); then the 24 others of the user's folder |
+| 2-3 | Mort, Young Senya, Celine, Frieren, School Nurse Yulha, Tactical Archetype Coli, Afternoon Soak Flan, ... | Mort, Young Senya, Celine, Frieren, Yulha, Coli, Flan, Fallen Cecilia done (D110, D111; Kizuna AI too) | Vollzanbel's damage (NV-74); Celine's life steal; Whopper's area damage (NV-78); Bomb's damage (NV-77); Kayron, Krau, Bellona and Diene done (D113); Lilibet, Laika, Choux, Roana and Aube done (D114); then the 19 others of the user's folder |
 
 Since SPEC D88 the plain unconditional sentences of an active skill's text are read for heroes without icons (fear, Defense / Attack changes, dispel, Combat Readiness, extra turn ...); what stays "not read" is what needs an amount or a mechanic the text does not give (heals, barriers, venom, offering, possession, focus, ...), so the table below is what is still missing after that.
 

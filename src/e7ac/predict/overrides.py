@@ -57,6 +57,11 @@ One file per hero, named by its code (`c2049.toml`); every number carries where 
     fs_ally_hit = 20              # ... by every attack an ally suffers
     fs_enemy_turn = 10            # ... at the end of every enemy's turn
     ready_reduction = 0.3         # damage reduction against attacks while the S3 is off cooldown
+    fs_debuff_turn = 10           # Fighting Spirit at the end of an enemy's turn per debuff an ally holds
+    crit_bonus = 0.3              # Critical Hit Chance on top of the stats
+    speed_mult = 0.5              # share of its Speed the turn order counts
+    front_ally_cr = 1.0           # Combat Readiness gained at the start of the foremost ally's turn
+    pen_marked = { 3 = 0.8 }      # slot -> penetration against targets that hold Target only
 
     [[effect]]
     slot = 3                      # 1-3
@@ -117,6 +122,11 @@ burn and poison at once), conditions "overload" / "no_overload", passive `always
 effects follow an attack that targeted all enemies (passives `hit_cd_cut`, `area_hit_cd_cut`), the generic Fighting
 Spirit (`fs_*` passives, `when = "fs_full"` effects, kind `fs_damage`: `value` + `count` x the share of Spirit held),
 kind cd_cut (the caster's cooldowns go down `value` turns), condition "immortal", passive `ready_reduction`;
+SPEC D114: kinds cd_up (the targets' cooldowns go up `value` turns), target (15% more damage suffered), bzzt (additional
+damage `value` to all enemies after each attack), cascade (additional damage `value` after the next attack, with a
+chance), immobilize (no Combat Readiness from Speed for four actions), concealment (stealth that attacks do not end),
+condition "marked" (a target holds Target), passives `fs_debuff_turn`, `crit_bonus`, `speed_mult`, `front_ally_cr`,
+`pen_marked`;
 `when = "before"` effects happen before the attack of their slot, on the targets it has chosen; conditions "crit",
 "debuffed", "half" (a target with half its Health or less) and "proc" join "kill" and "stun"; "proc_kill" (SPEC D109)
 follows an `extra_attack` that defeated an enemy and "cd3" holds while the hero's S3 is on cooldown.
@@ -203,6 +213,12 @@ KINDS: Final = frozenset(
         "detonate_dots",
         "cd_cut",
         "fs_damage",
+        "cd_up",
+        "bzzt",
+        "cascade",
+        "target",
+        "immobilize",
+        "concealment",
     }
 )
 _DEBUFFS: Final = frozenset(
@@ -229,6 +245,9 @@ _DEBUFFS: Final = frozenset(
         "sleep",
         "restrict",
         "block",
+        "cd_up",
+        "target",
+        "immobilize",
     }
 )
 WHEN: Final = frozenset(
@@ -252,7 +271,21 @@ WHEN: Final = frozenset(
     }
 )
 CONDITIONS: Final = frozenset(
-    {"", "kill", "stun", "crit", "debuffed", "half", "proc", "proc_kill", "cd3", "overload", "no_overload", "immortal"}
+    {
+        "",
+        "kill",
+        "stun",
+        "crit",
+        "debuffed",
+        "half",
+        "proc",
+        "proc_kill",
+        "cd3",
+        "overload",
+        "no_overload",
+        "immortal",
+        "marked",
+    }
 )
 PASSIVES: Final = frozenset(
     {
@@ -305,6 +338,11 @@ PASSIVES: Final = frozenset(
         "fs_ally_hit",
         "fs_enemy_turn",
         "ready_reduction",
+        "fs_debuff_turn",
+        "crit_bonus",
+        "speed_mult",
+        "front_ally_cr",
+        "pen_marked",
     }
 )
 
@@ -504,6 +542,11 @@ def apply_override(kit: Kit, cooldowns: Mapping[int, int], override: KitOverride
     out.fs_ally_hit = int(passive.get("fs_ally_hit", out.fs_ally_hit))
     out.fs_enemy_turn = int(passive.get("fs_enemy_turn", out.fs_enemy_turn))
     out.ready_reduction = float(passive.get("ready_reduction", out.ready_reduction))
+    out.fs_debuff_turn = int(passive.get("fs_debuff_turn", out.fs_debuff_turn))
+    out.crit_bonus = float(passive.get("crit_bonus", out.crit_bonus))
+    out.speed_mult = float(passive.get("speed_mult", out.speed_mult))
+    out.front_ally_cr = float(passive.get("front_ally_cr", out.front_ally_cr))
+    out.pen_marked = {int(k): float(v) for k, v in dict(passive.get("pen_marked", out.pen_marked)).items()}
     return out, {**cooldowns, **override.cooldowns}
 
 

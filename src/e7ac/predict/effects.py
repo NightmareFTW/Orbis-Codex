@@ -232,6 +232,16 @@ class Kit:
     fs_effects: list[Effect] = field(default_factory=list)
     ready_reduction: float = 0.0
     """Damage reduction against attacks while the hero's S3 is not on cooldown (Kayron's Sword of Requiem: 30%)."""
+    fs_debuff_turn: int = 0
+    """Fighting Spirit gained at the end of an enemy's turn for each debuff held by an ally (Designer Lilibet: 10)."""
+    crit_bonus: float = 0.0
+    """Critical Hit Chance the hero has on top of its stats (Urban Shadow Choux's Wild Charge: 20%, 30% at +5)."""
+    speed_mult: float = 1.0
+    """Share of its Speed the hero's turn order counts (Requiem Roana: Combat Readiness from Speed halved)."""
+    front_ally_cr: float = 0.0
+    """Combat Readiness gained at the start of the turn of the foremost ally except the hero (Roana: 70%, 100%)."""
+    pen_marked: dict[int, float] = field(default_factory=dict)
+    """Slot -> penetration against targets holding the Target effect only (Architect Laika's S3: 80%)."""
     unmodelled: list[str] = field(default_factory=list)
     unread: list[int] = field(default_factory=list)
     """Skill slots whose text describes effects (inflicts, heals, dispels, ...) but of which none was read: epic7db
@@ -275,6 +285,10 @@ class Kit:
             area_hit_effects=[],
             fs_full=0,
             fs_effects=[],
+            fs_debuff_turn=0,
+            crit_bonus=0.0,
+            speed_mult=1.0,
+            front_ally_cr=0.0,
         )
 
 

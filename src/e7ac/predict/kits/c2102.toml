@@ -1,0 +1,47 @@
+# Requiem Roana
+hero = "c2102"
+source = "in-game skill popups read by the Skill reader (the user's skills folder, 2026-11-09, the Journal's Preview Skills): S1, S2 and S3 at +0 with their enhancement steps and effect panels; multipliers, penetration and target counts from Fribbels' skill data (community)"
+status = "verified"
+replace = [1, 2, 3]
+handles = ["Decrease Defense", "Penetrate", "Dispel"]
+cooldowns = { 2 = 0, 3 = 4 }  # S3 "5 turns" on the popup read at +0; its +3 step is -1 turn; S2 is a passive
+unmodelled = [
+    "S1 deals additional damage in proportion to her Attack (no number; S1 cannot critically hit)",
+    "S3 increases the cooldown of the enemies' skills by 1 turn, read as a turn in which they do not count down (NV-81)",
+    "S1 Soulburn (10 Souls): effect chance 100% and decreased Defense for 2 turns",
+]
+
+# S1 Touch of Darkness: attacks the enemy "with a 65% chance to inflict decreased Defense for 1 turn" (+10% effect chance: 75%).
+# S2 Boundless Obsession (passive): "Reduces the effect of Combat Readiness increases provided by Speed by 50%. At the start of
+# the foremost ally's turn except for the caster, increases Combat Readiness of the caster by 70%" (+5% x 4 +10%: 100% at +5).
+[passive]
+speed_mult = 0.5
+front_ally_cr = 1.0
+
+[[effect]]
+slot = 1
+kind = "def"
+value = -0.7
+turns = 1
+chance = 0.75
+note = "S1: decreased Defense (70%) for 1 turn, 75% at +5"
+
+# S3 Eternal Lament (5 turns at +0, 4 at +3): attacks all enemies, "dispelling one buff before increasing cooldowns by 1 turn and
+# decreasing Combat Readiness by 30%. Penetrates the target's Defense."
+[[effect]]
+slot = 3
+kind = "dispel"
+count = 1
+note = "S3: dispels one buff"
+
+[[effect]]
+slot = 3
+kind = "cd_up"
+value = 1
+note = "S3: the enemies' skill cooldowns go up 1 turn"
+
+[[effect]]
+slot = 3
+kind = "cr"
+value = -0.3
+note = "S3: decreases Combat Readiness by 30%"

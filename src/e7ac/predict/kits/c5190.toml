@@ -1,0 +1,75 @@
+# Aube
+hero = "c5190"
+source = "in-game skill popups read by the Skill reader (the user's skills folder, 2026-11-09, the Journal's Preview Skills): S1, S2 and S3 at +0 with their enhancement steps and effect panels; the S1 multiplier from Fribbels' skill data (community)"
+status = "verified"
+replace = [1, 2, 3]
+handles = ["Cascade", "Skill Nullifier", "Extra Turn", "Immobilize", "Restrict", "Concealment", "Dispel"]
+cooldowns = { 2 = 3, 3 = 6 }  # S2 "3 turns" and S3 "7 turns" on the popups read at +0; S3's +3 step is -1 turn
+unmodelled = [
+    "S3 Soulburn (20 Souls): ignores Effect Resistance",
+    "Cascade's chance and Immobilize / Restrict chances are the +0 ones plus their steps (S2 70% -> 100%, S3 70% -> 100%)",
+]
+
+# S1 Coral Swell: attacks the enemy and decreases Combat Readiness by 15% (+2% and +3%: 20% at +5).
+[[effect]]
+slot = 1
+kind = "cr"
+value = -0.2
+note = "S1: decreases Combat Readiness by 20% (15% at +0)"
+
+# S2 Film Fiesta (3 turns): "Releases the moment engraved in the film, with a 70% chance to grant cascade to all allies. Grants skill
+# nullifier once and an extra turn to the caster." (+5% x 4 +10%: 100% at +5.) Cascade: after attacking, 4,000 additional damage on
+# the target, dispelled after attacking. Skill Nullifier: nullifies damage from skills.
+[[effect]]
+slot = 2
+kind = "cascade"
+value = 4000
+turns = 2
+chance = 1.0
+receivers = "all"
+note = "S2: cascade to all allies: 4,000 additional damage after their next attack"
+
+[[effect]]
+slot = 2
+kind = "skill_nullifier"
+receivers = "self"
+turns = 99
+note = "S2: Skill Nullifier once to the caster"
+
+[[effect]]
+slot = 2
+kind = "extra_turn"
+note = "S2: an extra turn for the caster"
+
+# S3 Eternal Moment (7 turns at +0, 6 at +3): "Fixes all enemies in a frame, dispelling two buffs before a 70% chance each to inflict
+# immobilize and inflict restrict for 2 turns. Concealment will remain throughout the battle." (+5% +5% +10% +10%: 100%.)
+# Immobilize: no Combat Readiness from Speed, dispelled at the start of someone's fourth turn. Concealment: stealth that stays.
+[[effect]]
+slot = 3
+kind = "dispel"
+count = 2
+receivers = "enemies"
+note = "S3: dispels two buffs from all enemies"
+
+[[effect]]
+slot = 3
+kind = "immobilize"
+turns = 4
+chance = 1.0
+receivers = "enemies"
+note = "S3: immobilize on all enemies (70% at +0, 100% at +5)"
+
+[[effect]]
+slot = 3
+kind = "restrict"
+turns = 2
+chance = 1.0
+receivers = "enemies"
+note = "S3: restrict for 2 turns on all enemies"
+
+[[effect]]
+slot = 3
+when = "start"
+kind = "concealment"
+turns = 999
+note = "S3: Concealment remains throughout the battle (a stealth that attacks do not end)"

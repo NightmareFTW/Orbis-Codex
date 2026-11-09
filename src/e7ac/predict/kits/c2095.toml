@@ -1,0 +1,79 @@
+# Designer Lilibet
+hero = "c2095"
+source = "in-game skill popups read by the Skill reader (the user's skills folder, 2026-11-09, the Journal's Preview Skills): S1, S2 and S3 at +0 with their enhancement steps and effect panels; multipliers, Defense scaling, target counts and penetration from Fribbels' skill data (community)"
+status = "verified"
+replace = [1, 2, 3]
+handles = ["Decrease Defense", "Increase Defense", "Penetrate", "Immunity"]
+cooldowns = { 2 = 0, 3 = 4 }  # S3 "5 turns" on the popup read at +0; its +3 step is -1 turn; S2 is a passive
+unmodelled = [
+    "S2: the start of the text was not read (the popup begins at \"Spirit.\"), so the Fighting Spirit she starts with is unknown: she starts with none (read the skill again, NV-81)",
+    "S2: Fighting Spirit full at 100 is assumed (NV-79)",
+    "S3: decreases the debuff durations of all allies by 2 turns, and the increase of the enemies' cooldown is read as one turn they do not count down (NV-81)",
+    "S1 Soulburn (10 Souls): effect chance 100% and decreased Defense for 2 turns",
+]
+
+# S1 Slice to Pieces: attacks the enemy "with a 65% chance to decrease Defense for 1 turn" (+10% effect chance: 75% at +5);
+# Fighting Spirit +25. Damage rises with her Defense (Fribbels).
+[passive]
+fs_full = 100
+fs_gain = { 1 = 25, 3 = 50 }
+fs_debuff_turn = 10
+
+[[effect]]
+slot = 1
+kind = "def"
+value = -0.7
+turns = 1
+chance = 0.75
+note = "S1: decreased Defense (70%) for 1 turn, 75% at +5"
+
+# S2 Emergency Stitching (passive): "When an enemy's turn ends, gains 10 Fighting Spirit for each debuff inflicted on an ally,
+# and when the caster's Fighting Spirit is full, consumes all Fighting Spirit to dispel all debuffs from the caster and grants
+# increased Defense and immunity for 1 turn before increasing Combat Readiness by 40%."
+[[effect]]
+slot = 2
+when = "fs_full"
+kind = "cleanse"
+receivers = "self"
+note = "S2: Fighting Spirit full: dispels all her debuffs"
+
+[[effect]]
+slot = 2
+when = "fs_full"
+kind = "def"
+value = 0.6
+turns = 1
+receivers = "self"
+note = "S2: ... increased Defense (60%) for 1 turn"
+
+[[effect]]
+slot = 2
+when = "fs_full"
+kind = "immunity"
+turns = 1
+receivers = "self"
+note = "S2: ... immunity for 1 turn"
+
+[[effect]]
+slot = 2
+when = "fs_full"
+kind = "cr"
+value = 0.4
+receivers = "self"
+note = "S2: ... and Combat Readiness +40%"
+
+# S3 Model Disqualification (5 turns at +0, 4 at +3): "Decreases debuff durations of all allies by 2 turns and gets on stage to
+# attack all enemies, increasing their skill cooldown by 1 turn, before increasing Combat Readiness of all allies by 15%.
+# Penetrates the target's Defense by 50%." Fighting Spirit +50.
+[[effect]]
+slot = 3
+kind = "cd_up"
+value = 1
+note = "S3: the enemies' skill cooldowns go up 1 turn"
+
+[[effect]]
+slot = 3
+kind = "cr"
+value = 0.15
+receivers = "all"
+note = "S3: Combat Readiness +15% to all allies"
