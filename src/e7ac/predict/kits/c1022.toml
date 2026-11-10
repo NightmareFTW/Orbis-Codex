@@ -1,0 +1,77 @@
+# Ruele of Light
+hero = "c1022"
+source = "in-game skill popups read by the Skill reader (the user's skills folder, 2026-11-10, the Journal's Preview Skills): S1, S2 and S3 at +0, with their enhancement steps and effect panels; heal / barrier amounts and the multipliers from Fribbels' skill data (community)"
+status = "verified"
+replace = [1, 2, 3]
+handles = ["Invincible", "Spirit Lord's Protection", "Barrier", "ht Exclusive Equipment", "Damage Limit"]
+cooldowns = { 2 = 3, 3 = 4 }  # S2 "3 turns" (no cooldown step); S3 "5 turns" at +0 and its +2 step is -1 turn
+unmodelled = [
+    "S2 Damage Limit (damage suffered in one attack never exceeds 35% of max Health, an ally buff)",
+    "S2: the number of turns of the barrier and the limit is cut on the popup (\"Z turns\"): epic7db's 2 is used",
+    "S1 / S2 healing steps (+10% .. +15% healing) are not applied: Fribbels' amounts are used as given (NV-76)",
+    "S3: the saved ally is the one with the least Health (a dead ally is revived first, at 100% Health: it is not the one who also gets the invincibility here); the caster is never the saved one",
+    "S1 Soulburn (20 Souls): attacks, then greatly heals all allies (Souls are not simulated)",
+]
+
+# S1 Key to an Oath: attacks the enemy, "before recovering Health of all allies" (5% of her max Health, Fribbels).
+[[effect]]
+slot = 1
+kind = "heal"
+scaling = [0.05, 0.0, 0.0]
+receivers = "all"
+note = "S1: recovers Health of all allies (5% of her max Health, Fribbels)"
+
+# S2 Light Pillar (3 turns): "dispelling all debuffs from an ally and recovering their Health before granting them a barrier
+# and damage limit": heal 35% and barrier 20% of her max Health (Fribbels).
+[[effect]]
+slot = 2
+kind = "cleanse"
+receivers = "lowest:1"
+note = "S2: dispels all debuffs from the ally with the least Health"
+
+[[effect]]
+slot = 2
+kind = "heal"
+scaling = [0.35, 0.0, 0.0]
+receivers = "lowest:1"
+note = "S2: recovers 35% of her max Health (Fribbels)"
+
+[[effect]]
+slot = 2
+kind = "barrier"
+scaling = [0.2, 0.0, 0.0]
+turns = 2
+receivers = "lowest:1"
+note = "S2: a barrier of 20% of her max Health"
+
+# S3 Light Ascending (4 turns at +2): "Dispels all debuffs from an ally ... before fully recovering Health and granting
+# invincibility for 1 turn. When the target is already dead, revives them with 100% Health before the same effect is
+# applied. At the start of the first battle, grants Spirit Lord's Protection to the caster": upon dying, revives with 50%
+# Health and increases Combat Readiness by 50%.
+[[effect]]
+slot = 3
+kind = "rescue"
+value = 0.0
+turns = 0
+note = "S3: a dead ally comes back, else the weakest one is cleansed and fully healed (no Combat Readiness, no superhumanization)"
+
+[[effect]]
+slot = 3
+kind = "invincible"
+turns = 1
+receivers = "lowest:1"
+note = "S3: invincibility for 1 turn"
+
+[[effect]]
+slot = 3
+when = "revive"
+kind = "heal"
+value = 0.5
+note = "S3: Spirit Lord's Protection: upon dying, revives with 50% Health"
+
+[[effect]]
+slot = 3
+when = "revive"
+kind = "cr"
+value = 0.5
+note = "S3: ... and increases Combat Readiness by 50%"

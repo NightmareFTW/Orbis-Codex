@@ -1,0 +1,51 @@
+# Desert Jewel Basar
+hero = "c2053"
+source = "in-game skill popups read by the Skill reader (the user's skills folder, 2026-11-10, the Journal's Preview Skills): S1, S2 and S3 at +0, with their enhancement steps and effect panels; multipliers and the S1 heal (9%) from Fribbels' skill data (community); epic7db's old S2 (an extra turn) is not what the game shows"
+status = "verified"
+replace = [1, 2, 3]
+handles = ["Stun", "Immunity", "Barrier Inversion", "Barrier", "Damage Reduction", "Extra Turn", "Basar Exclusive Equipment", "Decrease Hit Chance", "Equipment"]
+cooldowns = { 2 = 0, 3 = 4 }  # S3 "5 turns" at +0 and its +3 step is -1 turn
+unmodelled = [
+    "S1 heal: the text scales it with the target's max Health, Fribbels' 9% of the caster's max Health is used",
+    "S2 Desert Cycle: 25% damage reduction when attacked (+0.5 .. +2%: 31% at +5) is not simulated",
+    "S2 Desert Storm (after an enemy uses a skill, when granted a barrier: barrier inversion on all enemies, their Combat Readiness -20%, hers +20%): no barrier-granted trigger",
+    "S1 Soulburn (10 Souls): a bigger heal (Souls are not simulated)",
+]
+
+# S1 Desert Wind: attacks the enemy "and has a 25% chance to inflict stun for 1 turn" (+5% at +2 and +4: 35%), "before
+# recovering Health of all allies" (9% of her max Health, Fribbels).
+[[effect]]
+slot = 1
+kind = "stun"
+turns = 1
+chance = 0.35
+note = "S1: stun for 1 turn (25% at +0, 35% at +4)"
+
+[[effect]]
+slot = 1
+kind = "heal"
+scaling = [0.09, 0.0, 0.0]
+receivers = "all"
+note = "S1: recovers Health of all allies"
+
+# S3 Bastet Roar (4 turns at +3): "dispelling all debuffs from all allies, before granting immunity for 2 turns and increasing
+# Combat Readiness by 20%" (+2% +2% +3% +3%: 30% at +5).
+[[effect]]
+slot = 3
+kind = "cleanse"
+receivers = "all"
+note = "S3: dispels all debuffs from all allies"
+
+[[effect]]
+slot = 3
+kind = "immunity"
+turns = 2
+receivers = "all"
+note = "S3: immunity for 2 turns for all allies"
+
+[[effect]]
+slot = 3
+kind = "cr"
+value = 0.3
+receivers = "all"
+note = "S3: Combat Readiness +30% for all allies (20% at +0)"

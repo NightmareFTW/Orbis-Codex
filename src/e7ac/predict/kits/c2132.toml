@@ -1,0 +1,63 @@
+# Dragon King Sharun
+hero = "c2132"
+source = "in-game skill popups read by the Skill reader (the user's skills folder, 2026-11-10, the Journal's Preview Skills): S1, S2 and S3 at +0, with their enhancement steps and effect panels; multipliers and target counts from Fribbels' skill data (community)"
+status = "verified"
+replace = [1, 2, 3]
+handles = ["Stun", "Cascade", "Debuffs Which Prevent Movement", "Cannot Buff", "Class Debuff"]
+cooldowns = { 2 = 0, 3 = 4 }  # S3 "5 turns" at +0 and its +3 step is -1 turn; S2 is a passive with a 1-turn limit
+unmodelled = [
+    "S2 Lullaby for Waves: when an ally is stunned, put to sleep or feared: cascade (4,000 additional damage once) for all allies, the debuffs are dispelled, his Combat Readiness +40% (no such trigger)",
+    "S3 class debuff: Attack down on Thief, Warrior, Ranger and Mage, Defense down on Knight and Soul Weaver: a random draw among the six classes (four Attack, two Defense) is used, Attack -50% and Defense -70%",
+    "S1 Soulburn (10 Souls): the stun chance goes to 100%",
+]
+
+# S1 Turtle Flipping: attacks the enemy "with a 30% chance to stun for 1 turn" (+5% at +2 and +4: 40%). "After attacking, when the
+# target is stunned, increases Combat Readiness of the ally with the highest Attack except for the caster by 20%."
+[[effect]]
+slot = 1
+kind = "stun"
+turns = 1
+chance = 0.4
+note = "S1: stun for 1 turn (30% at +0, 40% at +4)"
+
+[[effect]]
+slot = 1
+condition = "stun"
+kind = "cr"
+value = 0.2
+receivers = "highest_atk"
+note = "S1: after a stun: Combat Readiness +20% for the ally with the highest Attack"
+
+# S3 Is It Going to Rain? (4 turns at +3): attacks all enemies, "decreasing buff durations by 2 turns before a 80% chance to
+# inflict cannot buff and class debuff for 2 turns and decrease Combat Readiness by 20%" (+10% +2 and +4: 100%).
+[[effect]]
+slot = 3
+when = "before"
+kind = "shorten"
+turns = 2
+note = "S3: the buffs of the enemies last 2 turns fewer"
+
+[[effect]]
+slot = 3
+kind = "unable_buff"
+turns = 2
+note = "S3: cannot buff for 2 turns (80% at +0, 100% at +4)"
+
+[[effect]]
+slot = 3
+kind = "random"
+note = "S3: class debuff for 2 turns: Attack down (four classes in six) or Defense down (two)"
+options = [
+    { kind = "atk", value = -0.5, turns = 2 },
+    { kind = "atk", value = -0.5, turns = 2 },
+    { kind = "atk", value = -0.5, turns = 2 },
+    { kind = "atk", value = -0.5, turns = 2 },
+    { kind = "def", value = -0.7, turns = 2 },
+    { kind = "def", value = -0.7, turns = 2 },
+]
+
+[[effect]]
+slot = 3
+kind = "cr"
+value = -0.2
+note = "S3: Combat Readiness -20% for the enemies"

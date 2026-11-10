@@ -1434,3 +1434,109 @@ def test_renoa_cerise_command_model_laika_and_benimaru_kits_carry_the_popup_numb
     assert cooldowns == {2: 0, 3: 3} and benimaru.fs_full == 100 and benimaru.fs_start == 50
     assert benimaru.fs_gain == {1: 25, 3: 25} and benimaru.fs_effects[0].kind == "extra_attack"
     assert [(e.kind, e.receivers) for e in benimaru.on_use[3]] == [("def", ""), ("cr", "highest_cr")]
+
+
+def test_an_allys_critical_hit_gives_fighting_spirit_to_pavel() -> None:
+    """Commander Pavel (SPEC D117): +20 Fighting Spirit after an ally's critical hit, not after his own."""
+    from e7ac.domain.codes import Stat
+    from e7ac.predict.battle import Combatant, simulate
+    from e7ac.predict.damage import SkillPower
+    from tests.test_effects import unit
+
+    skills = {1: SkillPower(0.01, 1.0, 0.0), 2: SkillPower(5.0, 1.0, 0.0)}
+    crit = {**unit("x", "you").stats, Stat.CRIT_CHANCE: 1.0}
+
+    def damage(gain: int) -> float:
+        kit = Kit(fs_full=100, fs_start=60, fs_ally_crit=gain, fs_effects=[Effect("extra_attack", False, 2.0, 0, 1.0)])
+        pavel = Combatant("p", "you", unit("x", "you").stats, 100, skills, {}, kit)
+        friend = Combatant("f", "you", crit, 300, {1: SkillPower(0.01, 1.0, 0.0)}, {}, Kit())
+        return simulate([pavel, friend, unit("e", "them", hp=10**7)], runs=30).heroes[0].damage
+
+    assert damage(20) > damage(0)  # Begone! comes after two ally critical hits
+
+
+def test_ruele_ken_basar_pavel_ray_senya_and_flan_kits_carry_the_popup_numbers() -> None:
+    kits = load_overrides()
+    ruele, cooldowns = apply_override(Kit(), {2: 3, 3: 5}, kits["c1022"])
+    assert (
+        cooldowns == {2: 3, 3: 4}
+        and ruele.revive_effects
+        and [e.kind for e in ruele.on_use[3]][:2]
+        == [
+            "rescue",
+            "invincible",
+        ]
+    )
+    ken, cooldowns = apply_override(Kit(), {2: 0, 3: 5}, kits["c2047"])
+    assert cooldowns == {2: 0, 3: 4} and ken.always_crit == (1, 3)
+    assert [(e.kind, e.chance) for e in ken.on_use[3]] == [("def", 0.8), ("atk", 1.0)]
+    basar, cooldowns = apply_override(Kit(), {2: 4, 3: 5}, kits["c2053"])
+    assert cooldowns == {2: 0, 3: 4} and [(e.kind, e.value) for e in basar.on_use[3]][2] == ("cr", 0.3)
+    pavel, cooldowns = apply_override(Kit(), {3: 5}, kits["c2080"])
+    assert cooldowns == {2: 0, 3: 4} and (pavel.fs_start, pavel.fs_ally_crit, pavel.fs_full) == (60, 20, 100)
+    assert [e.kind for e in pavel.fs_effects] == ["atk", "extra_attack", "cr"]
+    ray, cooldowns = apply_override(Kit(), {2: 4, 3: 5}, kits["c2090"])
+    assert cooldowns == {2: 3, 3: 5} and [e.kind for e in ray.on_use[3]] == ["dispel", "sleep", "venom", "extra_turn"]
+    senya, cooldowns = apply_override(Kit(), {2: 4, 3: 5}, kits["c2106"])
+    assert cooldowns == {2: 0, 3: 4} and senya.ally_low == 0.5 and len(senya.ally_low_effects) == 5
+    flan, cooldowns = apply_override(Kit(), {2: 3, 3: 5}, kits["c2110"])
+    assert cooldowns == {2: 0, 3: 4} and flan.ally_attack_slots == (1, 3) and flan.ally_attack_cooldown == 3
+    assert [(e.kind, e.value) for e in flan.on_use[3]] == [("def", -0.7), ("cr", -0.2)]
+
+
+def test_attack_stacks_each_turn_and_possession_gives_attack_in_battle() -> None:
+    """Lone Wolf Peira's Time to Rampage and Successor Taeyou's Possession (SPEC D117)."""
+    from e7ac.domain.codes import Stat
+    from e7ac.predict.battle import POSSESSION, Combatant, _State, simulate
+    from e7ac.predict.damage import SkillPower
+    from tests.test_effects import unit
+
+    state = _State()
+    assert state.factor("atk") == 1.0
+    state.stack_atk = 0.4
+    assert state.factor("atk") == pytest.approx(1.4)
+    state = _State()
+    state.timers["possession"] = 2
+    assert state.factor("atk") == pytest.approx(1 + POSSESSION)
+    state.timers["block"] = 1
+    assert state.factor("atk") == 1.0  # no buff counts under block
+
+    skills = {1: SkillPower(1.0, 1.0, 0.0)}
+
+    def damage(step: float) -> float:
+        kit = Kit(atk_stack_step=step, atk_stack_max=5)
+        hero = Combatant("p", "you", {**unit("x", "you").stats, Stat.CRIT_CHANCE: 0.0}, 300, skills, {}, kit)
+        return simulate([hero, unit("e", "them", hp=10**7)], runs=20).heroes[0].damage
+
+    assert damage(0.2) > damage(0.0)
+
+
+def test_the_second_batch_of_kits_of_the_third_folder_carry_the_popup_numbers() -> None:
+    kits = load_overrides()
+    solitaria, cooldowns = apply_override(Kit(), {2: 0, 3: 4}, kits["c2111"])
+    assert cooldowns == {2: 0, 3: 3} and [e.kind for e in solitaria.on_use[1]] == [
+        "dispel",
+        "random",
+        "extra_attack",
+        "stun",
+    ]
+    assert [e.kind for e in solitaria.on_use[3]] == ["stun", "cr", "barrier", "random"]
+    peira, cooldowns = apply_override(Kit(), {2: 0, 3: 8}, kits["c2125"])
+    assert cooldowns == {2: 0, 3: 5} and (peira.atk_stack_step, peira.atk_stack_max) == (0.2, 5)
+    assert [e.kind for e in peira.on_use[3]] == ["cleanse", "spd", "cr", "extra_turn"]
+    lua, cooldowns = apply_override(Kit(), {2: 0, 3: 4}, kits["c2126"])
+    assert cooldowns == {2: 0, 3: 3} and lua.hit_team_cr == 0.1
+    taeyou, cooldowns = apply_override(Kit(), {2: 0, 3: 5}, kits["c2127"])
+    assert cooldowns == {2: 0, 3: 4} and (taeyou.fs_start, taeyou.fs_full, taeyou.fs_gain) == (60, 100, {1: 20})
+    assert [e.kind for e in taeyou.fs_effects] == ["cr", "possession"]
+    assert taeyou.on_use[3][-1].condition == "possessed"
+    hwayoung, cooldowns = apply_override(Kit(), {2: 4, 3: 5}, kits["c2128"])
+    assert cooldowns == {2: 0, 3: 3} and "stun" in hwayoung.immune
+    aria, cooldowns = apply_override(Kit(), {2: 0, 3: 4}, kits["c2129"])
+    assert cooldowns == {2: 0, 3: 3} and aria.always_crit == (3,)
+    sharun, cooldowns = apply_override(Kit(), {2: 1, 3: 5}, kits["c2132"])
+    assert cooldowns == {2: 0, 3: 4} and sharun.on_use[1][0].chance == 0.4
+    assert len(sharun.on_use[3][1].options) == 6
+    salome, cooldowns = apply_override(Kit(), {2: 5, 3: 5}, kits["c2184"])
+    assert cooldowns == {2: 4, 3: 4} and [e.kind for e in salome.on_use[2]] == ["skill_nullifier", "extra_turn"]
+    assert [(e.kind, e.value) for e in salome.before_use[3]] == [("collapse", 0.5)]

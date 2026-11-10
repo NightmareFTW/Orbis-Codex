@@ -153,3 +153,14 @@ def test_the_shortcut_command_writes_the_icon_file_and_refuses_off_windows(
     monkeypatch.setattr(shortcut, "create_desktop_shortcut", lambda working_dir, ico: Path("C:/D/Orbis Codex.lnk"))
     done = CliRunner().invoke(app, ["shortcut"])
     assert done.exit_code == 0 and "Orbis Codex.lnk" in done.stdout
+
+
+def test_the_console_is_left_only_on_windows_and_never_when_asked_to_keep_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths = AppPaths(home=tmp_path)
+    monkeypatch.setattr(shortcut, "on_windows", lambda: False)
+    assert launch.release_console(paths) == ""
+    monkeypatch.setattr(shortcut, "on_windows", lambda: True)
+    assert launch.release_console(paths, ["--console"]) == ""  # a start from a terminal on purpose
+    assert not paths.logs_dir.exists()

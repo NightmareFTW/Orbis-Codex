@@ -1,0 +1,53 @@
+# Pirate Captain Flan
+hero = "c2110"
+source = "in-game skill popups read by the Skill reader (the user's skills folder, 2026-11-10, the Journal's Preview Skills): S1, S2 and S3 at +0, with their enhancement steps and effect panels; the S1 and S3 multipliers and target counts from Fribbels' skill data (community)"
+status = "verified"
+replace = [1, 2, 3]
+handles = ["Decrease Defense", "Damage Reduction", "Swift Attack", "Bomb", "Detonate"]
+cooldowns = { 2 = 0, 3 = 4 }  # S3 "5 turns" at +0 and its +3 step is -1 turn; S2 is a passive
+unmodelled = [
+    "S1 / S3: steals one buff from the target / each enemy (not simulated)",
+    "Bomb (S1 detonates it at the end of the turn; S3 inflicts it with 75% chance, 95% at +5): its damage and stun are not simulated",
+    "S2: 30% damage reduction when attacked (not simulated)",
+    "S2 Hunt: the condition \"the target does not have a buff\" is not checked (it happens after every ally attack, at most once every 3 own turns)",
+    "S1 Soulburn (20 Souls): an extra turn (Souls are not simulated)",
+]
+[passive]
+ally_attack_slots = [1, 3]
+ally_attack_cooldown = 3
+
+# S3 Full Burst (4 turns at +3): attacks all enemies, "stealing one buff before a 60% chance to inflict decreased Defense for 2
+# turns (+10% +2, +15% +5: 85%) and a 75% chance to inflict a bomb for 2 turns, and decreases Combat Readiness by 20%".
+[[effect]]
+slot = 3
+kind = "def"
+value = -0.7
+turns = 2
+chance = 0.85
+note = "S3: Defense -70% for 2 turns (60% at +0, 85% at +5)"
+
+[[effect]]
+slot = 3
+kind = "cr"
+value = -0.2
+receivers = "enemies"
+note = "S3: Combat Readiness -20% for all enemies"
+
+# S2 Scourge of the Sea (passive): "After an ally attacks, when the target does not have a buff, activates Hunt. Hunt: By raising
+# morale, grants swift attack to all allies and increases Combat Readiness by 10%" (+1% +2% +2%: 15%). Swift Attack: at the end
+# of the turn, Combat Readiness +50%.
+[[effect]]
+slot = 2
+when = "ally_attack"
+kind = "cr"
+value = 0.5
+receivers = "all"
+note = "S2: Hunt: swift attack (Combat Readiness +50% at the end of the turn, given at once) for all allies"
+
+[[effect]]
+slot = 2
+when = "ally_attack"
+kind = "cr"
+value = 0.15
+receivers = "all"
+note = "S2: Hunt: Combat Readiness +15% for all allies (10% at +0)"

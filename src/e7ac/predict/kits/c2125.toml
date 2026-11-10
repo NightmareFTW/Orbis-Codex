@@ -1,0 +1,66 @@
+# Lone Wolf Peira
+hero = "c2125"
+source = "in-game skill popups read by the Skill reader (the user's skills folder, 2026-11-10, the Journal's Preview Skills): S1, S2 and S3 at +0, with their enhancement steps and effect panels; the S1 multiplier from Fribbels' skill data (community; it has no S2 or S3 data)"
+status = "verified"
+replace = [1, 2, 3]
+handles = ["Decrease Defense", "Rampage", "Swift Attack", "Extra Turn"]
+cooldowns = { 2 = 0, 3 = 5 }  # S3 "8 turns" at +0 and its +1, +2 and +3 steps are -1 turn each
+unmodelled = [
+    "S1: additional damage proportional to her Attack (no number in the text)",
+    "S2: Evasion +35% (+2% .. +3%: 51% at +6): Evasion is not simulated",
+    "S3: Rampage (Speed +20%) goes only to the Dark allies; here it goes to every ally (the element of an ally is not known to the kit)",
+    "S1 Soulburn (10 Souls): attacks all enemies",
+]
+[passive]
+atk_stack_step = 0.2
+atk_stack_max = 5
+
+# S1 Bash: attacks the enemy "with a 60% chance to decrease Defense for 1 turn" (+5% at +2, +10% at +5: 75%). Defense -70%.
+[[effect]]
+slot = 1
+kind = "def"
+value = -0.7
+turns = 1
+chance = 0.75
+note = "S1: Defense -70% for 1 turn (60% at +0, 75% at +5)"
+
+# S2 Time to Rampage (passive): "At the start of the turn, increases Attack by 20%, and can stack up to 5 times. At the end of
+# the turn, increases Combat Readiness of all allies by 10%."
+[[effect]]
+slot = 2
+when = "turn"
+kind = "cr"
+value = 0.1
+receivers = "all"
+note = "S2: Combat Readiness +10% for all allies (at the end of her turn; given at its start here)"
+
+# S3 Hound the Indolent (5 turns at +3): "Dispels two debuffs from all allies before granting rampage to Dark elemental allies for 3
+# turns. Grants swift attack to all allies except for the caster. Grants an extra turn." Rampage: Speed and Evasion +20%.
+# Swift Attack: at the end of the turn Combat Readiness +50%.
+[[effect]]
+slot = 3
+kind = "cleanse"
+count = 2
+receivers = "all"
+note = "S3: dispels two debuffs from all allies"
+
+[[effect]]
+slot = 3
+kind = "spd"
+value = 0.2
+turns = 3
+receivers = "all"
+note = "S3: rampage (Speed +20%) for 3 turns for the allies (the Dark ones only in the game)"
+
+[[effect]]
+slot = 3
+kind = "cr"
+value = 0.5
+receivers = "others"
+note = "S3: swift attack (Combat Readiness +50%) for all allies but the caster"
+
+[[effect]]
+slot = 3
+kind = "extra_turn"
+receivers = "self"
+note = "S3: grants an extra turn"

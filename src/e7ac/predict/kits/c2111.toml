@@ -1,0 +1,97 @@
+# Solitaria of the Snow
+hero = "c2111"
+source = "in-game skill popups read by the Skill reader (the user's skills folder, 2026-11-10, the Journal's Preview Skills): S1, S2 and S3 at +0, with their enhancement steps and effect panels; the barrier (25% of max Health) and the multipliers from Fribbels' skill data (community; its \"S2\" entry is Fwooooosh-Ha!)"
+status = "verified"
+replace = [1, 2, 3]
+handles = ["Daydream", "Stun", "Random Debuff", "Stealth", "Barrier"]
+cooldowns = { 2 = 0, 3 = 3 }  # S3 "4 turns" at +0 and its +3 step is -1 turn; S2 is a passive
+unmodelled = [
+    "Random Debuff: Decrease Hit Chance is not simulated (the draw is among Attack, Speed and Cannot Buff)",
+    "S2: the enemy gains no Focus (Focus of the enemies is not simulated)",
+    "S1 / S3: the daydream debuff comes 'after attacking': here it lands on the target of every attack she makes",
+    "S3 Soulburn (20 Souls): longer buffs and an extra turn (Souls are not simulated)",
+]
+
+# S2 I Wanna Go Home... (passive): "At the start of the turn, has a 70% chance to grant daydream for 1 turn (+5% x4, +10%: 100%),
+# and at the end of the turn, has a 70% chance to grant stealth for 1 turn" (the same steps: 100%). Daydream: after attacking,
+# inflicts a random debuff on the target for 1 turn: Decrease Attack, Decrease Hit Chance, Decrease Speed, Cannot Buff.
+[[effect]]
+slot = 2
+when = "turn"
+kind = "stealth"
+turns = 2
+note = "S2: stealth for 1 turn after her turn (granted here at the start of her turn for 2, the turn it ends in included)"
+
+# S1 Pew, Pew, Pew!: attacks the enemy "with a 75% chance to dispel one buff. When the caster is granted daydream, activates
+# Fwooooosh-Ha! as an extra attack": attacks all enemies with a 25% chance to inflict stun for 1 turn.
+[[effect]]
+slot = 1
+kind = "dispel"
+count = 1
+chance = 0.75
+note = "S1: 75% chance to dispel one buff"
+
+[[effect]]
+slot = 1
+kind = "random"
+note = "S1: daydream: a random debuff for 1 turn on the target"
+options = [
+    { kind = "atk", value = -0.5, turns = 1 },
+    { kind = "spd", value = -0.3, turns = 1 },
+    { kind = "unable_buff", turns = 1 },
+]
+
+[[effect]]
+slot = 1
+kind = "extra_attack"
+value = 2
+note = "S1: Fwooooosh-Ha!: an attack on all enemies (Fribbels' S2 data), as she holds daydream from the start of her turn"
+
+[[effect]]
+slot = 1
+condition = "proc"
+kind = "stun"
+turns = 1
+chance = 0.25
+receivers = "enemies"
+note = "S1: Fwooooosh-Ha!: 25% chance to stun for 1 turn"
+
+# S3 Boom! Starlight Fall! (3 turns at +3): "Decreases buff durations of the enemy by 1 turn and attacks with starlight,
+# inflicting stun for 1 turn before decreasing Combat Readiness by 30%. Grants a barrier (25% of her max Health) to the caster
+# for 2 turns."
+[[effect]]
+slot = 3
+when = "before"
+kind = "shorten"
+turns = 1
+note = "S3: the target's buffs last 1 turn fewer"
+
+[[effect]]
+slot = 3
+kind = "stun"
+turns = 1
+note = "S3: stun for 1 turn"
+
+[[effect]]
+slot = 3
+kind = "cr"
+value = -0.3
+note = "S3: Combat Readiness -30% for the target"
+
+[[effect]]
+slot = 3
+kind = "barrier"
+scaling = [0.25, 0.0, 0.0]
+turns = 2
+receivers = "self"
+note = "S3: a barrier of 25% of her max Health for 2 turns (Fribbels)"
+
+[[effect]]
+slot = 3
+kind = "random"
+note = "S3: daydream: a random debuff for 1 turn on the target"
+options = [
+    { kind = "atk", value = -0.5, turns = 1 },
+    { kind = "spd", value = -0.3, turns = 1 },
+    { kind = "unable_buff", turns = 1 },
+]

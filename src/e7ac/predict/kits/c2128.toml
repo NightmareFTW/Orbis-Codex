@@ -1,0 +1,23 @@
+# Bystander Hwayoung
+hero = "c2128"
+source = "in-game skill popups read by the Skill reader (the user's skills folder, 2026-11-10, the Journal's Preview Skills): S1, S2 and S3 at +0, with their enhancement steps and effect panels; multipliers from Fribbels' skill data (community; it has no S2 data)"
+status = "verified"
+replace = [1, 2, 3]
+handles = ["IIN: SSS", "Extinction", "Damage Reduction", "Damage Sharing"]
+cooldowns = { 2 = 0, 3 = 3 }  # S3 "4 turns" at +0 and its +4 step is -1 turn; S2 is a passive with its own 4-turn limit
+unmodelled = [
+    "S2 Divine Vessel: Defense in proportion to Attack at the start of the battle, and Sura: Reave the Skies against a random enemy after an ally but him suffers 40% of its max Health in one attack (no such trigger)",
+    "S2: immune to buffs (the allies' buffs do not reach him) and to every debuff: only the debuffs are modelled",
+    "S3: extinction (a defeated target cannot revive), ignoring damage reduction and damage share against Heroes, more damage against Light enemies",
+    "S3 Soulburn (10 Souls): more damage",
+]
+[passive]
+immune = ["atk", "def", "spd", "stun", "provoke", "silence", "fear", "sleep", "unable_buff", "burn", "bleed", "poison", "venom", "seal", "restrict", "block"]
+
+# S1 Infernal Strike: attacks the enemy "and increases Combat Readiness of the caster by 15%" (+2% at +3, +3% at +5: 20%).
+[[effect]]
+slot = 1
+kind = "cr"
+value = 0.2
+receivers = "self"
+note = "S1: Combat Readiness +20% for the caster (15% at +0)"

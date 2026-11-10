@@ -49,6 +49,8 @@ be dispelled."""
 OVERLOAD: Final = 0.5
 """Overload (`verified`): Attack and Speed +50%; "upon ending, inflicts energy depletion for 1 turn" (both -50%)."""
 SUPERHUMAN: Final = 1.0
+POSSESSION: Final = 0.25
+"""Successor Taeyou's Possession: Attack +25% (`verified`, popup text)."""
 """Superhumanization (`verified`): max Health and Speed +100%."""
 TARGET_DAMAGE: Final = 0.15
 """Target (`verified`): "Increases damage suffered by 15% and decreases Evasion by 50%" (Evasion is not simulated)."""
@@ -222,6 +224,8 @@ def _play(
         unit, me = units[actor], state[actor]
         kit = _kit(units, state, actor)  # a sealed hero plays without its passives
         frozen = list(cr) if kit.cr_lock else None  # MECH-CRLOCK-01: Combat Readiness cannot go up on this turn
+        if kit.atk_stack_step:  # Attack stacks at the start of each own turn up to a limit (Peira's Time to Rampage)
+            me.stack_atk = min(me.stack_atk + kit.atk_stack_step, kit.atk_stack_step * kit.atk_stack_max)
         for effect in kit.on_turn:  # passive heals / barriers at the start of the turn
             _use(effect, actor, [], units, hp, cr, state, rng)
         if me.hots:  # continuous healing at the start of the turn
@@ -366,6 +370,8 @@ def _play(
                 continue
             if effect.condition == "immortal" and me.timers.get("immortal", 0) <= 0:
                 continue
+            if effect.condition == "possessed" and me.timers.get("possession", 0) <= 0:
+                continue
             if effect.condition == "marked" and not any(state[j].timers.get("target", 0) > 0 for j in targets):
                 continue
             if effect.condition in ("overload", "no_overload") and (me.timers.get("overload", 0) > 0) != (
@@ -404,6 +410,10 @@ def _play(
                 state[m].focus -= int(helper.ally_attack_focus)
                 state[m].attack_wait = helper.ally_attack_cooldown
                 _follow(m, actor, targets[0], helper.ally_attack_effects, units, hp, cr, state, hits, rng)
+        if crit and skill is not None:  # an ally's critical hit: Fighting Spirit for those that gather it so (Pavel)
+            for m in _allies(units, hp, actor):
+                if m != actor:
+                    _fs_add(m, _kit(units, state, m).fs_ally_crit, units, hp, cr, state, hits, rng)
         if frozen is not None:
             for i in range(n):
                 cr[i] = min(cr[i], frozen[i])
@@ -481,6 +491,8 @@ class _State:
     abundance: float = 0.0
     """Additional damage after each attack while the "abundance" timer runs."""
     spoils: int = 0
+    stack_atk: float = 0.0
+    """Attack gained by stacking at the start of each own turn (`Kit.atk_stack_step`, Lone Wolf Peira)."""
     pilfer: bool = False
     pilfer_by: int = -1
     dealt: float = 0.0
@@ -552,9 +564,12 @@ class _State:
 
     def factor(self, kind: str) -> float:
         extra = (SPOILS_STEP * self.spoils - PILFER_STEP * self.pilfer) if kind in ("atk", "def") else 0.0
+        extra += self.stack_atk if kind == "atk" else 0.0
         buff = 0.0 if self.timers.get("block", 0) > 0 else self.buffs.get(kind, (0.0, 0))[0]  # block: no buff counts
         if kind == "spd" and self.timers.get("superhuman", 0) > 0:
             buff += SUPERHUMAN
+        if kind == "atk" and self.timers.get("possession", 0) > 0 and not self.timers.get("block", 0) > 0:
+            buff += POSSESSION
         return max(0.0, 1 + buff + self.debuffs.get(kind, (0.0, 0))[0] + extra)
 
     def apply(self, effect: Effect) -> None:
@@ -707,6 +722,7 @@ _TIMERS: Final = (
     "bzzt",
     "immobilize",
     "concealment",
+    "possession",
 )
 _BUFF_TIMERS: Final = (
     "immortal",
@@ -723,6 +739,7 @@ _BUFF_TIMERS: Final = (
     "skill_nullifier",
     "cascade",
     "bzzt",
+    "possession",
 )
 _DEBUFF_TIMERS: Final = (
     "stun",

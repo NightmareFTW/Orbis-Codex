@@ -7,12 +7,13 @@ only inside `main`, after the streams are in place."""
 
 from __future__ import annotations
 
+import os
 import sys
 import traceback
 from datetime import datetime
 from typing import Final
 
-from e7ac import crashlog
+from e7ac import crashlog, shortcut
 from e7ac.paths import AppPaths, default_paths
 
 CONSOLE_LOG: Final = "console.log"
@@ -24,6 +25,7 @@ SHOWN_LINES: Final = 8
 def main() -> int:
     paths = default_paths()
     own_streams(paths)
+    release_console(paths)
     try:
         from e7ac.ui.app import run
 
@@ -31,6 +33,36 @@ def main() -> int:
     except Exception:
         failed(paths, traceback.format_exc())
         return 1
+
+
+def release_console(paths: AppPaths, argv: list[str] | None = None) -> str:
+    """Let go of the console this process was given (SPEC D118: a cmd window stayed open while the program ran).
+
+    The window needs no console. If Windows attached one anyway (a launcher that opened `python.exe` instead of
+    `pythonw.exe`), the process leaves it: the console closes with the last process that holds it, so a launcher that
+    has already ended takes the window with it. What it found goes to `app.log` (which processes shared the console,
+    who started this one), to see what keeps a console open when it does not close. `--console` keeps it, for a start
+    from a terminal on purpose. Returns the line written ("" when there was nothing to do)."""
+    if not shortcut.on_windows() or "--console" in (sys.argv[1:] if argv is None else argv):
+        return ""
+    import ctypes
+
+    kernel = ctypes.windll.kernel32  # type: ignore[attr-defined,unused-ignore]
+    if not kernel.GetConsoleWindow():
+        line = "start: no console"
+    else:
+        slots = (ctypes.c_ulong * 16)()
+        count = int(kernel.GetConsoleProcessList(slots, 16))
+        shared = [int(slots[i]) for i in range(min(count, 16))]
+        kernel.FreeConsole()
+        line = f"start: a console was attached (shared with process ids {shared}, started by {os.getppid()}): left it"
+    try:
+        paths.logs_dir.mkdir(parents=True, exist_ok=True)
+        with crashlog.log_path(paths.logs_dir).open("a", encoding="utf-8") as handle:
+            handle.write(f"{datetime.now():%Y-%m-%d %H:%M:%S} INFO {line} ({sys.executable})\n")
+    except OSError:
+        pass
+    return line
 
 
 def own_streams(paths: AppPaths) -> None:

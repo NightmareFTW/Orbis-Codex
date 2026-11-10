@@ -1,0 +1,71 @@
+# Death Dealer Ray
+hero = "c2090"
+source = "in-game skill popups read by the Skill reader (the user's skills folder, 2026-11-10, the Journal's Preview Skills): S1, S2 and S3 at +0, with their enhancement steps and effect panels; the S1 multiplier from Fribbels' skill data (community; it has no data for S2 and S3)"
+status = "verified"
+replace = [1, 2, 3]
+handles = ["Sleep", "Increase Effectiveness", "Venom", "Extra Turn", "Injury", "Pestilence"]
+cooldowns = { 2 = 3, 3 = 5 }  # S2 "4 turns" at +0 and its +3 step is -1 turn; S3 "5 turns", no cooldown step
+unmodelled = [
+    "S1: additional damage equal to 40% of the injuries inflicted (Injury lowers max Health: not simulated)",
+    "S2 Pestilence (after attacking on the bearer's turn: venom for 1 turn, detonated at the end of the turn)",
+    "Venom's injuries (the poisoned also lose max Health) and Sleep's -100% Critical Hit Resistance and Evasion",
+    "S1 Soulburn (10 Souls): the effect chance goes to 100%",
+]
+
+# S1 Clinical Trial: attacks the enemy "and has a 65% chance to put them to sleep for 1 turn" (+10% at +3: 75%).
+[[effect]]
+slot = 1
+kind = "sleep"
+turns = 1
+chance = 0.75
+note = "S1: sleep for 1 turn (65% at +0, 75% at +3)"
+
+# S2 Anatomical Mutation (3 turns at +3): "Grants increased Effectiveness and pestilence to all allies for 2 turns and
+# increases Combat Readiness by 15%" (+1% +1% +1% +2% steps: 20%). Effectiveness +50%.
+[[effect]]
+slot = 2
+kind = "eff"
+value = 0.5
+turns = 2
+receivers = "all"
+note = "S2: Effectiveness +50% for 2 turns for all allies"
+
+[[effect]]
+slot = 2
+kind = "cr"
+value = 0.2
+receivers = "all"
+note = "S2: Combat Readiness +20% for all allies (15% at +0)"
+
+# S3 Cloud of Death (5 turns): "dispelling two buffs from all enemies and a 70% chance to inflict sleep for 1 turn and venom
+# for 2 turns. Grants an extra turn." (+5% x4 and +10%: 100% effect chance). Venom: 10% of max Health at the start of the turn.
+[[effect]]
+slot = 3
+kind = "dispel"
+count = 2
+receivers = "enemies"
+note = "S3: dispels two buffs from all enemies"
+
+[[effect]]
+slot = 3
+kind = "sleep"
+turns = 1
+chance = 1.0
+receivers = "enemies"
+note = "S3: sleep for 1 turn on all enemies (70% at +0, 100% at +5)"
+
+[[effect]]
+slot = 3
+kind = "venom"
+value = 0.1
+turns = 2
+count = 1
+chance = 1.0
+receivers = "enemies"
+note = "S3: venom for 2 turns on all enemies (10% of max Health at the start of the turn)"
+
+[[effect]]
+slot = 3
+kind = "extra_turn"
+receivers = "self"
+note = "S3: grants an extra turn"

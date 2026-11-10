@@ -1,0 +1,34 @@
+# Disciplinary Prefect Aria
+hero = "c2129"
+source = "in-game skill popups read by the Skill reader (the user's skills folder, 2026-11-10, the Journal's Preview Skills): S1, S2 and S3 at +0, with their enhancement steps and effect panels; multipliers and the barrier (15% of max Health) from Fribbels' skill data (community; it has no S2 data)"
+status = "verified"
+replace = [1, 2, 3]
+handles = ["Injury", "Barrier", "Penetrate", "PrefectAria Exclusive Equipment", "Prefect Aria Exclusive Equipment", "Aria Exclusive Equipment"]
+cooldowns = { 2 = 0, 3 = 3 }  # S3 "4 turns" at +0 and its +3 step is -1 turn
+unmodelled = [
+    "S1: while Purge is on cooldown, Disciplinary Action as an extra attack (always critical, injuries up to 10%, scales with max Health): Fribbels has no numbers for it",
+    "S2 Unwavering Execution: Effect Resistance from max Health at the start, +25% for all allies while she holds no debuff (+2% .. +5% steps), the enemy's Soulburn costs 100% more",
+    "S3: its Defense penetration +35% after each use, up to 2 stacks",
+    "Injury (max Health lowered by damage suffered) is not simulated",
+    "S3 Soulburn (10 Souls): more damage and 1 turn less cooldown",
+]
+[passive]
+always_crit = [3]
+
+# S1 Disciplinary Warning: attacks the enemy, "increasing Combat Readiness of the caster by 15%".
+[[effect]]
+slot = 1
+kind = "cr"
+value = 0.15
+receivers = "self"
+note = "S1: Combat Readiness +15% for the caster"
+
+# S3 Purge (3 turns at +3): attacks the enemy (always critical), "granting a barrier to all allies for 2 turns before increasing
+# Defense penetration of this skill by 35%" (the barrier is 15% of her max Health, Fribbels).
+[[effect]]
+slot = 3
+kind = "barrier"
+scaling = [0.15, 0.0, 0.0]
+turns = 2
+receivers = "all"
+note = "S3: a barrier of 15% of her max Health for 2 turns for all allies"

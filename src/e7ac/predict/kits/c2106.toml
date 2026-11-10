@@ -1,0 +1,87 @@
+# Dragon Bride Senya
+hero = "c2106"
+source = "in-game skill popups read by the Skill reader (the user's skills folder, 2026-11-10, the Journal's Preview Skills): S1, S2 and S3 at +0, with their enhancement steps and effect panels; multipliers, penetration and the barrier (30% of max Health) from Fribbels' skill data (community)"
+status = "verified"
+replace = [1, 2, 3]
+handles = ["Increase Speed", "Barrier", "Oath of Punishment", "Penetrate", "S2 barrier"]
+cooldowns = { 2 = 0, 3 = 4 }  # S3 "5 turns" at +0 and its +4 step is -1 turn
+unmodelled = [
+    "S2: max Health +10%; the trigger is a back-row ally left at 50% Health or less (the position of the allies is not simulated: any ally left at 50% triggers it, at most once every 3 own turns, `assumed`)",
+    "S2: 3 turns of the effect and 4 turns of the trigger's cooldown (3 at +1) are read as given; the barrier goes to the caster and one more ally (the two with the least Health here)",
+    "S3: attacks all enemies while she holds Oath of Punishment (single target here); cannot trigger a critical hit or a heavy blow",
+    "S3 Soulburn (10 Souls): the cooldown goes down 2 turns",
+    "Oath of Punishment: additional damage of 4,000 after each of her attacks is modelled as a fixed amount",
+]
+[passive]
+ally_low = 0.5
+ally_low_cooldown = 3
+
+# S1 One Step: attacks the enemy "and increases Speed of the caster for 1 turn" (30%).
+[[effect]]
+slot = 1
+kind = "spd"
+value = 0.3
+turns = 1
+receivers = "self"
+note = "S1: Speed +30% for 1 turn"
+
+# S2 Bride's Resolve (passive, 4 turns): when the back-row ally's Health is 50% or less after being attacked, "dispels all
+# debuffs from the caster and the ally in the back row, and activates Bridal Prayer: grants a barrier (proportional to the
+# caster's max Health) to the caster and the ally in the back row for 3 turns, and grants Oath of Punishment to the caster for
+# 3 turns before resetting skill cooldowns of the caster". Oath of Punishment: unaffected by debuffs and some harmful
+# effects; after attacking on the bearer's turn, inflicts 4,000 additional damage.
+[[effect]]
+slot = 2
+when = "ally_low"
+kind = "cleanse"
+receivers = "lowest:2"
+note = "S2: dispels all debuffs from the caster and an ally"
+
+[[effect]]
+slot = 2
+when = "ally_low"
+kind = "barrier"
+scaling = [0.3, 0.0, 0.0]
+turns = 3
+receivers = "lowest:2"
+note = "S2: Bridal Prayer: a barrier (30% of her max Health, Fribbels) for 3 turns"
+
+[[effect]]
+slot = 2
+when = "ally_low"
+kind = "immunity"
+turns = 3
+receivers = "self"
+note = "S2: Oath of Punishment: unaffected by debuffs for 3 turns"
+
+[[effect]]
+slot = 2
+when = "ally_low"
+kind = "abundance"
+value = 4000
+turns = 3
+receivers = "self"
+note = "S2: Oath of Punishment: 4,000 additional damage after each attack"
+
+[[effect]]
+slot = 2
+when = "ally_low"
+kind = "cd_cut"
+value = 9
+note = "S2: resets her skill cooldowns"
+
+# S3 Overcoming Hardship (4 turns at +4): attacks the enemy (penetrates Defense, cannot be critical), "and increases Combat
+# Readiness of the caster and the ally in the back row by 30%".
+[[effect]]
+slot = 3
+kind = "cr"
+value = 0.3
+receivers = "self"
+note = "S3: Combat Readiness +30% for the caster"
+
+[[effect]]
+slot = 3
+kind = "cr"
+value = 0.3
+receivers = "random_other"
+note = "S3: ... and for the ally in the back row (a random ally here)"

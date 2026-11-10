@@ -56,6 +56,9 @@ One file per hero, named by its code (`c2049.toml`); every number carries where 
     fs_start = 50                 # Fighting Spirit at the start of the battle
     fs_gain = { 1 = 20 }          # Fighting Spirit gained by using the skill of a slot
     fs_ally_hit = 20              # ... by every attack an ally suffers
+    fs_ally_crit = 20             # ... by every critical hit of an ally (not of the hero itself)
+    atk_stack_step = 0.2          # Attack gained at the start of each own turn ...
+    atk_stack_max = 5             # ... stacking up to this many times
     fs_enemy_turn = 10            # ... at the end of every enemy's turn
     ready_reduction = 0.3         # damage reduction against attacks while the S3 is off cooldown
     fs_debuff_turn = 10           # Fighting Spirit at the end of an enemy's turn per debuff an ally holds
@@ -123,6 +126,8 @@ burn and poison at once), conditions "overload" / "no_overload", passive `always
 effects follow an attack that targeted all enemies (passives `hit_cd_cut`, `area_hit_cd_cut`), the generic Fighting
 Spirit (`fs_*` passives, `when = "fs_full"` effects, kind `fs_damage`: `value` + `count` x the share of Spirit held),
 kind cd_cut (the caster's cooldowns go down `value` turns), condition "immortal", passive `ready_reduction`;
+SPEC D117: kind possession (Attack +25% for `turns`; condition "possessed" holds while the caster has it), passives
+`fs_ally_crit`, `atk_stack_step` / `atk_stack_max`;
 SPEC D116: `receivers` of a buff or Combat Readiness effect also "random_other" (one ally but the caster, at
 random), "highest_atk" and "highest_cr" (the ally but the caster with the highest Attack / Combat Readiness), passive
 `fs_start`; SPEC D114: kinds cd_up (the targets' cooldowns go up `value` turns), target (15% more damage suffered),
@@ -222,6 +227,7 @@ KINDS: Final = frozenset(
         "target",
         "immobilize",
         "concealment",
+        "possession",
     }
 )
 _DEBUFFS: Final = frozenset(
@@ -288,6 +294,7 @@ CONDITIONS: Final = frozenset(
         "no_overload",
         "immortal",
         "marked",
+        "possessed",
     }
 )
 PASSIVES: Final = frozenset(
@@ -340,6 +347,9 @@ PASSIVES: Final = frozenset(
         "fs_start",
         "fs_gain",
         "fs_ally_hit",
+        "fs_ally_crit",
+        "atk_stack_step",
+        "atk_stack_max",
         "fs_enemy_turn",
         "ready_reduction",
         "fs_debuff_turn",
@@ -545,6 +555,9 @@ def apply_override(kit: Kit, cooldowns: Mapping[int, int], override: KitOverride
     out.fs_start = int(passive.get("fs_start", out.fs_start))
     out.fs_gain = {int(k): int(v) for k, v in dict(passive.get("fs_gain", out.fs_gain)).items()}
     out.fs_ally_hit = int(passive.get("fs_ally_hit", out.fs_ally_hit))
+    out.fs_ally_crit = int(passive.get("fs_ally_crit", out.fs_ally_crit))
+    out.atk_stack_step = float(passive.get("atk_stack_step", out.atk_stack_step))
+    out.atk_stack_max = int(passive.get("atk_stack_max", out.atk_stack_max))
     out.fs_enemy_turn = int(passive.get("fs_enemy_turn", out.fs_enemy_turn))
     out.ready_reduction = float(passive.get("ready_reduction", out.ready_reduction))
     out.fs_debuff_turn = int(passive.get("fs_debuff_turn", out.fs_debuff_turn))

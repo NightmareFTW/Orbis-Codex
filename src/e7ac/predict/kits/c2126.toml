@@ -1,0 +1,49 @@
+# Hellion Lua
+hero = "c2126"
+source = "in-game skill popups read by the Skill reader (the user's skills folder, 2026-11-10, the Journal's Preview Skills): S1, S2 and S3 at +0, with their enhancement steps and effect panels; the S1 multiplier from Fribbels' skill data (community; it has no S2 or S3 data)"
+status = "verified"
+replace = [1, 2, 3]
+handles = ["Challenge", "Increase Defense", "Provoke"]
+cooldowns = { 2 = 0, 3 = 3 }  # S3 "4 turns" at +0 and its +4 step is -1 turn
+unmodelled = [
+    "Challenge (after a basic skill on a Hero: additional damage of 10% of the target's max Health, then dispelled and Speed up 2 turns) and the counterattack of every ally holding it after Lua is attacked (S2)",
+    "S3 Soulburn (20 Souls): ignores Effect Resistance",
+]
+[passive]
+hit_team_cr = 0.10
+
+# S1 Lua Attack: attacks the enemy "and has a 85% chance to provoke for 1 turn" (+5% at +2, +10% at +4: 100%).
+[[effect]]
+slot = 1
+kind = "provoke"
+turns = 1
+chance = 1.0
+note = "S1: provoke for 1 turn (85% at +0, 100% at +4)"
+
+# S2 Lua Squad (passive): "After being attacked by a Hero, increases Combat Readiness of all allies by 7%" (+1% x3: 10%), "and
+# triggers a counterattack from all allies granted challenge".
+
+# S3 Lua's Challenge (3 turns at +4): "Grants challenge to all allies, before increasing Defense of the caster for 2 turns.
+# Decreases buff durations of all enemies by 1 turn and has a 70% chance to provoke for 1 turn" (+5% x4, +10%: 100%). Defense +60%.
+[[effect]]
+slot = 3
+kind = "def"
+value = 0.6
+turns = 2
+receivers = "self"
+note = "S3: Defense +60% for 2 turns for the caster"
+
+[[effect]]
+slot = 3
+kind = "shorten"
+turns = 1
+receivers = "enemies"
+note = "S3: the buffs of all enemies last 1 turn fewer"
+
+[[effect]]
+slot = 3
+kind = "provoke"
+turns = 1
+chance = 1.0
+receivers = "enemies"
+note = "S3: provoke for 1 turn on all enemies (70% at +0, 100% at +6)"

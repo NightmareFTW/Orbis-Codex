@@ -1,0 +1,54 @@
+# Commander Pavel
+hero = "c2080"
+source = "in-game skill popups read by the Skill reader (the user's skills folder, 2026-11-10, the Journal's Preview Skills): S1, S2 and S3 at +0, with their enhancement steps and effect panels; multipliers from Fribbels' skill data (community; its \"S2\" entry is Begone!)"
+status = "verified"
+replace = [1, 2, 3]
+handles = ["Decrease Attack", "Increase Attack", "Penetrate", "Damage Sharing", "Pavel Exclusive Equipment", "clusive Equipment", "S2 atk"]
+cooldowns = { 2 = 0, 3 = 4 }  # S3 "5 turns" at +0 and its +3 step is -1 turn
+unmodelled = [
+    "S3: penetrates Defense in proportion when his Attack is above the target's, up to 70% (the comparison is not simulated); it ignores damage share",
+    "Begone! attacks all enemies, Fribbels' data for it hits one (so it is understated, as NV-79 for Bellona)",
+    "S3 Soulburn (10 Souls): more damage (Souls are not simulated)",
+]
+
+# S1 How Sloppy: attacks the enemy "with a 65% chance to decrease Attack for 1 turn" (+10% +3: 75%). Attack -50%.
+[[effect]]
+slot = 1
+kind = "atk"
+value = -0.5
+turns = 1
+chance = 0.75
+note = "S1: Attack -50% for 1 turn (65% at +0, 75% at +3)"
+
+# S2 Obstacle Elimination (passive): "At the start of the first battle, gains 60 Fighting Spirit. After an ally except for the
+# caster makes a critical hit, gains 20 Fighting Spirit, and when Fighting Spirit is full, activates Begone!. This effect is not
+# activated by an extra attack, counterattack, or Dual Attack. Begone! (consumes 100 Fighting Spirit): Grants increased Attack
+# to the caster for 2 turns, and attacks all enemies with gunfire, before increasing Combat Readiness of the caster by 100%."
+[passive]
+fs_full = 100
+fs_start = 60
+fs_ally_crit = 20
+
+[[effect]]
+slot = 2
+when = "fs_full"
+kind = "atk"
+value = 0.5
+turns = 2
+receivers = "self"
+note = "Begone!: Attack +50% for 2 turns"
+
+[[effect]]
+slot = 2
+when = "fs_full"
+kind = "extra_attack"
+value = 2
+note = "Begone!: an attack (Fribbels' S2 data)"
+
+[[effect]]
+slot = 2
+when = "fs_full"
+kind = "cr"
+value = 1.0
+receivers = "self"
+note = "Begone!: Combat Readiness +100%"

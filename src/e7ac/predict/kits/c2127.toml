@@ -1,0 +1,78 @@
+# Successor Taeyou
+hero = "c2127"
+source = "in-game skill popups read by the Skill reader (the user's skills folder, 2026-11-10, the Journal's Preview Skills): S1, S2 and S3 at +0, with their enhancement steps and effect panels (the S1 text and its Possession panel were read cut: the hero's three skills are as the popups show them); the S1 multiplier from Fribbels' skill data (community)"
+status = "verified"
+replace = [1, 2, 3]
+handles = ["Possession", "Decrease Defense", "Invincible", "Extra Turn", "Possesn uspellable)", "clusive Equipment"]
+cooldowns = { 2 = 0, 3 = 4 }  # S3 "5 turns" at +0 and its +3 step is -1 turn
+unmodelled = [
+    "Possession's counterattack when suffering a critical hit",
+    "S1 (when she holds possession): Attack +, always critical, no Dual Attack: the text was read cut",
+    "S2: Fighting Spirit from the Combat Readiness an ally takes from an enemy (only her own S1 counts here), and that it is spent at the end of a turn (here at once)",
+    "S3: Possession also extends the buffs of the caster by 1 turn",
+    "S3 Soulburn (20 Souls): ignores Effect Resistance",
+]
+[passive]
+fs_full = 100
+fs_start = 60
+fs_gain = { 1 = 20 }
+
+# S2 Spirit Invocation (passive): "Starts the first battle with 40 Fighting Spirit (+3 +4 +4 +4 +5: 60). When Combat Readiness of an
+# enemy is decreased, gains Fighting Spirit equal to the amount of Combat Readiness reduced, and at the end of a turn, when Fighting
+# Spirit is full, consumes all Fighting Spirit, increasing Combat Readiness of the caster by 100% and granting possession for 2
+# turns." Possession: Attack +25%; counterattacks when suffering a critical hit.
+[[effect]]
+slot = 2
+when = "fs_full"
+kind = "cr"
+value = 1.0
+receivers = "self"
+note = "S2: Combat Readiness +100%"
+
+[[effect]]
+slot = 2
+when = "fs_full"
+kind = "possession"
+turns = 2
+receivers = "self"
+note = "S2: possession (Attack +25%) for 2 turns"
+
+# S1 Lan Na Zha: attacks the enemy, decreasing Combat Readiness by 20%.
+[[effect]]
+slot = 1
+kind = "cr"
+value = -0.2
+note = "S1: Combat Readiness -20% for the target"
+
+# S3 Azure Phantom (4 turns at +3): "dispelling two buffs from all enemies and a 60% chance to decrease Defense for 2 turns (+5% x3,
+# +10%: 85%), before granting invincibility to the caster for 1 turn. When the caster is granted possession, extends buff
+# durations of the caster by 1 turn and grants an extra turn."
+[[effect]]
+slot = 3
+kind = "dispel"
+count = 2
+receivers = "enemies"
+note = "S3: dispels two buffs from all enemies"
+
+[[effect]]
+slot = 3
+kind = "def"
+value = -0.7
+turns = 2
+chance = 0.85
+receivers = "enemies"
+note = "S3: Defense -70% for 2 turns on all enemies (60% at +0, 85% at +5)"
+
+[[effect]]
+slot = 3
+kind = "invincible"
+turns = 1
+receivers = "self"
+note = "S3: invincibility for 1 turn"
+
+[[effect]]
+slot = 3
+condition = "possessed"
+kind = "extra_turn"
+receivers = "self"
+note = "S3: while she holds possession: an extra turn"

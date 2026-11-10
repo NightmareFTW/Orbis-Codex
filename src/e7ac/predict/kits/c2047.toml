@@ -1,0 +1,58 @@
+# Martial Artist Ken
+hero = "c2047"
+source = "in-game skill popups read by the Skill reader (the user's skills folder, 2026-11-10, the Journal's Preview Skills): S1, S2 and S3 at +0, with their enhancement steps and effect panels; multipliers and target counts from Fribbels' skill data (community)"
+status = "verified"
+replace = [1, 2, 3]
+handles = ["Provoke", "Vigor", "Penetrate"]
+cooldowns = { 2 = 0, 3 = 4 }  # S3 "5 turns" at +0 and its +3 step is -1 turn
+unmodelled = [
+    "S2 Dragon Flame (a counterattack with 50% penetration, always critical, stronger with lost Health, when he or an ally suffers a critical hit): no trigger on a critical hit suffered, so his best damage is missing",
+    "S1 Soulburn (10 Souls): more damage (Souls are not simulated)",
+]
+[passive]
+always_crit = [1, 3]
+
+# S1 Knockout: attacks the enemy "with a 75% chance to inflict provoke for 1 turn" (+10% +3, +15% +5: 100%); always critical.
+[[effect]]
+slot = 1
+kind = "provoke"
+turns = 1
+chance = 1.0
+note = "S1: provoke for 1 turn (75% at +0, 100% at +5)"
+
+# S2 Dragon Flame: "At the start of battle, grants vigor for 3 turns" (Attack and Defense +30%).
+[[effect]]
+slot = 2
+when = "start"
+kind = "atk"
+value = 0.3
+turns = 3
+receivers = "self"
+note = "S2: vigor (Attack +30%) for 3 turns from the start of the battle"
+
+[[effect]]
+slot = 2
+when = "start"
+kind = "def"
+value = 0.3
+turns = 3
+receivers = "self"
+note = "S2: vigor (Defense +30%) for 3 turns from the start of the battle"
+
+# S3 The Coming of Asura (4 turns at +3): attacks all enemies "with a 55% chance to decrease Defense for 2 turns (+10% +2,
+# +15% +5: 80%), and increases Attack of the caster for 2 turns"; always critical. Defense -70%, Attack +50%.
+[[effect]]
+slot = 3
+kind = "def"
+value = -0.7
+turns = 2
+chance = 0.8
+note = "S3: Defense -70% for 2 turns (55% at +0, 80% at +5)"
+
+[[effect]]
+slot = 3
+kind = "atk"
+value = 0.5
+turns = 2
+receivers = "self"
+note = "S3: Attack +50% for 2 turns for the caster"

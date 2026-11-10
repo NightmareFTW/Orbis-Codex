@@ -230,6 +230,11 @@ class Kit:
     """Fighting Spirit held at the start of the battle (Benimaru: 50)."""
     fs_gain: dict[int, int] = field(default_factory=dict)
     fs_ally_hit: int = 0
+    atk_stack_step: float = 0.0
+    atk_stack_max: int = 0
+    """Attack +`atk_stack_step` at the start of each own turn, up to `atk_stack_max` times (Lone Wolf Peira)."""
+    fs_ally_crit: int = 0
+    """Fighting Spirit gained after an ally's critical hit with a normal attack (Commander Pavel)."""
     fs_enemy_turn: int = 0
     fs_effects: list[Effect] = field(default_factory=list)
     ready_reduction: float = 0.0

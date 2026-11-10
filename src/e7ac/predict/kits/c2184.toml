@@ -1,0 +1,53 @@
+# Salome
+hero = "c2184"
+source = "in-game skill popups read by the Skill reader (the user's skills folder, 2026-11-10, the Journal's Preview Skills): S1, S2 and S3 at +0, with their enhancement steps and effect panels; multipliers from Fribbels' skill data (community; its S3 is Nggdrasil's Judgment)"
+status = "verified"
+replace = [1, 2, 3]
+handles = ["Dual Attack", "Skill Nullifier", "Clone", "Extra Turn", "Collapse", "Decrease Defense"]
+cooldowns = { 2 = 4, 3 = 4 }  # S2 "5 turns" and S3 "5 turns" at +0; both have a -1 turn step (+1 and +4)
+unmodelled = [
+    "S2: Clone (the target Hero is cloned for 1 turn, with its appearance and abilities): not simulated",
+    "S3: additional damage to the target (no number in the text, scales with her max Health)",
+    "S3 Soulburn (10 Souls): ignores Effect Resistance",
+]
+
+# S1 Corrupted Divinity: attacks the enemy "and triggers a Dual Attack from the ally with the highest Attack".
+[[effect]]
+slot = 1
+kind = "dual_attack"
+receivers = "highest_atk"
+note = "S1: the ally with the highest Attack attacks the same target with a basic attack"
+
+# S2 Salvation (4 turns at +1): "Releases divinity, granting skill nullifier once to the caster, and clones a target Hero except
+# for the caster for 1 turn. Grants an extra turn."
+[[effect]]
+slot = 2
+kind = "skill_nullifier"
+receivers = "self"
+turns = 99
+note = "S2: Skill Nullifier once to the caster"
+
+[[effect]]
+slot = 2
+kind = "extra_turn"
+receivers = "self"
+note = "S2: grants an extra turn"
+
+# S3 Nggdrasil's Judgment (4 turns at +4): "After inflicting collapse on the enemy for 2 turns, attacks with the power of Nggdrasil,
+# with a 75% chance to inflict decreased Defense for 2 turns (+10% +2, +15% +6: 100%), and deals additional damage to the target."
+# Collapse: max Health -25%, doubled on Heroes: 50%.
+[[effect]]
+slot = 3
+when = "before"
+kind = "collapse"
+value = 0.5
+turns = 2
+note = "S3: collapse for 2 turns before the attack: max Health down 25%, doubled on Heroes"
+
+[[effect]]
+slot = 3
+kind = "def"
+value = -0.7
+turns = 2
+chance = 1.0
+note = "S3: Defense -70% for 2 turns (75% at +0, 100% at +6)"
