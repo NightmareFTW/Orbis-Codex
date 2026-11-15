@@ -10,7 +10,7 @@ import pytest
 from PIL import Image
 
 from e7ac.vision.ocr import Box, RapidOcrReader, TextLine
-from e7ac.vision.skill_popup import SkillPopup, clean, parse_skill_popup, read_skill_popup
+from e7ac.vision.skill_popup import SkillPopup, clean, parse_skill_popup, read_hero_name, read_skill_popup
 from tests.markers import FIXTURES_DIR
 
 SKILLS = "screenshots/skills"
@@ -626,3 +626,15 @@ def test_a_badge_the_page_missed_is_read_from_the_icons_corner() -> None:
     assert rescue_level(page, _CropReader("+8"), replace(missed, enhance=())) == replace(missed, enhance=())
     assert rescue_level(page, _CropReader("+8"), replace(missed, title_box=None)) == replace(missed, title_box=None)
     assert rescue_level(page, _CropReader("+8"), None) is None
+
+
+def test_the_journals_own_heading_is_never_taken_for_the_name_of_the_hero() -> None:
+    """Desert Jewel Basar's page in the Journal (the user's capture 2026-11-15): "< Journal" is the topmost large text
+    of the screen, the hero's name sits below it."""
+    heading = line("< Journal", 35, -70, 210, 62)
+    found = parse_skill_popup([heading, *synthetic()])
+    assert found is not None and found.hero == "Lady of the Scales"
+    screen = [heading, line("Desert Jewel Basar", 52, 100, 530, 70), line("Light Soul Weaver", 100, 40, 300, 36)]
+    assert read_hero_name([*screen, line("Preview Skills", 800, 900, 180, 36)]) == "Desert Jewel Basar"
+    foot = line("Preview Skills", 800, 900, 180, 36)
+    assert read_hero_name([heading, line("Hero Info", 40, 0, 200, 80), *screen[1:], foot]) == "Desert Jewel Basar"

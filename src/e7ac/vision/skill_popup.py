@@ -248,6 +248,7 @@ def read_hero_name(lines: Sequence[TextLine]) -> str | None:
         if r[0].box.x0 <= 0.12 * wide
         and r[0].box.y0 <= 0.25 * high
         and not r[1].lower().startswith("lv")
+        and not is_screen_title(r[1])
         and sum(c.isalpha() for c in r[1]) >= 3
     ]
     name = max(corner, key=lambda r: r[0].box.height, default=None)
@@ -606,11 +607,27 @@ def repair_panel(panel: EffectPanel, lines: Sequence[str] = ()) -> EffectPanel:
     return EffectPanel(re.sub(r"\s+", " ", name).strip(), tuple(dict.fromkeys(marks)), _join_text(rest))
 
 
+SCREEN_TITLES: Final = frozenset({"journal", "hero info", "heroes", "relationships", "preview skills", "preview stats"})
+"""The screen's own heading at its top left ("< Journal"): large text that is never a hero's name (SPEC D119: read
+as the hero of a Journal page, whose name sits below it, and the popup was refused as "no catalog hero is called
+'Journal'")."""
+
+
+def is_screen_title(text: str) -> bool:
+    return re.sub(r"[^a-z ]+", "", text.lower()).strip() in SCREEN_TITLES
+
+
 def _hero(rows: Sequence[tuple[TextLine, str]], title: TextLine, left: float) -> str | None:
-    """The hero's name: the topmost tall line at the screen's left edge (the "Lv. Max/60" line below it is tall too)."""
+    """The hero's name: the topmost tall line at the screen's left edge (the "Lv. Max/60" line below it is tall too, and
+    so is the screen's own heading, "Journal")."""
     wide = max(r[0].box.x1 for r in rows)  # the capture's width, as far as the text goes
     tall = [
-        r for r in rows if r[0].box.height >= 60 and r[0].box.x0 <= 0.12 * wide and not r[1].lower().startswith("lv")
+        r
+        for r in rows
+        if r[0].box.height >= 60
+        and r[0].box.x0 <= 0.12 * wide
+        and not r[1].lower().startswith("lv")
+        and not is_screen_title(r[1])
     ]
     top = min(tall, key=lambda r: r[0].box.y0, default=None)
     return re.sub(r"[^A-Za-z0-9' .&:-]+", "", top[1]).strip() if top else None
