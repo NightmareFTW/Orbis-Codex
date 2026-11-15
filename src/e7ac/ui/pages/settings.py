@@ -158,8 +158,16 @@ class SettingsPage(Page):
             "The game never shows an opponent's gear: mixed (the three Stove builds, with a range), one of them, or "
             "the Fribbels library average.",
         )
+        self._flag(
+            grid,
+            5,
+            "badge_in_screenshots",
+            "Badge in screenshots",
+            "Print Screen and the Snipping Tool then show the badge too (to show a problem). Next watch.",
+        )
         if sys.platform != "win32":
             self._editors["badge_overlay"].setEnabled(False)
+            self._editors["badge_in_screenshots"].setEnabled(False)
         return frame
 
     def _build_files(self) -> QWidget:
@@ -334,7 +342,9 @@ class SettingsPage(Page):
                     editor.setValue(int(value))
                 elif isinstance(editor, QLineEdit):
                     editor.setText("" if value is None else str(value))
-                editor.setEnabled(not problem and (key != "badge_overlay" or sys.platform == "win32"))
+                editor.setEnabled(
+                    not problem and (key not in ("badge_overlay", "badge_in_screenshots") or sys.platform == "win32")
+                )
         finally:
             self._loading = False
         if problem:

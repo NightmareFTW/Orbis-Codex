@@ -25,6 +25,7 @@ COMPARE_RUNS_MAX: Final = 10000
 _FREE_FORM_HINTS: Final = {
     "resolution": "auto | WIDTHxHEIGHT",
     "badge_overlay": "true | false",
+    "badge_in_screenshots": "true | false",
     "offline": "true | false",
     "compare_runs": f"a whole number from {COMPARE_RUNS_MIN} to {COMPARE_RUNS_MAX}",
 }
@@ -92,6 +93,9 @@ class Settings(BaseModel):
     game_language: GameLanguage = GameLanguage.EN
     badge_overlay: bool = True
     """Show the small badge over the game while the Arena watch runs (Windows)."""
+    badge_in_screenshots: bool = False
+    """The badge shows in screenshots (Print Screen, the Snipping Tool), to show a problem with the badge on it. Off, it
+    is hidden from every capture (SPEC D120); on, the watches blank it in the pictures they read."""
     offline: bool = False
     """The Arena watch uses cached data only (no downloads)."""
     compare_runs: int = Field(default=COMPARE_RUNS_DEFAULT, ge=COMPARE_RUNS_MIN, le=COMPARE_RUNS_MAX)

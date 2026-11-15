@@ -10,7 +10,14 @@ import pytest
 from PIL import Image
 
 from e7ac.vision.ocr import Box, RapidOcrReader, TextLine
-from e7ac.vision.skill_popup import SkillPopup, clean, parse_skill_popup, read_hero_name, read_skill_popup
+from e7ac.vision.skill_popup import (
+    SkillPopup,
+    clean,
+    is_screen_title,
+    parse_skill_popup,
+    read_hero_name,
+    read_skill_popup,
+)
 from tests.markers import FIXTURES_DIR
 
 SKILLS = "screenshots/skills"
@@ -638,3 +645,13 @@ def test_the_journals_own_heading_is_never_taken_for_the_name_of_the_hero() -> N
     assert read_hero_name([*screen, line("Preview Skills", 800, 900, 180, 36)]) == "Desert Jewel Basar"
     foot = line("Preview Skills", 800, 900, 180, 36)
     assert read_hero_name([heading, line("Hero Info", 40, 0, 200, 80), *screen[1:], foot]) == "Desert Jewel Basar"
+
+
+def test_a_misread_heading_and_a_name_cut_by_the_popup_are_still_sorted_out() -> None:
+    """Watcher Schuri's page with a skill held (the user's capture 2026-11-15): the popup covers the end of the name,
+    and the OCR may write the heading a letter wrong."""
+    for heading in ("< Joumal", "Journa", "<Journal"):
+        lines = [line(heading, 35, -70, 210, 70), line("Watcher Sc", 52, 0, 300, 64), *synthetic()[1:]]
+        found = parse_skill_popup(lines)
+        assert found is not None and found.hero == "Watcher Sc"
+    assert not is_screen_title("Watcher Schuri") and not is_screen_title("Jo")

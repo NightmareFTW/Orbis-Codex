@@ -88,17 +88,32 @@ def metrics(size: str, dpi_scale: float, buttons: bool = False) -> tuple[int, in
     )
 
 
+def _shown_in_captures() -> bool:
+    """The setting `badge_in_screenshots` (False when the settings cannot be read: the badge is then hidden)."""
+    try:
+        from e7ac.paths import default_paths
+        from e7ac.settings import load_settings
+
+        return load_settings(default_paths().settings_file).badge_in_screenshots
+    except Exception:
+        return False
+
+
 def open_signal(
-    beep: bool, buttons: list[tuple[str, Callable[[], None]]] | None = None, size: str = DEFAULT_SIZE
+    beep: bool,
+    buttons: list[tuple[str, Callable[[], None]]] | None = None,
+    size: str = DEFAULT_SIZE,
+    in_captures: bool | None = None,
 ) -> tuple[WatchSignal, str]:
     """The badge, or the console only with the reason. `buttons`: labels and what a click on each does (the badge then
-    takes clicks, on its own area only; it still never takes the focus from the game). `size`: a key of `SIZES`."""
+    takes clicks, on its own area only; it still never takes the focus from the game). `size`: a key of `SIZES`.
+    `in_captures`: the badge shows in screenshots (SPEC D120); None = the setting `badge_in_screenshots`."""
     if sys.platform == "win32":
         try:
             import tkinter  # noqa: F401
         except ImportError:
             return NoSignal(), "tkinter is missing from this Python: console only"
-        badge = TkBadge(beep, buttons or [], size)
+        badge = TkBadge(beep, buttons or [], size, _shown_in_captures() if in_captures is None else in_captures)
         if not badge.ready.wait(5):
             return NoSignal(), "the visual signal did not start: console only"
         return badge, ""
@@ -110,9 +125,15 @@ class TkBadge:
     """The badge, run by its own thread (tkinter calls stay on that thread; the others only post messages)."""
 
     def __init__(
-        self, beep: bool, buttons: list[tuple[str, Callable[[], None]]] | None = None, size: str = DEFAULT_SIZE
+        self,
+        beep: bool,
+        buttons: list[tuple[str, Callable[[], None]]] | None = None,
+        size: str = DEFAULT_SIZE,
+        in_captures: bool = False,
     ) -> None:
         self.beep = beep
+        self.in_captures = in_captures
+        """Screenshots (and so the pictures the watches read: `ui.badge_probe` blanks it there) show the badge."""
         self.buttons = buttons or []
         self.size = size
         self._affinity = threading.Event()
@@ -148,6 +169,8 @@ class TkBadge:
     def capturable(self, on: bool) -> bool:
         """Let screen captures see the badge (on) or hide it again (off), e.g. for a picture to share; True once
         applied. Only for a badge that is hidden from capture in the first place."""
+        if self.in_captures:
+            return on  # always visible to captures: nothing to switch
         if not self.excluded:
             return False
         self._affinity.clear()
@@ -212,7 +235,8 @@ class TkBadge:
         root.withdraw()
         root.update_idletasks()
         hwnd = int(root.wm_frame(), 16)
-        self.excluded = _exclude_from_capture(hwnd)
+        self.excluded = False if self.in_captures else _exclude_from_capture(hwnd)
+        over_game = self.excluded or self.in_captures  # not hidden from capture: still over the game, not beside it
         _click_through(hwnd, clickable=bool(self.buttons))
         placed: list[Rect] = []
 
@@ -222,7 +246,7 @@ class TkBadge:
                 return False
             if kind == "place" and (not placed or placed[-1] != value):
                 placed[:] = [value]
-                spot = _spot(value, self.excluded, root.winfo_screenheight(), *fitted[0])
+                spot = _spot(value, over_game, root.winfo_screenheight(), *fitted[0])
                 if spot is None:
                     root.withdraw()
                     self._region = None

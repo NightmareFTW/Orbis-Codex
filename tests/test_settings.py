@@ -188,3 +188,28 @@ def test_the_arena_watch_options_are_settings_with_limits() -> None:
         with pytest.raises(SettingsError):
             with_value(settings, key, value)
     assert all(value_hint(key) for key in EDITABLE_KEYS)  # `e7 config options` can describe every key
+
+
+def test_the_badge_is_hidden_from_screenshots_until_the_user_asks_for_it() -> None:
+    from e7ac.settings import Settings, with_value
+
+    settings = Settings()
+    assert not settings.badge_in_screenshots  # the readers never see it by default (SPEC D120)
+    assert with_value(settings, "badge_in_screenshots", "true").badge_in_screenshots
+
+
+def test_a_badge_shown_in_screenshots_needs_no_switch_and_stays_over_the_game(monkeypatch: pytest.MonkeyPatch) -> None:
+    import threading
+
+    from e7ac.ui import watch_signal
+    from e7ac.ui.watch_signal import TkBadge
+
+    monkeypatch.setattr(threading.Thread, "start", lambda self: None)  # no Tk thread in a test
+    shown = TkBadge(False, [], "large", in_captures=True)
+    assert shown.capturable(True) and not shown.capturable(False)  # nothing to switch: always visible
+    hidden = TkBadge(False, [], "large")
+    assert not hidden.in_captures and not hidden.capturable(True)  # not excluded yet (the thread did not run)
+    monkeypatch.setattr(watch_signal, "_shown_in_captures", lambda: True)
+    monkeypatch.setattr("sys.platform", "linux")
+    signal, why = watch_signal.open_signal(False)
+    assert "needs Windows" in why and signal.region() is None

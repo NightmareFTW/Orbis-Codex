@@ -27,6 +27,7 @@ import re
 import unicodedata
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
+from difflib import SequenceMatcher
 from statistics import median
 from typing import Any, Final
 
@@ -614,12 +615,15 @@ as the hero of a Journal page, whose name sits below it, and the popup was refus
 
 
 def is_screen_title(text: str) -> bool:
-    return re.sub(r"[^a-z ]+", "", text.lower()).strip() in SCREEN_TITLES
+    """A screen heading, even when the OCR read it a letter or two wrong ("Joumal", "< Journa") (SPEC D121)."""
+    letters = re.sub(r"[^a-z ]+", "", text.lower()).strip()
+    return len(letters) >= 4 and any(SequenceMatcher(None, letters, title).ratio() >= 0.75 for title in SCREEN_TITLES)
 
 
 def _hero(rows: Sequence[tuple[TextLine, str]], title: TextLine, left: float) -> str | None:
-    """The hero's name: the topmost tall line at the screen's left edge (the "Lv. Max/60" line below it is tall too, and
-    so is the screen's own heading, "Journal")."""
+    """The hero's name: the tallest line at the screen's left edge, the biggest text of the hero's page ("Lv. Max/60"
+    is tall too, and so is the screen's own heading, "Journal": neither is a name). A held skill's popup covers the
+    end of the name: what is left of it is still the tallest."""
     wide = max(r[0].box.x1 for r in rows)  # the capture's width, as far as the text goes
     tall = [
         r
@@ -629,5 +633,5 @@ def _hero(rows: Sequence[tuple[TextLine, str]], title: TextLine, left: float) ->
         and not r[1].lower().startswith("lv")
         and not is_screen_title(r[1])
     ]
-    top = min(tall, key=lambda r: r[0].box.y0, default=None)
+    top = max(tall, key=lambda r: (r[0].box.height, -r[0].box.y0), default=None)
     return re.sub(r"[^A-Za-z0-9' .&:-]+", "", top[1]).strip() if top else None
