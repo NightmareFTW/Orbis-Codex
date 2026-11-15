@@ -37,7 +37,8 @@ from e7ac.roster.store import list_owned
 from e7ac.settings import SettingsError, load_settings
 from e7ac.sources.assets import fetch_class_sprite, fetch_hero_icons, load_class_sprite, load_hero_icons
 from e7ac.storage.db import session_scope
-from e7ac.ui.badge_probe import hide_badge
+from e7ac.ui.badge_image import put_badge, render_badge, scale_for
+from e7ac.ui.badge_probe import badge_visible, hide_badge
 from e7ac.ui.watch_signal import AMBER, DEFAULT_SIZE, GREEN, LIGHT, RED, NoSignal, WatchSignal, open_signal
 from e7ac.vision.arena_badges import (
     WORK_HEIGHT,
@@ -285,63 +286,61 @@ def _share(
     client: Any = None,
     hwnd: int | None = None,
 ) -> None:
-    """ "Save picture": the game with the badge on it, to show to friends. The badge is hidden from every screen
-    capture so that it never disturbs the reading: for this picture only it is shown to the capture for a moment;
-    where Windows does not allow it, a copy of the badge is drawn on the last game picture instead."""
+    """ "Save picture": the game with the badge on it, to show to friends (or to me, to see a problem). The badge is
+    hidden from every screen capture so that it never disturbs the reading: for this picture only it is shown to the
+    capture for a moment. Whatever the capture then shows is checked: when the badge is not in it (the capture only
+    takes the game's own surface, or Windows does not allow the badge to be shown), the badge is drawn on the game
+    picture in its own layout (`ui.badge_image`, SPEC D122)."""
     if not result[0]:
         badge.say("Nothing to save yet", "a result first", LIGHT)
         return
     picture: BgrImage | None = None
+    grabbed_area: Rect | None = None
+    shown = False
     if badge.capturable(True):
         try:
             arena_sleep(0.3)  # the screen is redrawn with the badge
             grabbed = grab_frame(client, hwnd)
-            picture = grabbed[0] if grabbed is not None else None
+            if grabbed is not None:
+                picture, grabbed_area = grabbed
+                where = badge.region()
+                if where is not None:
+                    rect = Rect(where.left - grabbed[1].left, where.top - grabbed[1].top, where.width, where.height)
+                    shown = badge_visible(picture, rect)
         finally:
             badge.capturable(False)
     if picture is None:
-        if frame is None:
-            badge.say("Nothing to save yet", "the game is not visible", LIGHT)
-            return
-        picture = _with_badge(frame, result)
+        picture = frame
+    if picture is None:
+        badge.say("Nothing to save yet", "the game is not visible", LIGHT)
+        return
+    if not shown:
+        picture = _with_badge(picture, result, badge.region(), grabbed_area)
     path = _keep_capture(paths.captures_dir / "arena" / "shared", picture, "result")
     badge.say(result[0], f"picture saved: {path.name}", result[2])
-    typer.echo(f"Picture saved: {path}")
+    typer.echo(f"Picture saved: {path}" + ("" if shown else " (the badge drawn on it)"))
 
 
-def _with_badge(frame: BgrImage, result: tuple[str, str, str]) -> BgrImage:
-    """A copy of the badge drawn where it stands on the game (top centre), as large as the badge is on a screen of
-    this picture's height (the "large" size at 740 px, scaled with the picture)."""
-    picture = frame.copy()
-    k = 1.6 * picture.shape[0] / 740
-    width, height = round(300 * k), round(58 * k)
-    x0, y0 = max(0, (picture.shape[1] - width) // 2), round(8 * k)
-    colour = tuple(int(result[2][i : i + 2], 16) for i in (5, 3, 1))  # "#rrggbb" -> BGR
-    cv2.rectangle(picture, (x0, y0), (x0 + width, y0 + height), (30, 30, 30), -1)
-    cv2.rectangle(picture, (x0, y0), (x0 + width, y0 + height), colour, max(2, round(3 * k)))
-    thin = max(1, round(k))
-    cv2.putText(
-        picture,
+def _with_badge(
+    frame: BgrImage, result: tuple[str, str, str], where: Rect | None = None, area: Rect | None = None
+) -> BgrImage:
+    """A copy of the game picture with the badge drawn on it, in the badge's own layout (panel, stripe, light,
+    headline, line and the two buttons): of the size and in the place the real badge has when it is known (`where` on
+    the screen, `area` the game's place on it), else as large as it would be on a 740 px picture, at the top centre."""
+    try:
+        size = load_settings(default_paths().settings_file).badge_size.value
+    except SettingsError:
+        size = DEFAULT_SIZE
+    drawn = render_badge(
         result[0],
-        (x0 + round(12 * k), y0 + round(24 * k)),
-        cv2.FONT_HERSHEY_DUPLEX,
-        0.6 * k,
-        colour,
-        thin,
-        cv2.LINE_AA,
+        result[1],
+        result[2],
+        ("Check again", "Save picture"),
+        size,
+        scale_for(frame.shape[0], size, where.width if where is not None else None),
     )
-    line = result[1] if len(result[1]) <= 44 else result[1][:43] + "..."
-    cv2.putText(
-        picture,
-        line,
-        (x0 + round(12 * k), y0 + round(46 * k)),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.42 * k,
-        (187, 187, 187),
-        thin,
-        cv2.LINE_AA,
-    )
-    return np.asarray(picture, np.uint8)
+    spot = (where.left - area.left, where.top - area.top) if where is not None and area is not None else None
+    return put_badge(frame, drawn, spot)
 
 
 def _again(match: _Match, badge: WatchSignal, collect_only: bool = False) -> None:

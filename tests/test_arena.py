@@ -581,6 +581,8 @@ def test_save_picture_shows_the_badge_on_the_game(monkeypatch: pytest.MonkeyPatc
     said: list[str] = []
 
     class FakeBadge:
+        spot: Rect | None = None
+
         def __init__(self, capturable: bool) -> None:
             self.allowed = capturable
             self.states: list[bool] = []
@@ -593,19 +595,24 @@ def test_save_picture_shows_the_badge_on_the_game(monkeypatch: pytest.MonkeyPatc
             self.states.append(on)
             return self.allowed
 
-        def region(self) -> None:
-            return None
+        def region(self) -> Rect | None:
+            return self.spot
 
         def close(self) -> None: ...
+
+    from e7ac.ui.badge_image import put_badge, render_badge
+    from e7ac.vision.window import Rect
 
     paths = default_paths()
     folder = paths.captures_dir / "arena" / "shared"
     game = np.asarray(cv2.resize(_textured(9), (1600, 900)), np.uint8)
-    with_badge = game.copy()
-    with_badge[:80] = 255  # what the screen shows with the badge visible to the capture
-    monkeypatch.setattr(arena_cli, "grab_frame", lambda client, hwnd: (with_badge, None))
-    monkeypatch.setattr(arena_cli, "arena_sleep", lambda seconds: None)
     result = ("Win chance 62%", "vs Foe One, Foe Two", "#2fa84f")
+    badge = render_badge(*result, ("Check again", "Save picture"), "large", 1.0)
+    with_badge = put_badge(game, badge)  # what the screen shows with the badge visible to the capture
+    spot = Rect((1600 - badge.shape[1]) // 2, 8, badge.shape[1], badge.shape[0])
+    FakeBadge.spot = spot
+    monkeypatch.setattr(arena_cli, "grab_frame", lambda client, hwnd: (with_badge, Rect(0, 0, 1600, 900)))
+    monkeypatch.setattr(arena_cli, "arena_sleep", lambda seconds: None)
     arena_cli._share(game, ("", "", ""), paths, cast(Any, FakeBadge(True)))
     shown = FakeBadge(True)
     arena_cli._share(game, result, paths, cast(Any, shown))
@@ -616,8 +623,16 @@ def test_save_picture_shows_the_badge_on_the_game(monkeypatch: pytest.MonkeyPatc
         old.unlink()
     arena_cli._share(game, result, paths, cast(Any, FakeBadge(False)))  # older Windows: a copy is drawn
     drawn = cv2.imread(str(next(folder.glob("*.png"))))
-    assert drawn is not None and not np.array_equal(drawn[8:66, 650:950], game[8:66, 650:950])
-    assert np.array_equal(drawn[200:], game[200:]) and said[0] == "Nothing to save yet"
+    assert drawn is not None and np.array_equal(drawn, with_badge)  # in the badge's own layout, the same picture
+    assert said[0] == "Nothing to save yet"
+    for old in folder.glob("*.png"):
+        old.unlink()
+    elsewhere = FakeBadge(True)
+    elsewhere.spot = Rect(10, 400, spot.width, spot.height)  # the capture shows no badge where it stands
+    monkeypatch.setattr(arena_cli, "grab_frame", lambda client, hwnd: (game, Rect(0, 0, 1600, 900)))
+    arena_cli._share(game, result, paths, cast(Any, elsewhere))
+    again = cv2.imread(str(next(folder.glob("*.png"))))
+    assert again is not None and np.array_equal(again, put_badge(game, badge, (10, 400)))  # drawn where it stands
 
 
 def test_the_opponents_list_is_read_row_by_row() -> None:

@@ -127,3 +127,32 @@ def test_the_badge_is_told_in_the_picture_by_its_gradient_and_gold_edge_and_blan
     shifted, found = hide_badge(seen, Rect(50, 0, 640, 400), Rect(150, 8, 220, 60))  # the game window is not at 0, 0
     assert found and not shifted[8:68, 100:320].any()
     assert not hide_badge(seen, Rect(0, 0, 640, 400), Rect(500, 300, 220, 60))[1]  # the badge is elsewhere
+
+
+def test_the_badge_picture_has_the_badges_layout_and_is_found_by_the_probe() -> None:
+    """ "Save picture" draws the badge itself when the capture does not show it (SPEC D122)."""
+    import numpy as np
+
+    from e7ac.ui.badge_image import put_badge, render_badge
+    from e7ac.ui.badge_probe import badge_visible
+    from e7ac.vision.window import Rect
+
+    drawn = render_badge(
+        "Win 72%", "vs the best of the three", "#2fa84f", ("Check again", "Save picture"), "large", 1080
+    )
+    height, width = drawn.shape[:2]
+    assert width > height * 3 and height > 40  # a wide panel, larger on a larger picture
+    assert render_badge("x", "y", "#2fa84f", (), "large", 1.46).shape[1] < width  # the plates widen it
+    assert render_badge("x", "y", "#2fa84f", (), "large", 2.9).shape[0] > render_badge("x", "y", "#2fa84f").shape[0]
+    from e7ac.ui.badge_image import scale_for
+
+    assert scale_for(1080) > 1.4 and scale_for(500) == 1.0  # as large as on a 740 px picture, never smaller
+    assert render_badge("x", "y", "#2fa84f", ("a",), "large", scale_for(1080, "large", 700)).shape[1] == 700
+    game = np.full((1080, 1920, 3), 90, np.uint8)
+    out = put_badge(game, drawn)
+    left = (1920 - width) // 2
+    assert (game == 90).all() and out.shape == game.shape  # the game picture is not touched
+    top = 8
+    assert badge_visible(out, Rect(left, top, width, height))  # the same panel the probe looks for
+    assert not badge_visible(game, Rect(left, top, width, height))
+    assert np.array_equal(out[top + 6 : top + height - 6, left + width // 2], drawn[6 : height - 6, width // 2])
