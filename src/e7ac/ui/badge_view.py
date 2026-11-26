@@ -131,7 +131,7 @@ class BadgeView:
         stripe = max(3, round(5 * unit))
         canvas.create_rectangle(0, 0, stripe, height, fill=light, outline="")
         canvas.create_line(stripe, 0, stripe, height, fill=mix(light, PANEL_BOTTOM, 0.5))
-        plates_width = self._draw_plates(self.font(self.fonts[2], "bold"), unit)
+        plates_width = self._draw_plates(self.fonts[2], unit)
         left = stripe + round(30 * unit)
         room = width - left - plates_width - round(10 * unit)
         radius = round(5.5 * unit)
@@ -171,7 +171,7 @@ class BadgeView:
             fill=_LINE.get(self.bottom_colour, self.bottom_colour),
         )
 
-    def _draw_plates(self, font: Any, unit: float) -> int:
+    def _draw_plates(self, pixels: int, unit: float) -> int:
         """The buttons as plates stacked at the right; returns the width they take (0 without buttons)."""
         self._plates = []
         if not self.buttons:
@@ -179,9 +179,10 @@ class BadgeView:
         canvas = self.canvas
         width, height = self.size
         pad = round(7 * unit)
-        plate_width = max(font.measure(label) for label, _ in self.buttons) + round(22 * unit)
         gap = max(2, round(3 * unit))
         each = (height - 2 * pad - gap * (len(self.buttons) - 1)) / len(self.buttons)
+        font = self.font(min(pixels, max(8, int(each * 0.62))), "bold")  # more plates: smaller letters (SPEC D126)
+        plate_width = max(font.measure(label) for label, _ in self.buttons) + round(22 * unit)
         x1 = width - pad
         x0 = x1 - plate_width
         for index, (label, action) in enumerate(self.buttons):

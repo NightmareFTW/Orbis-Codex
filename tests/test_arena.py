@@ -607,7 +607,7 @@ def test_save_picture_shows_the_badge_on_the_game(monkeypatch: pytest.MonkeyPatc
     folder = paths.captures_dir / "arena" / "shared"
     game = np.asarray(cv2.resize(_textured(9), (1600, 900)), np.uint8)
     result = ("Win chance 62%", "vs Foe One, Foe Two", "#2fa84f")
-    badge = render_badge(*result, ("Check again", "Save picture"), "large", 1.0)
+    badge = render_badge(*result, ("Check again", "Save picture", "Open folder"), "large", 1.0)
     with_badge = put_badge(game, badge)  # what the screen shows with the badge visible to the capture
     spot = Rect((1600 - badge.shape[1]) // 2, 8, badge.shape[1], badge.shape[0])
     FakeBadge.spot = spot
@@ -665,3 +665,14 @@ def test_the_opponents_list_is_read_row_by_row() -> None:
     assert sum(code is not None for code, _ in pairs) >= 6  # most read (the real list: 11 of 12)
     with pytest.raises(ArenaScreenError):
         list_rows(_guide(list(icons.values())[:4]))  # one row: the Attack Guide, not the list
+
+
+def test_the_third_badge_button_opens_the_folder_of_the_saved_pictures(monkeypatch: pytest.MonkeyPatch) -> None:
+    """SPEC D126: "Open folder" makes the folder of "Save picture" and opens it (on Windows only)."""
+    from e7ac.cli import arena as arena_cli
+
+    folder = default_paths().captures_dir / "arena" / "shared"
+    assert not folder.exists()
+    arena_cli.open_pictures()
+    assert folder.is_dir()  # made, so Explorer never opens a missing path
+    assert arena_cli.OPEN_LABEL == "Open folder"

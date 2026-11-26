@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import itertools
+import os
 import queue
 import sys
 import threading
@@ -335,7 +336,7 @@ def _with_badge(
         result[0],
         result[1],
         result[2],
-        ("Check again", "Save picture"),
+        ("Check again", "Save picture", OPEN_LABEL),
         size,
         scale_for(frame.shape[0], size, where.width if where is not None else None),
     )
@@ -1087,12 +1088,26 @@ game_frames: Callable[[Any, int | None], Iterator[tuple[BgrImage, Rect] | None]]
 grab_frame: Callable[[Any, int | None], tuple[BgrImage, Rect] | None] = _grab
 
 
+OPEN_LABEL: Final = "Open folder"
+"""The badge's third button: the folder where "Save picture" keeps its pictures (SPEC D126)."""
+
+
+def open_pictures() -> None:
+    """Open the folder of the pictures "Save picture" made (Explorer on Windows); made first when it is not there."""
+    folder = default_paths().captures_dir / "arena" / "shared"
+    folder.mkdir(parents=True, exist_ok=True)
+    if sys.platform == "win32":
+        os.startfile(folder)  # type: ignore[attr-defined,unused-ignore]
+
+
 def _open_badge(on_retry: Callable[[], None], on_share: Callable[[], None]) -> tuple[WatchSignal, str]:
     try:
         size = load_settings(default_paths().settings_file).badge_size.value
     except SettingsError:
         size = DEFAULT_SIZE
-    return open_signal(False, [("Check again", on_retry), ("Save picture", on_share)], size)
+    return open_signal(
+        False, [("Check again", on_retry), ("Save picture", on_share), (OPEN_LABEL, open_pictures)], size
+    )
 
 
 def _shape(codes: list[str], heroes: dict[str, ResolvedEntity]) -> list[tuple[str, str]]:

@@ -96,11 +96,11 @@ def _plates(draw: Any, buttons: Sequence[str], width: int, height: int, unit: fl
     """The buttons as plates stacked at the right (as `BadgeView._draw_plates`); the width they take."""
     if not buttons:
         return 0
-    font = _font(pixels, "bold")
     pad = round(7 * unit)
-    plate_width = round(max(font.getlength(label) for label in buttons)) + round(22 * unit)
     gap = max(2, round(3 * unit))
     each = (height - 2 * pad - gap * (len(buttons) - 1)) / len(buttons)
+    font = _font(min(pixels, max(8, int(each * 0.62))), "bold")
+    plate_width = round(max(font.getlength(label) for label in buttons)) + round(22 * unit)
     x1 = width - pad
     x0 = x1 - plate_width
     for index, label in enumerate(buttons):
