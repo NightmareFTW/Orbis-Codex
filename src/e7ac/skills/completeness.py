@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from collections.abc import Collection, Iterable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Any, Final
 
 if TYPE_CHECKING:
     from e7ac.skills.store import SkillStore, StoredSkill
@@ -103,6 +103,11 @@ def cut_parts(skill: StoredSkill) -> list[str]:
     return found + [f"effect {e.title}" for e in skill.effects if _bad(e.title, e.text)]
 
 
+def is_cut_panel(panel: Any) -> bool:
+    """Whether an effect panel (title and text) was read cut."""
+    return _bad(panel.title, panel.text)
+
+
 def _bad(title: str, text: str) -> bool:
     """An effect description that is cut, empty, or whose title is still open ("Energy Depletion (Unique")."""
     return looks_cut(text) or not text.strip() or title.count("(") != title.count(")")
@@ -114,11 +119,14 @@ def find_cut(store: SkillStore) -> list[Cut]:
 
 
 def cut_effects(store: SkillStore) -> dict[str, list[str]]:
-    """Effects whose stored description looks cut -> the heroes it was seen on (the codes)."""
+    """Effects whose stored description looks cut -> the heroes it was seen on (the codes). An effect no stored skill
+    shows any more (its skill was read again, whole) is not listed (SPEC D123)."""
+    shown = {e.title.lower() for code in store.heroes() for s in store.load(code) for e in s.effects}
     return {
         str(entry.get("title", key)): [str(h) for h in entry.get("heroes", [])]
         for key, entry in store.effects().items()
         if _bad(str(entry.get("title", key)), str(entry.get("text", "")))
+        and str(entry.get("title", key)).lower() in shown
     }
 
 

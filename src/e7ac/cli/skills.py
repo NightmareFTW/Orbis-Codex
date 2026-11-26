@@ -126,7 +126,9 @@ def store_popup(
     slot, passive = place(popup.name, kit)
     saved = store.save(code, popup, slot=slot, passive=passive)
     assign(store, code, kit)  # the skills read before this one get their slot too
-    if not kit and infer_slots(store, code):  # epic7db has no page for the hero: what the skills show places them
+    if infer_slots(
+        store, code
+    ):  # epic7db has no page, or a stale one (Basar's Desert Cycle): what the skills show places them
         placed = next((s for s in store.load(code) if s.key == saved.stored.key), saved.stored)
         slot, passive = placed.slot, placed.passive
     return ReadEvent(

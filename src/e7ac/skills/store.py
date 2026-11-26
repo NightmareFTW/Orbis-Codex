@@ -15,7 +15,7 @@ from typing import Any, Final
 from e7ac.catalog.names import normalise_name
 from e7ac.domain.codes import is_hero_code
 from e7ac.fileio import write_text_atomic
-from e7ac.skills.completeness import fuller
+from e7ac.skills.completeness import fuller, is_cut_panel
 from e7ac.vision.skill_popup import EffectPanel, SkillPopup, repair_panel
 
 FOLDER: Final = "skills"
@@ -168,7 +168,8 @@ class SkillStore:
                 for e in stored.effects
             )
             seen = {e.title.lower() for e in merged}
-            stored = replace(stored, effects=(*merged, *(e for e in before.effects if e.title.lower() not in seen)))
+            kept = (e for e in before.effects if e.title.lower() not in seen and not is_cut_panel(e))
+            stored = replace(stored, effects=(*merged, *kept))  # a panel that was read cut is not kept (D123)
         if index is None:
             skills.append(stored)
         else:

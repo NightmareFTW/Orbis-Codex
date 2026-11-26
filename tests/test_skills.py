@@ -3,6 +3,7 @@ commands (synthetic popups; the OCR itself is tested in test_skill_popup)."""
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -779,3 +780,23 @@ def test_the_skills_of_a_hero_epic7db_does_not_know_are_placed_by_what_they_show
     assert place_by_structure(twin) == {twin[0].key: (1, False)}  # the same cooldown: not told, never guessed
     two_passives = [StoredSkill("c1", n, None, (), None, "", "T.", "", None, (), (), 0.9, "") for n in ("A", "B")]
     assert place_by_structure(two_passives) == {}
+
+
+def test_a_panel_read_cut_is_not_kept_when_the_skill_is_read_again_and_a_stale_name_is_placed_by_shape(
+    tmp_path: Path,
+) -> None:
+    """Taeyou's Lan Na Zha kept "Possesn uspellable)" for good; Basar's Desert Cycle (epic7db's S2 is another skill)
+    stayed unplaced (SPEC D123)."""
+    from e7ac.skills.completeness import cut_effects
+    from e7ac.skills.merge import place_by_structure
+
+    store = SkillStore(tmp_path)
+    cut = EffectPanel("Possesn uspellable)", (), "Counterattack")
+    store.save("c2127", popup("Lan Na Zha", 5, "Attacks the enemy.", effects=(cut,)))
+    assert cut_effects(store)
+    whole = EffectPanel("Possession", ("Undispellable",), "Increases Attack by 25%.")
+    store.save("c2127", popup("Lan Na Zha", 5, "Attacks the enemy.", effects=(whole,)))
+    assert [e.title for e in store.load("c2127")[0].effects] == ["Possession"]
+    assert cut_effects(store) == {}  # nothing shows the cut panel any more
+    passive = replace(store.load("c2127")[0], name="Desert Cycle", gains=(), cooldown=None, slot=None)
+    assert place_by_structure([passive], {1, 3}) == {passive.key: (2, True)}
