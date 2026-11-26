@@ -96,7 +96,7 @@ def identify(
     remembered: str | None = None,
 ) -> tuple[str | None, str]:
     """(hero code, "") for a popup, or (None, why not): see `skills.hero.decide` for what is trusted first."""
-    decision = decide(popup.hero, heroes, override, remembered)
+    decision = decide(popup.hero, heroes, override, remembered, popup.header)
     return decision.code, decision.problem
 
 
@@ -128,7 +128,7 @@ def store_popup(
     remembered: str | None = None,
     kit_of: KitOf | None = None,
 ) -> ReadEvent:
-    decision = decide(popup.hero, heroes, override, remembered)
+    decision = decide(popup.hero, heroes, override, remembered, popup.header)
     code = decision.code
     shown = popup.hero or override or "?"
     if code is None:

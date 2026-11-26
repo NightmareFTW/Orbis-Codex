@@ -76,14 +76,20 @@ def decide(
     heroes: Mapping[str, ResolvedEntity],
     chosen: str | None = None,
     remembered: str | None = None,
+    header: str | None = None,
 ) -> Decision:
     """The hero of a popup from the name on it (`read`), the hero named by the user and the hero remembered."""
     whole, problem = resolve_hero_code(read, heroes) if read else (None, "the hero name was not read")
-    named = whole or (hero_starting_with(read, heroes) if read else None)
-    how = "screen name" if whole else "start of the name"
 
     def fits(code: str) -> bool:
         return bool(read) and starts(read or "", heroes[code].name or "")
+
+    if whole is None and header:  # the top bar writes the name whole when the popup covers the big one (SPEC D129)
+        top, _ = resolve_hero_code(header, heroes)
+        if top is not None and (not read or fits(top) or not any(starts(read, h.name or "") for h in heroes.values())):
+            whole, problem = top, ""
+    named = whole or (hero_starting_with(read, heroes) if read else None)
+    how = "screen name" if whole else "start of the name"
 
     if chosen:
         code, why = (chosen, "") if chosen in heroes else resolve_hero_code(chosen, heroes)

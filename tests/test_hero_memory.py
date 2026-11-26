@@ -311,3 +311,14 @@ def test_a_name_shared_with_placeholder_codes_is_the_playable_hero() -> None:
     assert found.code == "c1005" and found.how == "screen name"
     twins = cast(dict[str, ResolvedEntity], {c: SimpleNamespace(name="Twin") for c in ("c1001", "c1002")})
     assert decide("Twin", twins).code is None  # two real heroes with one name stay refused
+
+
+def test_the_top_bar_names_the_hero_when_the_popup_covers_the_big_name() -> None:
+    """Tamarinne's upgrade screen (the user's capture 2026-11-26): the big name is read "Tamaril", the top bar says
+    "Tamarinne" whole (SPEC D129)."""
+    heroes = cast(dict[str, ResolvedEntity], {**HEROES, "c1170": SimpleNamespace(name="Tamarinne")})
+    assert decide("Tamaril", heroes).code is None
+    found = decide("Tamaril", heroes, header="Tamarinne")
+    assert found.code == "c1170" and found.how == "screen name"
+    assert decide("Karin", heroes, header="Tamarinne").code == "c1011"  # a whole name on the popup comes first
+    assert decide(None, heroes, header="Journal").code is None  # not a hero: nothing is guessed

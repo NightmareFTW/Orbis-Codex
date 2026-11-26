@@ -690,3 +690,11 @@ def test_the_description_is_read_top_to_bottom_whatever_order_the_ocr_gives_it()
         "Attacks all enemies with a sword, with a 75% chance to decrease Defense for 2 turns. "
         "Increases Attack of the caster for 2 turns."
     )
+
+
+def test_the_top_bar_name_is_read_beside_the_back_arrow_but_not_the_screens_heading() -> None:
+    top = [line("Tamarinne", 95, 28, 170, 40), line("186/360", 900, 30, 110, 36)]
+    found = parse_skill_popup([*top, *synthetic()[2:]])
+    assert found is not None and found.header == "Tamarinne"
+    heading = parse_skill_popup([line("Journal", 95, 28, 110, 40), *synthetic()[2:]])
+    assert heading is not None and heading.header is None

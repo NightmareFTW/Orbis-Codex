@@ -103,6 +103,9 @@ class SkillPopup:
     """The lowest OCR score of the lines used."""
     title_box: tuple[float, float, float, float] | None = None
     """Where the title line is on the capture (x0, y0, x1, y1), to look for the badge the OCR missed."""
+    header: str | None = None
+    """The name in the screen's top bar (the hero's upgrade screens write it whole there, "Tamarinne", while the popup
+    covers the big one), when there is one (SPEC D129)."""
 
 
 _QUOTES: Final = {0x2019: "'", 0x2018: "'", 0x201C: '"', 0x201D: '"'}
@@ -222,6 +225,7 @@ def parse_skill_popup(
         effects=panels,
         confidence=min(scores),
         title_box=(title_line.box.x0, title_line.box.y0, title_line.box.x1, title_line.box.y1),
+        header=_header(rows),
     )
 
 
@@ -636,6 +640,23 @@ def is_screen_title(text: str) -> bool:
     """A screen heading, even when the OCR read it a letter or two wrong ("Joumal", "< Journa") (SPEC D121)."""
     letters = re.sub(r"[^a-z ]+", "", text.lower()).strip()
     return len(letters) >= 4 and any(SequenceMatcher(None, letters, title).ratio() >= 0.75 for title in SCREEN_TITLES)
+
+
+def _header(rows: Sequence[tuple[TextLine, str]]) -> str | None:
+    """The text of the screen's top bar at the left (right of the back arrow): the leftmost line in the top band that is
+    not the screen's own heading ("Journal", "Hero Info") nor an icon."""
+    wide = max(r[0].box.x1 for r in rows)
+    high = max(r[0].box.y1 for r in rows)
+    band = [
+        r
+        for r in rows
+        if r[0].box.y0 <= 0.1 * high
+        and r[0].box.x0 <= 0.2 * wide
+        and sum(c.isalpha() for c in r[1]) >= 3
+        and not is_screen_title(r[1])
+    ]
+    first = min(band, key=lambda r: r[0].box.x0, default=None)
+    return re.sub(r"[^A-Za-z0-9' .&:-]+", "", first[1]).strip() or None if first else None
 
 
 def _hero(rows: Sequence[tuple[TextLine, str]], title: TextLine, left: float) -> str | None:
