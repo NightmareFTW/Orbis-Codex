@@ -63,8 +63,8 @@ def place_by_structure(unplaced: Sequence[StoredSkill], taken: Collection[int] =
     if len(basics) == 1 and 1 not in taken:
         found[basics[0].key] = (1, False)
     free = [slot for slot in (2, 3) if slot not in taken and slot not in {v[0] for v in found.values()}]
-    if len(timed) == 1 and free == [3]:
-        found[timed[0].key] = (3, False)
+    if len(timed) == 1 and len(free) == 1:  # the one slot left: S3, or S2 when S1 and S3 are placed (Baal & Sezan)
+        found[timed[0].key] = (free[0], False)
     elif len(timed) == 2 and free == [2, 3] and timed[0].cooldown != timed[1].cooldown:
         low, high = sorted(timed, key=lambda s: s.cooldown or 0)
         found[low.key], found[high.key] = (2, False), (3, False)

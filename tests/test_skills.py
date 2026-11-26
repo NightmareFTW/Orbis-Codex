@@ -815,3 +815,13 @@ def test_a_hero_with_three_skills_read_and_no_problem_is_done(tmp_path: Path) ->
     store.save("c1002", popup("Two", 5, "Attacks the enemy."), slot=2)
     store.save("c1002", popup("Three", 5, "Decreases Attack by"), slot=3)  # read cut: a problem
     assert not hero_done(store, "c1002")
+
+
+def test_the_one_timed_skill_left_takes_the_one_slot_left_even_when_it_is_the_second() -> None:
+    """Baal & Sezan (the user's capture 2026-11-26): S1 and S3 are placed, Dark Cloud (cooldown 2) is S2."""
+    from e7ac.skills.merge import place_by_structure
+
+    dark = replace(stored_of(popup("Dark Cloud", 6, cooldown=2)), slot=None)
+    assert place_by_structure([dark], {1, 3}) == {dark.key: (2, False)}
+    assert place_by_structure([dark], {1, 2}) == {dark.key: (3, False)}
+    assert place_by_structure([dark], {1}) == {}  # two slots free: not guessed
