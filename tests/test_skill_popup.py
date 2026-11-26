@@ -667,3 +667,26 @@ def test_the_hero_name_is_found_on_a_small_window_too() -> None:
     ]
     found = parse_skill_popup(small)
     assert found is not None and found.hero == "Lady of the Scales"
+
+
+def test_the_description_is_read_top_to_bottom_whatever_order_the_ocr_gives_it() -> None:
+    """Muwi's Wind Cutter (the user's capture 2026-11-26): the OCR listed the last line, "2 turns.", before the line
+    above it, and the text came out "... for 2 2 turns. turns. Increases Attack of the caster for", which looks cut."""
+    lines = [
+        line("Wind Cutter", 710, 300, 160, 40),
+        line("+5", 665, 296, 30, 28),
+        line("Acquire 2 Soul", 710, 370, 160, 34),
+        line("Attacks all enemies with a sword, with a", 593, 416, 445, 30),
+        line("75% chance to decrease Defense for 2", 593, 445, 445, 30),
+        line("2 turns.", 593, 504, 85, 30),  # the last line, listed before the third
+        line("turns. Increases Attack of the caster for", 593, 475, 445, 30),
+        line("Skill Enhance", 593, 685, 160, 36),
+        line("+1", 593, 725, 25, 26),
+        line("+5% damage dealt", 646, 722, 200, 30),
+    ]
+    found = parse_skill_popup(lines)
+    assert found is not None
+    assert found.text == (
+        "Attacks all enemies with a sword, with a 75% chance to decrease Defense for 2 turns. "
+        "Increases Attack of the caster for 2 turns."
+    )

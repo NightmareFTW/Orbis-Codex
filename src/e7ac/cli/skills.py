@@ -9,6 +9,7 @@ one text file to send."""
 
 from __future__ import annotations
 
+import json
 import queue
 import threading
 import time
@@ -442,6 +443,7 @@ def run_skill_watch(options: SkillWatchOptions, badge: WatchSignal, stop: thread
                 typer.echo(f"  picture kept: {_keep(image, paths.captures_dir / 'skills')}")
             elif event.cut:
                 typer.echo(f"  picture of the reading with a problem{_evidence(image, counts, paths, 'cut')}")
+                _keep_lines(lines, paths.captures_dir / "skills")  # what the OCR read, to reproduce the problem
                 badge.say(f"Read: {event.hero} (problem)", f"{event.cut[0]}: hold it again", AMBER)
             else:
                 top = f"Read: {event.hero}"
@@ -493,6 +495,19 @@ def _evidence(image: Any, counts: dict[str, int], paths: AppPaths, tag: str) -> 
         return ""
     counts["evidence"] += 1
     return f": picture kept at {_keep(image, paths.captures_dir / 'skills', 'own-' + tag)}"
+
+
+def _keep_lines(lines: Any, folder: Path) -> Path | None:
+    """The text lines of a reading with a problem (text and box of each), as JSON beside its picture (SPEC D128): with
+    them the problem can be reproduced without the game. Local, never committed."""
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / f"{time.strftime('%Y%m%d-%H%M%S')}-cut-lines.json"
+        rows = [{"text": x.text, "box": [x.box.x0, x.box.y0, x.box.x1, x.box.y1], "score": x.score} for x in lines]
+        path.write_text(json.dumps(rows, ensure_ascii=False, indent=0), encoding="utf-8")
+        return path
+    except OSError:
+        return None
 
 
 def _keep(image: Any, folder: Path, tag: str = "skill") -> Path:

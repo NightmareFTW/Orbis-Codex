@@ -439,8 +439,26 @@ def _cost(text: str) -> bool:
     return bool(ACQUIRE.search(text) or (TURNS.search(text) and len(text) < 40))
 
 
+def reading_order(rows: Sequence[tuple[TextLine, str]]) -> list[tuple[TextLine, str]]:
+    """The rows as a person reads them: top to bottom, and left to right within a line (rows whose boxes overlap
+    vertically by more than half are one line). The OCR's own order can put a short last line ("2 turns.") before the
+    line above it (Muwi's Wind Cutter, 2026-11-26: "... for 2 2 turns. turns. Increases Attack of the caster for", which
+    then looked cut)."""
+    lines: list[list[tuple[TextLine, str]]] = []
+    for row in sorted(rows, key=lambda r: r[0].box.y0):
+        box = row[0].box
+        for line in lines:
+            top, bottom = min(r[0].box.y0 for r in line), max(r[0].box.y1 for r in line)
+            if min(bottom, box.y1) - max(top, box.y0) > 0.5 * min(bottom - top, box.height):
+                line.append(row)
+                break
+        else:
+            lines.append([row])
+    return [r for line in lines for r in sorted(line, key=lambda r: r[0].box.x0)]
+
+
 def _join(rows: Any) -> str:
-    return clean(" ".join(r[1] for r in rows))
+    return clean(" ".join(r[1] for r in reading_order(list(rows))))
 
 
 def _steps(rows: Sequence[tuple[TextLine, str]]) -> tuple[tuple[int, str], ...]:
