@@ -299,3 +299,15 @@ def test_the_watch_reads_nothing_from_a_picture_that_shows_the_orbis_window_or_i
     skills_cli.run_skill_watch(skills_cli.SkillWatchOptions(on_read=events.append), badge, threading.Event())
     assert events == [] and SkillStore(isolated_home.home / "skills").heroes() == []
     assert ("Skills: the Orbis window is over the game", "move it beside the game") in badge.said
+
+
+def test_a_name_shared_with_placeholder_codes_is_the_playable_hero() -> None:
+    """Mercedes (SPEC D127): c0001 and c0002 are placeholders, c1005 is the hero."""
+    heroes = cast(
+        dict[str, ResolvedEntity],
+        {c: SimpleNamespace(name="Mercedes") for c in ("c0001", "c0002", "c1005")} | dict(HEROES),
+    )
+    found = decide("Mercedes", heroes)
+    assert found.code == "c1005" and found.how == "screen name"
+    twins = cast(dict[str, ResolvedEntity], {c: SimpleNamespace(name="Twin") for c in ("c1001", "c1002")})
+    assert decide("Twin", twins).code is None  # two real heroes with one name stay refused

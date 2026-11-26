@@ -195,6 +195,9 @@ def resolve_hero_code(
     for hero_code, entity in heroes.items():
         index.add(entity.name, hero_code)
     if name and index.is_ambiguous(name):
+        real = {c: e for c, e in heroes.items() if not c.startswith("c0")}  # c0001, c0002 "Mercedes": placeholders
+        if len(real) < len(heroes) and (playable := resolve_hero_code(name, real, title))[0] is not None:
+            return playable
         return None, f"several catalog heroes are called {name!r}: use --id to choose the hero"
     exact = {found for text in (name, title) if text and (found := index.lookup(text)) is not None}
     if len(exact) > 1:
