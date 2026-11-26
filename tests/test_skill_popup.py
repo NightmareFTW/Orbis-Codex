@@ -698,3 +698,24 @@ def test_the_top_bar_name_is_read_beside_the_back_arrow_but_not_the_screens_head
     assert found is not None and found.header == "Tamarinne"
     heading = parse_skill_popup([line("Journal", 95, 28, 110, 40), *synthetic()[2:]])
     assert heading is not None and heading.header is None
+
+
+def test_a_description_line_that_mentions_turns_is_not_the_cost_row() -> None:
+    """Inheritor Amiki's Desperate Resolve (the user's capture 2026-11-26): "Grants immortality for 1 turn and" and
+    "increased Attack for 2 turns to the" are short and say "turns", and were taken for the cost row, so the text began
+    at "caster. Upon receiving ..." and looked cut (SPEC D131)."""
+    lines = [
+        line("Desperate Resolve", 586, 355, 268, 44),
+        line("+3", 540, 352, 40, 26),
+        line("Acquire 2 Soul", 586, 423, 167, 36),
+        line("6 turns", 825, 423, 86, 34),
+        line("Grants immortality for 1 turn and", 472, 468, 372, 33),
+        line("increased Attack for 2 turns to the", 471, 498, 390, 32),
+        line("caster. Upon receiving lethal damage,", 470, 526, 432, 36),
+        line("and fully increases cooldowns.", 470, 613, 360, 35),
+        line("Skill Enhance", 471, 682, 169, 39),
+        line("+1 -1 turn cooldown", 471, 720, 240, 36),
+    ]
+    found = parse_skill_popup(lines)
+    assert found is not None and found.cooldown == 6 and found.gains == (("Soul", 2),)
+    assert found.text.startswith("Grants immortality for 1 turn and increased Attack for 2 turns to the caster.")

@@ -439,8 +439,13 @@ def _main_left(
     return median(near) if near else None
 
 
+TURNS_ROW: Final = re.compile(r"\d+\s*turns?\s*$", re.IGNORECASE)
+
+
 def _cost(text: str) -> bool:
-    return bool(ACQUIRE.search(text) or (TURNS.search(text) and len(text) < 40))
+    """The cost row ("Acquire 2 Soul  6 turns", "Desert Storm 2 turns"): it ends on its turns. A line of the description
+    that merely mentions turns ("Grants immortality for 1 turn and") is not one (SPEC D131)."""
+    return bool(ACQUIRE.search(text) or (TURNS_ROW.search(text) and len(text) < 40))
 
 
 def reading_order(rows: Sequence[tuple[TextLine, str]]) -> list[tuple[TextLine, str]]:
