@@ -800,3 +800,18 @@ def test_a_panel_read_cut_is_not_kept_when_the_skill_is_read_again_and_a_stale_n
     assert cut_effects(store) == {}  # nothing shows the cut panel any more
     passive = replace(store.load("c2127")[0], name="Desert Cycle", gains=(), cooldown=None, slot=None)
     assert place_by_structure([passive], {1, 3}) == {passive.key: (2, True)}
+
+
+def test_a_hero_with_three_skills_read_and_no_problem_is_done(tmp_path: Path) -> None:
+    """The badge shows a check mark for it (SPEC D125)."""
+    from e7ac.cli.skills import hero_done
+
+    store = SkillStore(tmp_path)
+    for slot, name in ((1, "One"), (2, "Two"), (3, "Three")):
+        assert not hero_done(store, "c1001")
+        store.save("c1001", popup(name, 5, "Attacks the enemy."), slot=slot)
+    assert hero_done(store, "c1001")
+    store.save("c1002", popup("One", 5, "Attacks the enemy."), slot=1)
+    store.save("c1002", popup("Two", 5, "Attacks the enemy."), slot=2)
+    store.save("c1002", popup("Three", 5, "Decreases Attack by"), slot=3)  # read cut: a problem
+    assert not hero_done(store, "c1002")

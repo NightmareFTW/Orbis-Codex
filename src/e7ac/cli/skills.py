@@ -35,9 +35,9 @@ from e7ac.skills.hero import HeroMemory, decide
 from e7ac.skills.importer import import_export
 from e7ac.skills.merge import assign, infer_slots, place
 from e7ac.skills.own_ui import shows_window, without_badge
-from e7ac.skills.problems import clear_problems, effect_titles, find_problems, skill_problems
+from e7ac.skills.problems import clear_problems, effect_titles, find_problems, hero_problems, skill_problems
 from e7ac.skills.store import SkillStore, skills_dir
-from e7ac.skills.worklist import progress, worklist
+from e7ac.skills.worklist import SKILLS_PER_HERO, progress, slot_marks, worklist
 from e7ac.sources.epic7db import SkillInfo, fetch_kit, fetch_tier_order, slug
 from e7ac.sources.http import FetchError
 from e7ac.storage.db import session_scope
@@ -76,6 +76,16 @@ class ReadEvent:
     cut: tuple[str, ...] = ()
     """What is wrong with the stored skill and a new reading may cure ("effect Vigor looks cut", a stray "+3"): hold
     the skill again (SPEC D106/D107)."""
+
+
+CHECK: Final = "\u2714"
+"""The check mark on the badge of a hero whose three skills are all read (SPEC D125)."""
+
+
+def hero_done(store: SkillStore, code: str) -> bool:
+    """All three skills of the hero are read and none has a problem (junk, cut, unplaced)."""
+    skills = store.load(code)
+    return slot_marks(skills)[1] >= SKILLS_PER_HERO and not hero_problems(skills, effect_titles(store))
 
 
 def identify(
@@ -416,7 +426,10 @@ def run_skill_watch(options: SkillWatchOptions, badge: WatchSignal, stop: thread
                     continue
                 memory.see(seen, clock())
                 typer.echo(f"  hero screen: {heroes[seen].name}")
-                badge.say(f"Hero: {heroes[seen].name}", "now hold each skill icon ~2 s", GREEN)
+                if hero_done(store, seen):
+                    badge.say(f"{CHECK} Hero: {heroes[seen].name}", "all 3 skills read - nothing to hold", GREEN)
+                else:
+                    badge.say(f"Hero: {heroes[seen].name}", "now hold each skill icon ~2 s", GREEN)
                 continue
             chosen = options.chosen() if options.chosen is not None else None
             event = store_popup(store, heroes, popup, chosen, memory.recall(clock()), kit_of)
@@ -432,7 +445,10 @@ def run_skill_watch(options: SkillWatchOptions, badge: WatchSignal, stop: thread
                 badge.say(f"Read: {event.hero} (problem)", f"{event.cut[0]}: hold it again", AMBER)
             else:
                 top = f"Read: {event.hero}"
-                badge.say(top, f"{event.skill}" + (f" +{event.level}" if event.level is not None else ""), GREEN)
+                line = f"{event.skill}" + (f" +{event.level}" if event.level is not None else "")
+                if event.hero_code is not None and hero_done(store, event.hero_code):
+                    top, line = f"{CHECK} {top}", f"{line} - hero complete"  # all three skills read, nothing wrong
+                badge.say(top, line, GREEN)
 
     thread = threading.Thread(target=work, name="e7-skill-reader", daemon=True)
     thread.start()
