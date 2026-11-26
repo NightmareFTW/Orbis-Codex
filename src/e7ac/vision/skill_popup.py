@@ -625,10 +625,12 @@ def _hero(rows: Sequence[tuple[TextLine, str]], title: TextLine, left: float) ->
     is tall too, and so is the screen's own heading, "Journal": neither is a name). A held skill's popup covers the
     end of the name: what is left of it is still the tallest."""
     wide = max(r[0].box.x1 for r in rows)  # the capture's width, as far as the text goes
+    high = max(r[0].box.y1 for r in rows)
+    minimum = min(60.0, 0.05 * high)  # a smaller window writes the name smaller (Ivana, 1292 px wide: 55 px)
     tall = [
         r
         for r in rows
-        if r[0].box.height >= 60
+        if r[0].box.height >= minimum
         and r[0].box.x0 <= 0.12 * wide
         and not r[1].lower().startswith("lv")
         and not is_screen_title(r[1])

@@ -655,3 +655,15 @@ def test_a_misread_heading_and_a_name_cut_by_the_popup_are_still_sorted_out() ->
         found = parse_skill_popup(lines)
         assert found is not None and found.hero == "Watcher Sc"
     assert not is_screen_title("Watcher Schuri") and not is_screen_title("Jo")
+
+
+def test_the_hero_name_is_found_on_a_small_window_too() -> None:
+    """Ivana's screen, 1292 px wide (the user's capture 2026-11-26): the name is 55 px high, not 60 or more."""
+    from e7ac.vision.ocr import Box
+
+    small = [
+        TextLine(x.text, x.score, Box(*(v * 0.55 for v in (x.box.x0, x.box.y0, x.box.x1, x.box.y1))), ())
+        for x in synthetic()
+    ]
+    found = parse_skill_popup(small)
+    assert found is not None and found.hero == "Lady of the Scales"

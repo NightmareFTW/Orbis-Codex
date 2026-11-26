@@ -236,7 +236,6 @@ class TkBadge:
         root.update_idletasks()
         hwnd = int(root.wm_frame(), 16)
         self.excluded = False if self.in_captures else _exclude_from_capture(hwnd)
-        over_game = self.excluded or self.in_captures  # not hidden from capture: still over the game, not beside it
         _click_through(hwnd, clickable=bool(self.buttons))
         placed: list[Rect] = []
 
@@ -246,7 +245,9 @@ class TkBadge:
                 return False
             if kind == "place" and (not placed or placed[-1] != value):
                 placed[:] = [value]
-                spot = _spot(value, over_game, root.winfo_screenheight(), *fitted[0])
+                spot = _spot(
+                    value, self.excluded or self.in_captures, root.winfo_screenheight(), *fitted[0]
+                )  # over the game
                 if spot is None:
                     root.withdraw()
                     self._region = None
@@ -274,7 +275,21 @@ class TkBadge:
                 view.say(value[0], value[1])
             return True
 
+        ticks = [0]
+
+        def follow_setting() -> None:
+            """The setting `badge_in_screenshots` changed while the badge is up: apply it at once (SPEC D124)."""
+            wanted = _shown_in_captures()
+            if wanted != self.in_captures:
+                self.in_captures = wanted
+                _set_affinity(hwnd, excluded=not wanted)
+                self.excluded = not wanted
+                root.update_idletasks()
+
         def poll() -> None:
+            ticks[0] += 1
+            if ticks[0] % 40 == 0:  # every two seconds
+                follow_setting()
             while True:
                 try:
                     kind, value = self._messages.get_nowait()
