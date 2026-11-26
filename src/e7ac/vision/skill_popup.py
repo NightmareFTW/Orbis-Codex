@@ -179,6 +179,7 @@ def parse_skill_popup(
     aligned = [r for r in below if abs(r[0].box.x0 - left) <= max(12.0, tolerance)]
     right_edge = max((r[0].box.x1 for r in aligned), default=left)
     main = [r for r in below if r[0].box.x0 >= left - 12 and r[0].box.x0 < right_edge - 10]
+    main = reading_order(main)  # the OCR's own order is not always the screen's (SPEC D132)
     if enhance_row is None and burn_row is None:  # nothing marks where the text ends: the paragraph does
         main = _paragraph(main)
     reach = right_edge + PANEL_REACH * (right_edge - left)

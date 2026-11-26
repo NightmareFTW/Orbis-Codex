@@ -719,3 +719,24 @@ def test_a_description_line_that_mentions_turns_is_not_the_cost_row() -> None:
     found = parse_skill_popup(lines)
     assert found is not None and found.cooldown == 6 and found.gains == (("Soul", 2),)
     assert found.text.startswith("Grants immortality for 1 turn and increased Attack for 2 turns to the caster.")
+
+
+def test_the_first_line_of_the_description_is_kept_when_the_ocr_lists_the_second_before_it() -> None:
+    """ae-KARINA's Rocket Punch (the user's capture 2026-11-26): "caster is 50% or less after being" came before
+    "When Health of an ally except for the", the text began at the second line and looked headless (SPEC D132)."""
+    lines = [
+        line("Rocket Punch", 587, 280, 200, 39),
+        line("+5", 545, 276, 40, 28),
+        line("3 turns", 825, 346, 87, 35),
+        line("caster is 50% or less after being", 469, 418, 376, 38),  # listed before the line above it
+        line("When Health of an ally except for the", 471, 390, 416, 36),
+        line("attacked, increases Combat Readiness", 472, 450, 446, 33),
+        line("Skill Enhance", 471, 694, 170, 39),
+        line("+1", 476, 738, 30, 26),
+        line("+2% Combat Readiness", 522, 733, 263, 35),
+    ]
+    found = parse_skill_popup(lines)
+    assert found is not None
+    assert found.text == (
+        "When Health of an ally except for the caster is 50% or less after being attacked, increases Combat Readiness"
+    )
