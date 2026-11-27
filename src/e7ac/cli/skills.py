@@ -33,6 +33,7 @@ from e7ac.skills.clean import find as find_junk
 from e7ac.skills.completeness import cut_effects
 from e7ac.skills.export import export_text
 from e7ac.skills.hero import HeroMemory, decide
+from e7ac.skills.icons import save_icon
 from e7ac.skills.importer import import_export
 from e7ac.skills.merge import assign, infer_slots, place
 from e7ac.skills.own_ui import shows_window, without_badge
@@ -221,6 +222,8 @@ def read(
             )
             continue
         event = store_popup(store, heroes, popup, hero, None, kit_of)
+        if event.hero_code is not None and not event.problem and popup.title_box is not None:
+            save_icon(default_paths().home, event.hero_code, popup.name, image, popup.title_box)
         stored += not event.problem
         typer.echo(f"{path.name}: {describe(event)}", err=bool(event.problem))
     typer.echo(f"{stored} skill(s) stored of {len(paths)} capture(s)." if not dry_run else "Dry run: nothing stored.")
@@ -434,6 +437,8 @@ def run_skill_watch(options: SkillWatchOptions, badge: WatchSignal, stop: thread
                 continue
             chosen = options.chosen() if options.chosen is not None else None
             event = store_popup(store, heroes, popup, chosen, memory.recall(clock()), kit_of)
+            if event.hero_code is not None and not event.problem and popup.title_box is not None:
+                save_icon(paths.home, event.hero_code, popup.name, image, popup.title_box)  # for the Hero page (D134)
             counts["read"] += not event.problem
             typer.echo(("  " if not event.problem else "  ! ") + describe(event))
             if options.on_read is not None:

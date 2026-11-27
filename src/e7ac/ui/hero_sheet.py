@@ -43,6 +43,10 @@ class Sheet:
     tags: tuple[str, ...] = ()
     """Element, class, rarity."""
     sections: tuple[Section, ...] = ()
+    builds: tuple[HeroBuild, ...] = ()
+    """Every owned copy of the hero (the page draws them as stat tiles and a gear grid)."""
+    skills: tuple[StoredSkill, ...] = ()
+    """The skills as read from the game, in the hero's order."""
 
 
 _STAT_NAMES = {
@@ -81,7 +85,43 @@ def build_sheet(paths: AppPaths, heroes: dict[str, ResolvedEntity], code: str) -
         _kit(code, stored),
         _arena(paths, heroes, code),
     ]
-    return Sheet(code, name, tags, tuple(sections))
+    builds = _builds(paths, code)
+    ordered = tuple(sorted(stored, key=lambda s: (s.slot or 9, s.name)))
+    return Sheet(code, name, tags, tuple(sections), builds, ordered)
+
+
+def _builds(paths: AppPaths, code: str) -> tuple[HeroBuild, ...]:
+    if not paths.database.is_file():
+        return ()
+    found: list[HeroBuild] = []
+    with session_scope(open_engine(paths)) as session:
+        for owned, row in list_owned(session):
+            if owned.hero_code == code and row is not None:
+                found.append(build_from_row(session, row))
+    return tuple(found)
+
+
+SET_NAMES = {
+    "set_cri_dmg": "Destruction",
+    "set_max_hp": "Health",
+    "set_att": "Attack",
+    "set_acc": "Hit",
+    "set_res": "Resist",
+    "set_def": "Defense",
+    "set_cri": "Critical",
+    "set_speed": "Speed",
+    "set_rage": "Rage",
+    "set_vampire": "Lifesteal",
+    "set_revenge": "Revenge",
+    "set_counter": "Counter",
+    "set_scar": "Scar",
+    "set_torrent": "Torrent",
+}
+"""Set code -> the name the game shows (only the ones that are certain; any other is shown as its code)."""
+
+
+def set_name(code: str) -> str:
+    return SET_NAMES.get(code, code.removeprefix("set_").replace("_", " ").title())
 
 
 def _copies(paths: AppPaths, code: str) -> Section:
