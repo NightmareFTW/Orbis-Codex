@@ -7,7 +7,7 @@ from collections.abc import Callable, Sequence
 from typing import ClassVar
 
 from PySide6.QtCore import QPointF, Qt
-from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPaintEvent, QPen, QPolygonF, QWheelEvent
+from PySide6.QtGui import QColor, QLinearGradient, QMouseEvent, QPainter, QPaintEvent, QPen, QPolygonF, QWheelEvent
 from PySide6.QtWidgets import QComboBox, QGridLayout, QHBoxLayout, QLabel, QSpinBox, QVBoxLayout, QWidget
 
 from e7ac.settings import BadgeSize
@@ -44,11 +44,30 @@ class Ornament(QWidget):
         painter.end()
 
 
-class HeroRow(QWidget):
-    """A row of round portraits (a team, a banner). Each shows the hero's name when the mouse rests on it."""
+class _Portrait(QLabel):
+    """A round portrait that can be clicked (it calls `on_click` with no arguments)."""
 
-    def __init__(self, context: AppContext, size: int = 56, spacing: int = 6) -> None:
+    def __init__(self, on_click: Callable[[], None] | None) -> None:
         super().__init__()
+        self._on_click = on_click
+        if on_click is not None:
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802 (Qt's name)
+        if self._on_click is not None and event.button() == Qt.MouseButton.LeftButton:
+            self._on_click()
+        super().mouseReleaseEvent(event)
+
+
+class HeroRow(QWidget):
+    """A row of round portraits (a team, a banner). Each shows the hero's name when the mouse rests on it; with `opens`
+    a click on one calls it with the hero's code."""
+
+    def __init__(
+        self, context: AppContext, size: int = 56, spacing: int = 6, opens: Callable[[str], None] | None = None
+    ) -> None:
+        super().__init__()
+        self._opens = opens
         self._context = context
         self._size = size
         layout = QHBoxLayout(self)
@@ -59,6 +78,12 @@ class HeroRow(QWidget):
         """The heroes shown now."""
         layout.addStretch()
 
+    def _click_for(self, code: str | None) -> Callable[[], None] | None:
+        opens = self._opens
+        if opens is None or not code:
+            return None
+        return lambda: opens(code)
+
     def set_codes(self, codes: Sequence[str | None]) -> None:
         self.codes = list(codes)
         while self._layout.count() > 1:
@@ -67,7 +92,7 @@ class HeroRow(QWidget):
             if widget is not None:
                 widget.deleteLater()
         for code in codes:
-            label = QLabel()
+            label = _Portrait(self._click_for(code))
             label.setPixmap(self._context.portraits.pixmap(code, self._size))
             label.setFixedSize(self._size, self._size)
             label.setToolTip(self._context.hero_name(code) if code else "not recognised")

@@ -47,7 +47,7 @@ class HomePage(Page):
         layout.addWidget(self._crash)
 
         banner, banner_layout = card()
-        self._banner = HeroRow(context, size=68, spacing=10)
+        self._banner = HeroRow(context, size=68, spacing=10, opens=context.open_hero)
         banner_layout.addWidget(self._banner)
         self._icons = QWidget()
         icons_row = QHBoxLayout(self._icons)
@@ -120,7 +120,7 @@ class HomePage(Page):
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(logs)))
 
     def _show_banner(self) -> None:
-        self._banner.set_codes(self.context.featured(8))
+        self._banner.set_codes(self.context.my_team())
         heroes = self.context.heroes()
         missing = sum(not self.context.portraits.has(code) for code in heroes)
         self._icons.setVisible(bool(heroes) and missing > 0)

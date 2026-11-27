@@ -3,6 +3,8 @@ two at once), the catalog's heroes and the hero portraits."""
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from e7ac.appdata import catalog_heroes, open_engine
 from e7ac.arena.references import ReferenceStore
 from e7ac.arena.sightings import SightingStore, popularity, sightings_path
@@ -33,6 +35,8 @@ class AppContext:
         """The run before this one did not end normally (Home says so until it is dismissed)."""
         self.portraits = Portraits(paths.cache_dir)
         self._heroes: dict[str, ResolvedEntity] | None = None
+        self.open_hero: Callable[[str], None] = lambda code: None
+        """Opens the Hero page on a hero (the main window sets it; a click on a portrait calls it)."""
 
     def heroes(self, reload: bool = False) -> dict[str, ResolvedEntity]:
         """The catalog's heroes by code (empty when there is no catalog yet)."""
@@ -73,6 +77,10 @@ class AppContext:
             with session_scope(open_engine(self.paths)) as session:
                 add([row.hero_code for row, _ in list_owned(session)])
         return chosen
+
+    def my_team(self) -> list[str]:
+        """Your last Arena team (the one the watch saw on the VS screen), those whose portrait is cached."""
+        return self.portraits.cached(ReferenceStore(self.paths.home / "references" / "arena").last_team())
 
     def hero_of_the_day(self) -> str | None:
         return hero_of_the_day(self.featured(12))

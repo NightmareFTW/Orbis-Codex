@@ -93,6 +93,7 @@ class MainWindow(QMainWindow):
         row.addWidget(self._stack, 1)
         self.setCentralWidget(central)
 
+        context.open_hero = self.open_hero
         self._watching = QLabel()
         self.statusBar().addPermanentWidget(self._watching)
         context.watch.state.connect(self._watch_state)
@@ -107,6 +108,14 @@ class MainWindow(QMainWindow):
         if parent is not None:
             self._open(parent, True)
         self._nav.setCurrentItem(item)
+
+    def open_hero(self, code: str) -> None:
+        """The Hero page, on this hero (a click on a portrait of the team)."""
+        self.show_page("hero")
+        page = self._built.get("hero")
+        show = getattr(page, "show_hero", None)
+        if callable(show):
+            show(code)
 
     def page(self, key: str) -> Page | None:
         """The page, once it has been opened (None before its first visit)."""

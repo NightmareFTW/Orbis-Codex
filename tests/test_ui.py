@@ -64,6 +64,7 @@ def test_the_window_builds_its_pages_on_the_first_visit(context: AppContext) -> 
     assert _tree(window) == [
         ("Home", []),
         ("Arena", []),
+        ("Hero", []),
         ("\u25b8  Dev tools", ["Arena stats", "Skill reader"]),
         ("Settings", []),
     ]
@@ -72,19 +73,19 @@ def test_the_window_builds_its_pages_on_the_first_visit(context: AppContext) -> 
     assert window.page("arena") is not None and window._stack.currentWidget() is window.page("arena")
     window.show_page("dev")
     assert window.page("dev") is not None and window.page("home") is not None
-    assert window.folder_open("Dev tools") and _tree(window)[2][0] == "\u25be  Dev tools"
+    assert window.folder_open("Dev tools") and _tree(window)[3][0] == "\u25be  Dev tools"
     window.close()
 
 
 def test_the_dev_tools_folder_opens_and_closes_when_clicked(context: AppContext) -> None:
     window = MainWindow(context)
-    folder = window._nav.topLevelItem(2)
+    folder = window._nav.topLevelItem(3)
     assert folder is not None and not window.folder_open("Dev tools")  # closed until it is clicked
     window._nav.setCurrentItem(folder)  # as a click does
     window._clicked(folder, 0)
     assert window.folder_open("Dev tools") and window._stack.currentWidget() is window.page("home")  # page unchanged
     window._clicked(folder, 0)
-    assert not window.folder_open("Dev tools") and _tree(window)[2][0].startswith("\u25b8")
+    assert not window.folder_open("Dev tools") and _tree(window)[3][0].startswith("\u25b8")
     window.show_page("dev")  # going to a page inside opens its folder
     assert window.folder_open("Dev tools") and window._stack.currentWidget() is window.page("dev")
     window._nav.setCurrentItem(folder)  # a click on the folder never takes the page away
@@ -977,3 +978,35 @@ def test_a_reading_that_came_out_wrong_can_be_cleared_by_hand_from_the_skill_rea
     assert store.load("c2011") == [] and "Cleared 2 reading(s)" in page._status.text()
     assert page._which.count() == 0 and not page._forget.isEnabled()
     window.close()
+
+
+def test_a_click_on_a_portrait_of_the_team_opens_the_hero_page_on_that_hero(context: AppContext) -> None:
+    """SPEC D133: Home shows your team only; a click opens the Hero page, with that hero only."""
+    from e7ac.arena.references import ReferenceStore
+    from e7ac.ui.pages.hero import HeroPage
+
+    ReferenceStore(context.paths.home / "references" / "arena").save_last_team(["c1005", "c1018"])
+    context.portraits.cached = lambda codes: list(codes)  # type: ignore[method-assign]  # portraits not cached here
+    window = MainWindow(context)
+    home = window.page("home")
+    assert home is not None
+    home.shown()
+    assert home._banner.codes == ["c1005", "c1018"]  # type: ignore[attr-defined]  # only your team
+    portraits = [home._banner._layout.itemAt(i).widget() for i in range(2)]  # type: ignore[attr-defined]
+    event = widgets.QApplication  # a left click is a release on the portrait
+    from PySide6.QtCore import QEvent, QPointF, Qt
+    from PySide6.QtGui import QMouseEvent
+
+    release = QMouseEvent(
+        QEvent.Type.MouseButtonRelease,
+        QPointF(5, 5),
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    assert event is not None
+    widgets.QApplication.sendEvent(portraits[1], release)
+    page = window.page("hero")
+    assert isinstance(page, HeroPage) and page.code == "c1018"
+    assert [t for t, _ in _tree(window)][:3] == ["Home", "Arena", "Hero"]
+    assert page.sheet is not None and next(s.title for s in page.sheet.sections) == "Your hero"

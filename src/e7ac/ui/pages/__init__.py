@@ -33,6 +33,12 @@ def _arena(context: AppContext) -> Page:
     return ArenaPage(context)
 
 
+def _hero(context: AppContext) -> Page:
+    from e7ac.ui.pages.hero import HeroPage
+
+    return HeroPage(context)
+
+
 def _dev(context: AppContext) -> Page:
     from e7ac.ui.pages.dev import DevPage
 
@@ -54,6 +60,7 @@ def _settings(context: AppContext) -> Page:
 PAGES: Final = (
     PageSpec("home", "Home", _home),
     PageSpec("arena", "Arena", _arena),
+    PageSpec("hero", "Hero", _hero),
     PageSpec("dev", "Arena stats", _dev, group="Dev tools"),
     PageSpec("skills", "Skill reader", _skills, group="Dev tools"),
     PageSpec("settings", "Settings", _settings),
