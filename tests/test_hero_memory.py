@@ -156,7 +156,7 @@ def test_the_watch_remembers_the_hero_of_its_screen_and_files_the_popups_under_i
     events: list[skills_cli.ReadEvent] = []
     badge = Badge()
     skills_cli.run_skill_watch(skills_cli.SkillWatchOptions(on_read=events.append), badge, threading.Event())
-    assert ("Hero: Blood Blade Karin", "now hold each skill icon ~2 s") in badge.said
+    assert ("Hero: Blood Blade Karin", "Blood Blade Karin 0 of 3 - next: hold S1, S2 and S3") in badge.said
     assert [(e.hero, e.how) for e in events] == [
         ("Blood Blade Karin", "hero screen"),
         ("Blood Blade Karin", "hero screen"),

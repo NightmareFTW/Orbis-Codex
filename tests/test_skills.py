@@ -361,7 +361,10 @@ def test_the_watch_reads_a_popup_once_the_screen_has_settled(
     skills_cli.run_skill_watch(skills_cli.SkillWatchOptions(on_read=events.append), badge, threading.Event())
     assert [e.skill for e in events] == ["The Caress of Mercy", "The Caress of Mercy"]  # one per settled screen
     assert [e.new for e in events] == [True, False]  # the same skill held again: read, not new
-    assert ("Read: Blood Blade Karin", "The Caress of Mercy +5") in badge.said
+    assert (
+        "Read: Blood Blade Karin - The Caress of Mercy +5",
+        "Blood Blade Karin 1 of 3 - next: hold S2 and S3",
+    ) in badge.said  # the result and what to do next (SPEC D136)
     assert SkillStore(isolated_home.home / "skills").heroes() == ["c2011"]
 
 

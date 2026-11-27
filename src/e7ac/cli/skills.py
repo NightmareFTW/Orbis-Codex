@@ -32,18 +32,20 @@ from e7ac.skills.clean import clean as clean_store
 from e7ac.skills.clean import find as find_junk
 from e7ac.skills.completeness import cut_effects
 from e7ac.skills.export import export_text
+from e7ac.skills.guide import next_step
 from e7ac.skills.hero import HeroMemory, decide
-from e7ac.skills.icons import save_icon
+from e7ac.skills.icons import find_icon, save_icon
 from e7ac.skills.importer import import_export
 from e7ac.skills.merge import assign, infer_slots, place
 from e7ac.skills.own_ui import shows_window, without_badge
 from e7ac.skills.problems import clear_problems, effect_titles, find_problems, hero_problems, skill_problems
-from e7ac.skills.store import SkillStore, skills_dir
+from e7ac.skills.store import SkillStore, StoredSkill, skills_dir
 from e7ac.skills.worklist import SKILLS_PER_HERO, progress, slot_marks, worklist
 from e7ac.sources.epic7db import SkillInfo, fetch_kit, fetch_tier_order, slug
 from e7ac.sources.http import FetchError
 from e7ac.storage.db import session_scope
 from e7ac.ui.badge_probe import hide_badge
+from e7ac.ui.sticky_badge import HOLD, StickyBadge
 from e7ac.ui.watch_signal import AMBER, GREEN, LIGHT, NoSignal, WatchSignal
 from e7ac.vision.skill_popup import SkillPopup, looks_like_popup, parse_skill_popup, read_hero_name, rescue_level
 
@@ -388,6 +390,11 @@ def run_skill_watch(options: SkillWatchOptions, badge: WatchSignal, stop: thread
     pending: queue.Queue[Any | None] = queue.Queue()
     counts = {"read": 0, "ignored": 0, "evidence": 0}
     kit_of = make_kit_of(paths)
+    badge = StickyBadge(badge, clock)  # a result stays long enough to be read (SPEC D136)
+
+    def icon_kept(skill: StoredSkill) -> bool:
+        return find_icon(paths.home, skill.hero, skill.name) is not None
+
     memory = HeroMemory()
     """The hero seen on its own screen (SPEC D97): its name is whole there, and covered once a skill is held."""
 
@@ -397,7 +404,7 @@ def run_skill_watch(options: SkillWatchOptions, badge: WatchSignal, stop: thread
             if shows_window(lines):  # the Orbis window is on top of the game: its text is not the game's
                 counts["ignored"] += 1
                 typer.echo(f"  ! the Orbis window is in the picture{_evidence(image, counts, paths, 'window')}")
-                badge.say("Skills: the Orbis window is over the game", "move it beside the game", AMBER)
+                badge.say("Skills: the Orbis window is over the game", "move it beside the game", AMBER, hold=HOLD)
                 continue
             clean_lines = without_badge(lines)  # nor is the badge's own text
             if len(clean_lines) != len(lines):
@@ -423,17 +430,15 @@ def run_skill_watch(options: SkillWatchOptions, badge: WatchSignal, stop: thread
                     typer.echo("  ! " + describe(lost))
                     if options.on_read is not None:
                         options.on_read(lost)
-                    badge.say("Skills: popup not understood", "its picture was kept - send it", AMBER)
+                    badge.say("Skills: popup not understood", "its picture was kept - send it", AMBER, hold=HOLD)
                     continue
                 if seen is None:
                     badge.say("Skills: hold a skill icon", "no skill popup on this screen", LIGHT)
                     continue
                 memory.see(seen, clock())
                 typer.echo(f"  hero screen: {heroes[seen].name}")
-                if hero_done(store, seen):
-                    badge.say(f"{CHECK} Hero: {heroes[seen].name}", "all 3 skills read - nothing to hold", GREEN)
-                else:
-                    badge.say(f"Hero: {heroes[seen].name}", "now hold each skill icon ~2 s", GREEN)
+                step, done = next_step(store, seen, heroes[seen].name or seen, icon_kept)
+                badge.say(f"{CHECK + ' ' if done else ''}Hero: {heroes[seen].name}", step, GREEN, hold=3.0)
                 continue
             chosen = options.chosen() if options.chosen is not None else None
             event = store_popup(store, heroes, popup, chosen, memory.recall(clock()), kit_of)
@@ -444,18 +449,20 @@ def run_skill_watch(options: SkillWatchOptions, badge: WatchSignal, stop: thread
             if options.on_read is not None:
                 options.on_read(event)
             if event.problem:
-                badge.say("Skills: hero not identified", event.problem[:60], AMBER)
+                badge.say("Skills: hero not identified", event.problem[:60], AMBER, hold=HOLD + 2)
                 typer.echo(f"  picture kept: {_keep(image, paths.captures_dir / 'skills')}")
             elif event.cut:
                 typer.echo(f"  picture of the reading with a problem{_evidence(image, counts, paths, 'cut')}")
                 _keep_lines(lines, paths.captures_dir / "skills")  # what the OCR read, to reproduce the problem
-                badge.say(f"Read: {event.hero} (problem)", f"{event.cut[0]}: hold it again", AMBER)
+                badge.say(f"Read: {event.hero} (problem)", f"{event.cut[0]}: hold it again", AMBER, hold=HOLD + 2)
             else:
-                top = f"Read: {event.hero}"
-                line = f"{event.skill}" + (f" +{event.level}" if event.level is not None else "")
-                if event.hero_code is not None and hero_done(store, event.hero_code):
-                    top, line = f"{CHECK} {top}", f"{line} - hero complete"  # all three skills read, nothing wrong
-                badge.say(top, line, GREEN)
+                level = f" +{event.level}" if event.level is not None else ""
+                top = f"Read: {event.hero} - {event.skill}{level}"
+                line = ""
+                if event.hero_code is not None:
+                    line, done = next_step(store, event.hero_code, event.hero, icon_kept)
+                    top = f"{CHECK} {top}" if done else top
+                badge.say(top, line or "stored", GREEN, hold=HOLD)
 
     thread = threading.Thread(target=work, name="e7-skill-reader", daemon=True)
     thread.start()
@@ -467,6 +474,7 @@ def run_skill_watch(options: SkillWatchOptions, badge: WatchSignal, stop: thread
     for item in game_frames(client, options.hwnd):
         if stop.is_set():
             break
+        badge.tick()  # what waited behind a result is shown once the result has had its time
         if item is not None:
             frame, area = item
             badge.place(area)
@@ -479,7 +487,7 @@ def run_skill_watch(options: SkillWatchOptions, badge: WatchSignal, stop: thread
                 )
             if watcher.feed(thumbnail(frame), clock()):
                 pending.put(frame)
-                badge.say("Skills: reading...", "keep holding until it says Read", LIGHT)
+                badge.say("Skills: reading...", "keep holding until it says Read", LIGHT, urgent=True)
             elif watcher.settling and not was_settling:
                 badge.settling()
             was_settling = watcher.settling
