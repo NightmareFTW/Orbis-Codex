@@ -11,7 +11,7 @@ store."""
 
 from __future__ import annotations
 
-from collections.abc import Collection, Sequence
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass
 from typing import Final
 
@@ -55,8 +55,19 @@ def skill_problems(skill: StoredSkill, titles: Collection[str] = ()) -> list[Pro
     return found
 
 
-def hero_problems(skills: Sequence[StoredSkill], titles: Collection[str] = ()) -> tuple[Problem, ...]:
-    return tuple(p for skill in skills for p in skill_problems(skill, titles))
+def hero_problems(
+    skills: Sequence[StoredSkill], titles: Collection[str] = (), has_icon: Callable[[StoredSkill], bool] | None = None
+) -> tuple[Problem, ...]:
+    """`has_icon`: whether a skill's own icon is kept (SPEC D135); a skill without one is a problem of kind "icon": hold
+    it once more and the Skill reader cuts the icon from its popup."""
+    found = [p for skill in skills for p in skill_problems(skill, titles)]
+    if has_icon is not None:
+        found += [
+            Problem(s.hero, s.name, "icon", "its icon is not kept yet: hold it once more")
+            for s in skills
+            if why_junk(s) is None and not has_icon(s)
+        ]
+    return tuple(found)
 
 
 def effect_titles(store: SkillStore) -> list[str]:

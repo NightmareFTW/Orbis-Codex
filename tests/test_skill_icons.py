@@ -40,3 +40,20 @@ def test_the_icon_is_kept_under_the_heros_code_and_the_skills_name(tmp_path: Pat
     assert path.parent == tmp_path / "skills" / "icons" and path.name == "c2053-bastetroar.png"
     read = cv2.imdecode(np.fromfile(str(path), np.uint8), cv2.IMREAD_COLOR)
     assert read is not None and read.shape[0] == read.shape[1]
+
+
+def test_a_skill_without_its_icon_is_a_problem_until_it_is_held_again(tmp_path: Path) -> None:
+    """SPEC D135: a hero is not done while a skill read has no icon kept (here or among the program's own)."""
+    from e7ac.skills.icons import find_icon
+    from e7ac.skills.problems import hero_problems
+    from e7ac.skills.store import SkillStore
+    from tests.test_skills import popup
+
+    store = SkillStore(tmp_path / "skills")
+    store.save("c2053", popup("Bastet Roar", 5, "Dispels all debuffs.", cooldown=5), slot=3)
+    skills = store.load("c2053")
+    kept = lambda s: find_icon(tmp_path, s.hero, s.name) is not None  # noqa: E731
+    assert [p.kind for p in hero_problems(skills, (), kept)] == ["icon"]
+    assert hero_problems(skills) == ()  # asked for no icons: none is wanted
+    save_icon(tmp_path, "c2053", "Bastet Roar", _picture(), TITLE)
+    assert hero_problems(skills, (), kept) == ()

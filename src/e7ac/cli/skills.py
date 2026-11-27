@@ -334,7 +334,7 @@ def todo(
     by_slug = {slug(name): code for code, name in names.items()}
     with catalog_cli.http_factory(paths, offline) as http:
         tiers = [by_slug[s] for s in fetch_tier_order(http) if s in by_slug]
-    rows = worklist(names, met_heroes(paths.home), tiers, SkillStore(skills_dir(paths.home)))
+    rows = worklist(names, met_heroes(paths.home), tiers, SkillStore(skills_dir(paths.home)), paths.home)
     complete, started, skills, total = progress(rows)
     typer.echo(f"{complete} of {total} heroes complete ({started} started, {skills} skills read).")
     shown = [r for r in rows if done or not r.complete][:limit]

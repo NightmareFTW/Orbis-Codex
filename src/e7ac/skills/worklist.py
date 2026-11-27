@@ -8,7 +8,9 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 
+from e7ac.skills.icons import find_icon
 from e7ac.skills.problems import Problem, effect_titles, hero_problems
 from e7ac.skills.store import SkillStore, StoredSkill
 
@@ -73,6 +75,7 @@ def worklist(
     seen: Sequence[tuple[str, int]],
     tiers: Sequence[str],
     store: SkillStore,
+    home: Path | None = None,
 ) -> list[SkillRow]:
     """`heroes`: code -> name. `seen`: (code, teams) most met first. `tiers`: codes in the RTA tier list's order."""
     order: list[tuple[str, str]] = []
@@ -88,10 +91,23 @@ def worklist(
     order += [(code, "") for code in sorted(heroes, key=lambda c: heroes[c].lower()) if code not in placed]
     rows = []
     titles = effect_titles(store)
+
+    def has_icon(skill: StoredSkill) -> bool:
+        return find_icon(home, skill.hero, skill.name) is not None if home is not None else True
+
     for code, why in order:
         skills = store.load(code)
         marks, read = slot_marks(skills)
-        rows.append(SkillRow(code, heroes[code], why, read, marks, hero_problems(skills, titles)))
+        rows.append(
+            SkillRow(
+                code,
+                heroes[code],
+                why,
+                read,
+                marks,
+                hero_problems(skills, titles, has_icon if home is not None else None),  # an icon not kept: a problem
+            )
+        )
     return rows
 
 

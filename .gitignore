@@ -9,6 +9,8 @@ fixtures/private/
 *.webp
 *.bmp
 !docs/**/*.png
+# The skill icons that come with the program (temporarily public, SPEC D135; see the release checklist)
+!assets/art/**
 
 # Local runtime data (DB, caches, captures)
 /data/

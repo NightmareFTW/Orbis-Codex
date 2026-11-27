@@ -8,6 +8,7 @@ import os
 import time
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -840,8 +841,9 @@ WHOLE = "Attacks the enemy with a sheath, and grants stealth to the caster for 1
 
 
 def test_a_hero_with_a_problem_stays_amber_in_the_list_and_the_button_clears_it(
-    context: AppContext, synthetic_catalog: list[str], qapp: Any
+    context: AppContext, synthetic_catalog: list[str], qapp: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr("e7ac.skills.worklist.find_icon", lambda home, code, name: Path("icon.png"))  # icons kept
     """Three skills read is not the same as three skills right (SPEC D107): the table says what is wrong and the
     button drops the readings to be held again."""
     from e7ac.skills.store import SkillStore, skills_dir
@@ -880,8 +882,9 @@ def test_a_hero_with_a_problem_stays_amber_in_the_list_and_the_button_clears_it(
 
 
 def test_the_skill_reader_page_lists_what_is_missing_and_exports_what_was_read(
-    context: AppContext, synthetic_catalog: list[str], qapp: Any
+    context: AppContext, synthetic_catalog: list[str], qapp: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr("e7ac.skills.worklist.find_icon", lambda home, code, name: Path("icon.png"))  # icons kept
     from e7ac.cli.skills import ReadEvent
     from e7ac.skills.store import SkillStore, skills_dir
     from e7ac.vision.skill_popup import SkillPopup

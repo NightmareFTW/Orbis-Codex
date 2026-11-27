@@ -8,6 +8,14 @@
 - Batch questions; for non-blocking details pick a sensible default, record it in `docs/SPEC.md` (§9 decisions) and continue.
 - Throwaway experiments go in `spikes/` (never imported by `src/`).
 
+## BEFORE THE RELEASE: the game's art leaves the public repository (user decision 2026-11-27, SPEC D135)
+The user allowed the game's art (the skill icons the Skill reader cuts, later the zodiac / class / element / imprint
+icons) in the PUBLIC repository **temporarily**, in `assets/art/`, so that every PC has it. When the user says the
+release is near, or at the first sign of one, REMIND THE USER (and do it with them): move `assets/art/` to a
+synchronised folder (a setting "art folder") or a private repository the program downloads from, remove it from the
+public history (the history keeps what was ever committed: rewrite it together with the authorship cleanup below), and
+restore `*.png` in `.gitignore` for it. Remind the user in every session that touches art until then.
+
 ## Pending at the very end of the project: authorship cleanup (user request 2026-10-11)
 When the user says everything is finished — not before — rewrite the repository so it shows only the user's work:
 - every commit's author and committer -> `Diogo Borges <jdiogopessoa@hotmail.com>` (the identity of the user's own

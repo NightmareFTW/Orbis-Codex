@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from e7ac.domain.roster import Gear, HeroBuild
-from e7ac.skills.icons import icon_path
+from e7ac.skills.icons import find_icon
 from e7ac.skills.store import StoredSkill
 from e7ac.sources.assets import load_set_icons
 from e7ac.ui.context import AppContext
@@ -203,8 +203,8 @@ class HeroPage(Page):
             layout.addWidget(_muted("Not read yet: use the Skill reader (Dev tools)."))
             return frame
         for skill in sheet.skills:
-            path = icon_path(self.context.paths.home, skill.hero, skill.name)
-            layout.addWidget(_skill(skill, QImage(str(path)) if path.is_file() else QImage()))
+            path = find_icon(self.context.paths.home, skill.hero, skill.name)
+            layout.addWidget(_skill(skill, QImage(str(path)) if path is not None else QImage()))
         return frame
 
 

@@ -228,7 +228,9 @@ class SkillsPage(Page):
 
     def reload(self) -> None:
         heroes = {code: h.name for code, h in self.context.heroes().items() if h.name}
-        self._rows = worklist(heroes, met_heroes(self.context.paths.home), self._tier_order, self._store)
+        self._rows = worklist(
+            heroes, met_heroes(self.context.paths.home), self._tier_order, self._store, self.context.paths.home
+        )
         complete, started, skills, total = progress(self._rows)
         effects = len(self._store.effects())
         wrong = sum(bool(r.problems) for r in self._rows)

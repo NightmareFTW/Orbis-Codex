@@ -17,6 +17,9 @@ from e7ac.catalog.names import normalise_name
 
 type BgrImage = npt.NDArray[np.uint8]
 
+ART_DIR: Final = Path(__file__).resolve().parents[3] / "assets" / "art" / "skills"
+"""The icons kept in the repository (SPEC D135, temporarily public: see the release checklist in CLAUDE.md); a copy in
+`<home>/skills/icons/` wins over them."""
 FOLDER: Final = "icons"
 SIDE: Final = 2.6
 """The icon's side, in heights of the title's text (the game's popups: a 38 px title, a 98 px icon)."""
@@ -33,6 +36,15 @@ def icons_dir(home: Path) -> Path:
 
 def icon_path(home: Path, code: str, skill_name: str) -> Path:
     return icons_dir(home) / f"{code}-{normalise_name(skill_name)}.png"
+
+
+def find_icon(home: Path, code: str, skill_name: str) -> Path | None:
+    """The icon file of a skill: the one cut on this PC, else the one that comes with the program."""
+    name = icon_path(home, code, skill_name).name
+    for folder in (icons_dir(home), ART_DIR):
+        if (folder / name).is_file():
+            return folder / name
+    return None
 
 
 def crop_icon(image: BgrImage, title_box: tuple[float, float, float, float]) -> BgrImage | None:
